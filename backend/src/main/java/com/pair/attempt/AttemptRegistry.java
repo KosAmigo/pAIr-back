@@ -7,12 +7,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.PostConstruct;
-
 /**
- * 응시 목록 정보(DB attempts)와 응시 파일(AttemptStore)을 잇는다.
- * 응시 ID 는 DB 가 만든 attempt_id 이고, 파일 폴더 이름도 같은 숫자다.
- * 파일의 응시 상태가 저장될 때마다(제출, 후속 질문, 채점 완료·실패) DB 행을 맞춘다.
+ * 응시 행(DB attempts)을 만들고 찾는다. 응시 ID 는 DB 가 만든 attempt_id 를 문자열로 쓴다.
+ * 응시 상태·작업 파일·대화 등 나머지는 DbAttemptStore 가 같은 행과 하위 테이블에 저장한다.
  */
 @Component
 public class AttemptRegistry {
@@ -20,16 +17,9 @@ public class AttemptRegistry {
     private static final Logger log = LoggerFactory.getLogger(AttemptRegistry.class);
 
     private final AttemptRecordRepository records;
-    private final AttemptStore store;
 
-    public AttemptRegistry(AttemptRecordRepository records, AttemptStore store) {
+    public AttemptRegistry(AttemptRecordRepository records) {
         this.records = records;
-        this.store = store;
-    }
-
-    @PostConstruct
-    void listen() {
-        store.onSave(this::sync);
     }
 
     public AttemptRecord save(AttemptRecord r) {
@@ -41,15 +31,7 @@ public class AttemptRegistry {
         return id == null ? Optional.empty() : records.findById(id);
     }
 
-    /** 파일 상태 → DB. 채점 툴 샘플처럼 DB 에 없는 응시는 건너뛴다 */
-    public void sync(Attempt a) {
-        find(a.id()).ifPresent(r -> {
-            r.sync(a.status(), a.submittedAt(), a.followupsDoneAt());
-            records.save(r);
-        });
-    }
-
-    /** 회차 제출: 파일 쪽 제출과 별개로 DB 에 제출 시각을 바로 남긴다 (두 번 불러도 안전) */
+    /** 회차 제출: 응시 화면 제출이 실패해도 제출 시각은 남긴다 (두 번 불러도 안전) */
     public void markSubmitted(String attemptId, Instant at) {
         find(attemptId).ifPresentOrElse(r -> {
             r.sync(Attempt.Status.FOLLOWUP, at, null);

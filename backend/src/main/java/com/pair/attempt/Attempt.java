@@ -3,7 +3,7 @@ package com.pair.attempt;
 import java.time.Instant;
 import java.util.List;
 
-/** 응시 1건의 상태. pilot-data/attempts/{id}/attempt.json */
+/** 응시 1건의 상태. DB attempts 행 (채점 툴 샘플은 grader/samples/{id}/attempt.json) */
 public record Attempt(
         String id,
         String taskId,

@@ -609,7 +609,7 @@ public class ScoringService {
                 if (c.deducted() > 0) sb.append(String.format("  %s -%d  %s%n", c.code(), c.deducted(), c.reason()));
             }
         }
-        sb.append("리포트 파일: ").append(store.dir(a.id()).resolve("report.json")).append("\n");
+        sb.append("리포트 위치: ").append(store.location(a.id())).append("\n");
         sb.append("====================================");
         log.info(sb.toString());
     }

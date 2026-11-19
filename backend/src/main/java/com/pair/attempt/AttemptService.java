@@ -81,7 +81,8 @@ public class AttemptService {
     public void saveFile(String id, String path, String content) {
         Attempt a = requireStatus(id, Attempt.Status.SOLVING);
         store.writeWorkspaceFile(id, path, content);
-        store.appendEvent(id, "save", Map.of("path", path, "length", content.length()));
+        // 저장할 때마다 내용을 함께 남긴다 (예전 snapshots/, D3·R2 분석용)
+        store.appendEvent(id, "save", Map.of("path", path, "length", content.length(), "content", content));
         TaskDef task = tasks.get(a.taskId());
         if (!task.isDev() && path.equals(task.editableFile()) && content.length() >= 300
                 && task.requiredHeadings().stream().allMatch(content::contains)

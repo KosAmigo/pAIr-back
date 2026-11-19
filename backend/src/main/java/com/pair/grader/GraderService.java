@@ -41,7 +41,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 /**
  * 채점 툴의 실험 채점. 응시 여러 개를 골라 프롬프트 버전과 설정으로 N번씩 채점하고,
  * 결과는 응시자 리포트와 따로 grader/runs/{runId}/ 에 저장한다. git 으로 팀원과 공유한다(2026-11-16).
- * 응시는 두 곳에서 고른다: 샘플(grader/samples, git 공유)과 내 응시(pilot-data/attempts).
+ * 응시는 두 곳에서 고른다: 샘플(grader/samples, git 공유)과 내 응시(DB, 후속 질문까지 마친 응시).
  */
 @Service
 public class GraderService {
@@ -83,7 +83,7 @@ public class GraderService {
         this.tasks = tasks;
         this.mine = mine;
         this.samplesDir = Path.of(props.grader().dir(), "samples").toAbsolutePath();
-        this.samples = new AttemptStore(samplesDir, json);
+        this.samples = new com.pair.attempt.FileAttemptStore(samplesDir, json);
         this.runsDir = Path.of(props.grader().dir(), "runs").toAbsolutePath();
         this.props = props;
         this.json = json;
@@ -115,13 +115,13 @@ public class GraderService {
         Map<String, String> labels = sampleLabels();
         // 샘플은 index.json 순서대로 (목록에 없는 샘플은 뒤에)
         List<String> sampleIds = new ArrayList<>(labels.keySet());
-        for (String id : ids(samplesDir)) if (!sampleIds.contains(id)) sampleIds.add(id);
+        for (String id : samples.ids()) if (!sampleIds.contains(id)) sampleIds.add(id);
         for (String id : sampleIds) {
             AttemptRow r = row(SAMPLE, id, labels.getOrDefault(id, id));
             if (r != null) out.add(r);
         }
         List<AttemptRow> my = new ArrayList<>();
-        for (String id : ids(mine.root())) {
+        for (String id : mine.ids()) {
             AttemptRow r = row(MINE, id, null);
             if (r != null) my.add(r);
         }
@@ -156,6 +156,7 @@ public class GraderService {
         return m;
     }
 
+    /** 실험 기록 폴더(grader/runs) 아래 폴더 이름들 */
     private static List<String> ids(Path dir) {
         if (!Files.isDirectory(dir)) return List.of();
         try (Stream<Path> s = Files.list(dir)) {
@@ -254,7 +255,7 @@ public class GraderService {
     /** 같은 과제의 지난 채점 기록 중 아무거나(샘플 먼저) 하나를 기준으로 쓴다. */
     private JsonNode averageReport(String taskId) {
         for (AttemptStore src : List.of(samples, mine)) {
-            for (String id : ids(src.root())) {
+            for (String id : src.ids()) {
                 try {
                     if (!src.load(id).taskId().equals(taskId)) continue;
                     JsonNode rep = src.readReport(id);
@@ -695,7 +696,7 @@ public class GraderService {
             throw new IllegalArgumentException("배치 최대 대기 시간은 1~1440분입니다.");
         }
         if (full && (req.versionId() == null || req.versionId().isBlank())) throw new IllegalArgumentException("프롬프트 버전을 고르세요.");
-        for (AttemptRef r : req.attempts()) store(r.source()).dir(r.id());
+        for (AttemptRef r : req.attempts()) store(r.source()).load(r.id());
     }
 
     /** 서버가 꺼져서 끝나지 못한 실험은 다시 켤 때 '중단됨'으로 표시한다. */

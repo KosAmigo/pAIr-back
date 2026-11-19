@@ -2,6 +2,9 @@ package com.pair.attempt;
 
 import java.time.Instant;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,8 +16,7 @@ import jakarta.persistence.Table;
 
 /**
  * 응시 1건의 목록 정보 (ERD attempts): 누가(자가진단 회원 / 실전 대상자), 어떤 과제를, 어떤 상태로, 언제 시작·제출했는지.
- * 작업 파일·대화·채점 리포트는 아직 pilot-data/attempts/{attempt_id}/ 파일에 있다(AttemptStore).
- * 파일의 상태가 바뀌면 AttemptRegistry 가 이 행을 맞춘다.
+ * 작업 파일(attempt_files)·대화(chat_turns)·작업 기록(attempt_events)·리포트(attempt_reports)는 DbAttemptStore 가 다룬다.
  */
 @Entity
 @Table(name = "attempts")
@@ -59,6 +61,25 @@ public class AttemptRecord {
     @Column(name = "followups_done_at")
     private Instant followupsDoneAt;
 
+    @Column(length = 20)
+    private String provider;
+
+    @Column(name = "first_valid_at")
+    private Instant firstValidAt;
+
+    @Column(columnDefinition = "text")
+    private String error;
+
+    /** 후속 질문 문구 목록 JSON */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "followup_questions")
+    private String followupQuestions;
+
+    /** 후속 질문 답 목록 JSON */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "followup_answers")
+    private String followupAnswers;
+
     protected AttemptRecord() {}
 
     private AttemptRecord(Mode mode, Long userId, Long participantId, Long taskId, String assistantModel, Instant startedAt) {
@@ -79,7 +100,18 @@ public class AttemptRecord {
         return new AttemptRecord(Mode.LIVE, null, participantId, taskId, model, at);
     }
 
-    /** 파일의 응시 상태와 맞춘다. 제출 시각은 한 번 정해지면 바꾸지 않는다 */
+    /** 응시 상태 전체를 저장한다(AttemptStore.save). questions·answers 는 JSON 문자열 */
+    public void apply(Attempt a, String questionsJson, String answersJson) {
+        sync(a.status(), a.submittedAt(), a.followupsDoneAt());
+        this.provider = a.provider();
+        if (a.model() != null) this.assistantModel = a.model();
+        if (this.firstValidAt == null) this.firstValidAt = a.firstValidAt();
+        this.error = a.error();
+        this.followupQuestions = questionsJson;
+        this.followupAnswers = answersJson;
+    }
+
+    /** 응시 상태를 맞춘다. 제출 시각은 한 번 정해지면 바꾸지 않는다 */
     public void sync(Attempt.Status status, Instant submittedAt, Instant followupsDoneAt) {
         if (this.submittedAt == null && submittedAt != null) this.submittedAt = submittedAt;
         if (this.followupsDoneAt == null && followupsDoneAt != null) this.followupsDoneAt = followupsDoneAt;
@@ -103,4 +135,9 @@ public class AttemptRecord {
     public Instant getStartedAt() { return startedAt; }
     public Instant getSubmittedAt() { return submittedAt; }
     public Instant getFollowupsDoneAt() { return followupsDoneAt; }
+    public String getProvider() { return provider; }
+    public Instant getFirstValidAt() { return firstValidAt; }
+    public String getError() { return error; }
+    public String getFollowupQuestions() { return followupQuestions; }
+    public String getFollowupAnswers() { return followupAnswers; }
 }

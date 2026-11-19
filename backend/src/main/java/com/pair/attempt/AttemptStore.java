@@ -1,238 +1,64 @@
 package com.pair.attempt;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.TreeMap;
-import java.util.stream.Stream;
-
-import org.springframework.stereotype.Component;
-
-import com.pair.config.PairProperties;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * 응시 기록을 JSON 파일로 저장한다.
- * pilot-data/attempts/{id}/ 아래에 attempt.json, turns.jsonl, events.jsonl, workspace/, snapshots/, report.json
+ * 응시 기록(상태, 작업 파일, 대화, 작업 기록, 채점 리포트) 저장소.
+ * 실제 응시는 DB(DbAttemptStore), 채점 툴 실험용 샘플 응시만 파일(FileAttemptStore, grader/samples)이다.
  */
-@Component
-public class AttemptStore {
+public interface AttemptStore {
 
-    private final Path root;
-    private final ObjectMapper json;
-    private final ObjectMapper pretty;
+    /** 응시를 만들고 과제 원본 파일을 작업 파일로 넣는다 */
+    void create(Attempt a, Map<String, String> files);
 
-    @org.springframework.beans.factory.annotation.Autowired
-    public AttemptStore(PairProperties props, ObjectMapper json) {
-        this(Path.of(props.dataDir(), "attempts"), json);
-    }
+    void save(Attempt a);
 
-    /** 다른 폴더의 응시 기록을 읽을 때 (채점 툴의 샘플 응시: grader/samples). */
-    public AttemptStore(Path root, ObjectMapper json) {
-        this.root = root.toAbsolutePath();
-        this.json = json;
-        this.pretty = json.copy().enable(SerializationFeature.INDENT_OUTPUT);
-        try {
-            Files.createDirectories(root);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
+    /** 없는 응시면 NoSuchElementException */
+    Attempt load(String id);
 
-    public Path root() {
-        return root;
-    }
+    /** 채점 툴이 고를 수 있는 응시 ID 목록 */
+    List<String> ids();
 
-    public Path dir(String id) {
-        if (!id.matches("[a-z0-9-]+")) throw new IllegalArgumentException("잘못된 응시 ID: " + id);
-        return root.resolve(id);
-    }
+    /** 로그에 남길 응시 위치 (DB 행 / 파일 폴더) */
+    String location(String id);
 
-    public Path workspace(String id) {
-        return dir(id).resolve("workspace");
-    }
+    // ── 작업 파일 ─────────────────────
 
-    public synchronized void create(Attempt a, Map<String, String> files) {
-        try {
-            Path ws = workspace(a.id());
-            Files.createDirectories(ws);
-            for (var e : files.entrySet()) writeFile(ws, e.getKey(), e.getValue());
-            save(a);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
+    /** 경로 → 내용 (경로 순) */
+    Map<String, String> readFiles(String id);
 
-    public synchronized void save(Attempt a) {
-        writeJson(dir(a.id()).resolve("attempt.json"), a);
-        java.util.function.Consumer<Attempt> l = onSave;
-        if (l != null) l.accept(a);
-    }
+    /** 이미 있는 작업 파일만 고칠 수 있다 */
+    void writeWorkspaceFile(String id, String path, String content);
 
-    /** 응시 상태를 저장할 때마다 불린다 (AttemptRegistry 가 DB attempts 행을 맞춘다). 채점 툴 샘플용 저장소에는 없다 */
-    private volatile java.util.function.Consumer<Attempt> onSave;
+    /** AI 수정 제안으로 빈 새 파일을 만든다. 이미 있으면 그대로 둔다 */
+    void createWorkspaceFile(String id, String path);
 
-    public void onSave(java.util.function.Consumer<Attempt> listener) {
-        this.onSave = listener;
-    }
+    // ── 대화, 작업 기록 ─────────────────
 
-    public Attempt load(String id) {
-        Path p = dir(id).resolve("attempt.json");
-        if (!Files.exists(p)) throw new NoSuchElementException("없는 응시입니다: " + id);
-        try {
-            return json.readValue(p.toFile(), Attempt.class);
-        } catch (IOException | RuntimeException e) {
-            throw new IllegalStateException("응시 기록을 읽지 못했습니다: " + id, e);
-        }
-    }
+    void appendTurn(String id, ChatTurn turn);
 
-    // ── 파일 ─────────────────────────────
+    List<ChatTurn> turns(String id);
 
-    public Map<String, String> readFiles(String id) {
-        Path ws = workspace(id);
-        Map<String, String> out = new TreeMap<>();
-        try (Stream<Path> s = Files.walk(ws)) {
-            for (Path p : s.filter(Files::isRegularFile).toList()) {
-                out.put(ws.relativize(p).toString().replace('\\', '/'), Files.readString(p, StandardCharsets.UTF_8));
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return out;
-    }
+    /** type 은 start, save, build, run, chat, chatEmpty, aiEdit, submit, followups, firstValid */
+    void appendEvent(String id, String type, Map<String, Object> data);
 
-    public synchronized void writeWorkspaceFile(String id, String rel, String content) {
-        try {
-            Path ws = workspace(id);
-            Path target = ws.resolve(rel).normalize();
-            if (!target.startsWith(ws) || !Files.exists(target)) {
-                throw new IllegalArgumentException("수정할 수 없는 파일입니다: " + rel);
-            }
-            Files.writeString(target, content, StandardCharsets.UTF_8);
-            // 저장할 때마다 스냅샷을 남긴다 (D3, R2 분석용)
-            Path snap = dir(id).resolve("snapshots").resolve(Instant.now().toEpochMilli() + "_" + rel.replace("/", "__"));
-            Files.createDirectories(snap.getParent());
-            Files.writeString(snap, content, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    /** AI 수정 제안으로 새 파일을 만들 때. 작업 폴더 안의 .java, .md 파일만 허용하고 logs/, 자료/ 아래는 막는다. */
-    public synchronized void createWorkspaceFile(String id, String rel) {
-        try {
-            Path ws = workspace(id);
-            Path target = ws.resolve(rel).normalize();
-            boolean allowed = target.startsWith(ws) && (rel.endsWith(".java") || rel.endsWith(".md"))
-                    && !rel.startsWith("logs/") && !rel.startsWith("자료/") && !rel.contains("..");
-            if (!allowed) throw new IllegalArgumentException("이 경로에는 파일을 만들 수 없습니다: " + rel);
-            if (Files.exists(target)) return;
-            Files.createDirectories(target.getParent());
-            Files.writeString(target, "", StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private static void writeFile(Path ws, String rel, String content) throws IOException {
-        Path target = ws.resolve(rel).normalize();
-        if (!target.startsWith(ws)) throw new IllegalArgumentException(rel);
-        Files.createDirectories(target.getParent());
-        Files.writeString(target, content, StandardCharsets.UTF_8);
-    }
-
-    // ── 대화 턴, 이벤트 ─────────────────
-
-    public synchronized void appendTurn(String id, ChatTurn turn) {
-        appendLine(dir(id).resolve("turns.jsonl"), toJson(turn));
-    }
-
-    public List<ChatTurn> turns(String id) {
-        return readLines(dir(id).resolve("turns.jsonl"), ChatTurn.class);
-    }
-
-    public synchronized void appendEvent(String id, String type, Map<String, Object> data) {
-        Map<String, Object> e = new TreeMap<>(data);
-        e.put("type", type);
-        e.put("at", Instant.now().toString());
-        appendLine(dir(id).resolve("events.jsonl"), toJson(e));
-    }
-
-    public List<JsonNode> events(String id) {
-        return readLines(dir(id).resolve("events.jsonl"), JsonNode.class);
-    }
+    /** 이벤트마다 {type, at, ...data} 모양 (기록 순) */
+    List<JsonNode> events(String id);
 
     // ── 리포트 ─────────────────────────
 
-    public void writeReport(String id, Object report) {
-        writeJson(dir(id).resolve("report.json"), report);
-    }
+    void writeReport(String id, Object report);
 
-    public JsonNode readReport(String id) {
-        Path p = dir(id).resolve("report.json");
-        if (!Files.exists(p)) return null;
-        try {
-            return json.readTree(p.toFile());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
+    /** 없으면 null */
+    JsonNode readReport(String id);
 
-    /** 채점 중간 산출물(R2 다시 실행 결과 등)을 남긴다. */
-    public void writeArtifact(String id, String name, Object value) {
-        writeJson(dir(id).resolve(name), value);
-    }
-
-    // ── 내부 ───────────────────────────
-
-    private void writeJson(Path p, Object v) {
-        try {
-            Files.createDirectories(p.getParent());
-            Files.writeString(p, pretty.writeValueAsString(v), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private String toJson(Object v) {
-        try {
-            return json.writeValueAsString(v);
-        } catch (JsonProcessingException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private static void appendLine(Path p, String line) {
-        try {
-            Files.createDirectories(p.getParent());
-            Files.writeString(p, line + "\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private <T> List<T> readLines(Path p, Class<T> type) {
-        List<T> out = new ArrayList<>();
-        if (!Files.exists(p)) return out;
-        try {
-            for (String line : Files.readAllLines(p, StandardCharsets.UTF_8)) {
-                if (!line.isBlank()) out.add(json.readValue(line, type));
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return out;
+    /** AI 수정 제안으로 새로 만들 수 있는 경로: .java, .md 만, logs/·자료/ 아래와 상위 경로(..)는 안 됨 */
+    static boolean creatable(String path) {
+        return path != null && (path.endsWith(".java") || path.endsWith(".md"))
+                && !path.startsWith("/") && !path.contains("\\")
+                && !path.startsWith("logs/") && !path.startsWith("자료/") && !path.contains("..");
     }
 }

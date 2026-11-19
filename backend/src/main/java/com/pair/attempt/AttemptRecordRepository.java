@@ -19,6 +19,10 @@ public interface AttemptRecordRepository extends JpaRepository<AttemptRecord, Lo
 
     boolean existsByParticipantId(Long participantId);
 
+    /** 후속 질문까지 마친 응시 ID (최근 순). 채점 툴의 "내 응시" 목록 */
+    @Query("select a.id from AttemptRecord a where a.followupsDoneAt is not null order by a.id desc")
+    List<Long> findFinishedIds();
+
     /** 회차별 제출 완료 인원: 응시가 있고, 제출 안 한 응시가 하나도 없는 대상자 수 */
     interface SessionSubmitted {
         Long getSessionId();
