@@ -1,0 +1,89 @@
+{
+ "attemptId": "att-261111-1841-al0",
+ "repeat": 2,
+ "claude": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 20,
+    "reason": "첫 질문에 장애 목표가 있고 로그와 코드를 붙였으며, 답변 형식과 범위(3줄, 2줄, 메서드 코드만, 테스트 1개)를 지정했고 후속 확인 질문도 있었습니다."
+   },
+   {
+    "key": "control",
+    "score": 15,
+    "reason": "AI가 만든 수정 코드와 테스트를 실행해 통과를 확인했고, 타임아웃 증가 제안에 대해서도 맞는지 되물어 근거를 확인했습니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 10,
+    "reason": "원인 파악, 근거 확인, 수정, 검증을 단계별로 나눠 진행했고 중간 결과를 확인한 뒤 다음 요청을 했습니다."
+   },
+   {
+    "key": "delegation",
+    "score": 10,
+    "reason": "로그 줄과 재고 차이 같은 자기 근거를 직접 들어 원인을 판단했고, 과제 파일에 있는 내용을 반복해서 묻지 않았습니다."
+   },
+   {
+    "key": "delivery",
+    "score": 3,
+    "reason": "NOTES.md에 잠금 순서 불일치로 인한 교착과 역순 주문 근거가 명확히 적혀 있습니다."
+   },
+   {
+    "key": "potential",
+    "score": 8,
+    "reason": "Q2에서 AI가 커넥션 풀과 Redis 분산 락을 제안했다고 했지만 대화 기록에 그런 제안이 없고, 결과의 한계나 남은 위험도 어디에도 언급하지 않았습니다."
+   }
+  ]
+ },
+ "openai": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 20,
+    "reason": "첫 질문에서 장애와 목표를 밝혔고, 로그와 코드를 제공한 뒤 원인과 수정 방향을 확인했습니다. 질문 5개 중 형식이나 범위를 정하지 않은 질문은 0개입니다."
+   },
+   {
+    "key": "control",
+    "score": 15,
+    "reason": "타임아웃 연장의 타당성을 확인하고, 수정과 테스트 추가 후 실행 결과를 확인했습니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 10,
+    "reason": "로그와 코드로 원인을 확인한 뒤 수정과 테스트를 순서대로 진행했습니다."
+   },
+   {
+    "key": "delegation",
+    "score": 10,
+    "reason": "AI가 제시한 원인을 사용했지만, 최종 설명에 역순 주문과 타임아웃 로그라는 판단 근거를 직접 제시했습니다."
+   },
+   {
+    "key": "delivery",
+    "score": 3,
+    "reason": "NOTES.md에 잠금 순서 불일치로 인한 교착과 로그 근거를 설명했습니다."
+   },
+   {
+    "key": "potential",
+    "score": 8,
+    "reason": "채택하지 않았다는 커넥션 풀 및 Redis 제안은 대화 기록에 없으며, 결과의 한계나 남은 위험도 언급하지 않았습니다."
+   }
+  ]
+ },
+ "claudeUsd": 0.002534625,
+ "openaiUsage": {
+  "prompt_tokens": 7555,
+  "completion_tokens": 494,
+  "total_tokens": 8049,
+  "prompt_tokens_details": {
+   "cached_tokens": 3714,
+   "cache_write_tokens": 3838,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 225,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ }
+}

@@ -1,0 +1,89 @@
+{
+ "attemptId": "att-261111-1841-avn",
+ "repeat": 4,
+ "claude": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 20,
+    "reason": "첫 질문에서 장애 목표와 로그를 붙였고, 질문 중 절반 이상이 형식이나 범위를 정했으며(3줄, 2줄, 메서드 코드만 등), 답변 후 근거를 좁혀 묻는 질문도 있어 감점이 없습니다."
+   },
+   {
+    "key": "control",
+    "score": 10,
+    "reason": "AI 수정 코드를 적용한 뒤 테스트를 실행해 3개 통과를 확인했고, 타임아웃 증액 제안의 근거도 물었습니다. 다만 테스트 실행 전 AI 코드 검증 흔적이 제한적이고 AI 답변의 근거를 되묻는 과정이 충분히 드러나지 않아 감점이 있습니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 8,
+    "reason": "원인 후보 확인, 코드 대조, 근거 질문, 수정, 테스트로 단계를 나눠 진행했습니다. 다만 수정과 테스트 요청을 여러 턴으로 나눠 중간 확인을 충분히 하지 않은 점은 아쉽습니다."
+   },
+   {
+    "key": "delegation",
+    "score": 10,
+    "reason": "교착 원인은 로그의 역순 주문과 타임아웃 시각을 직접 짚어 근거를 댔고, 재고 불일치 근거도 자신의 판단으로 제시했습니다. 과제 파일을 반복해서 묻지 않았습니다."
+   },
+   {
+    "key": "delivery",
+    "score": 3,
+    "reason": "NOTES.md에 잠금 순서 불일치로 인한 교착과 재고 미복구 두 원인을 모두 설명했고, 로그 시각과 상품 ID를 근거로 들었습니다."
+   },
+   {
+    "key": "potential",
+    "score": 12,
+    "reason": "채택하지 않은 타임아웃 증액과 synchronized 방식의 이유를 구체적으로 설명했고, 실제 DB의 행 잠금 순서와 한계를 언급했습니다. 다만 재현 테스트 실행 결과를 바탕으로 한 검증 설명은 조금 부족합니다."
+   }
+  ]
+ },
+ "openai": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 20,
+    "reason": "장애 목표와 로그·코드를 제시하고 원인과 대안을 단계적으로 확인했습니다. 질문 5개 중 형식이나 범위를 정하지 않은 질문은 0개입니다."
+   },
+   {
+    "key": "control",
+    "score": 15,
+    "reason": "타임아웃 연장의 타당성을 따져 물었고, 수정 후 테스트를 실행해 3개가 통과했습니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 10,
+    "reason": "로그 분석, 코드로 원인 확인, 수정, 테스트를 순서대로 나누어 진행했습니다."
+   },
+   {
+    "key": "delegation",
+    "score": 10,
+    "reason": "AI의 원인 분석을 코드로 확인하고, 최종 설명에 역순 주문과 타임아웃 로그를 근거로 제시했습니다."
+   },
+   {
+    "key": "delivery",
+    "score": 3,
+    "reason": "NOTES.md에 잠금 순서 불일치로 인한 교착과 로그 근거를 설명했습니다."
+   },
+   {
+    "key": "potential",
+    "score": 15,
+    "reason": "후속 답변에서 원인과 대안의 미채택 이유를 설명하고, 실제 DB의 행 잠금 순서를 추가 확인해야 한다는 한계도 밝혔습니다."
+   }
+  ]
+ },
+ "claudeUsd": 0.0011345500000000002,
+ "openaiUsage": {
+  "prompt_tokens": 7795,
+  "completion_tokens": 382,
+  "total_tokens": 8177,
+  "prompt_tokens_details": {
+   "cached_tokens": 7792,
+   "cache_write_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 110,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ }
+}
