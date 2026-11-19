@@ -33,7 +33,7 @@ import com.pair.task.TaskRepository;
 @EnabledIfEnvironmentVariable(named = "PAIR_BENCH", matches = ".+")
 class SandboxConcurrencyBenchTest {
 
-    private final SandboxRunner runner = new SandboxRunner(new PairProperties(null, null, null, null, new PairProperties.Run(30), null, null));
+    private final SandboxRunner runner = new SandboxRunner(new PairProperties(null, null, null, null, new PairProperties.Run(30, null, null, 1000, 600), null, null)); // 상한을 풀어 순수 동시 실행 성능을 잰다
 
     @Test
     void measure() throws Exception {
