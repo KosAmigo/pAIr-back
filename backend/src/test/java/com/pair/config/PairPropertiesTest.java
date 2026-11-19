@@ -11,12 +11,13 @@ import org.junit.jupiter.api.Test;
 class PairPropertiesTest {
 
     @Test
-    void relativeDirs_resolveFromRepoRoot() {
-        // 저장소 최상위(settings.gradle 과 grader 가 함께 있는 곳) 기준으로 바뀐다
+    void relativeDirs_resolveFromRepoRoot_evenWhenRunInBackendFolder() {
+        // Gradle 테스트는 backend 폴더에서 돈다. IntelliJ 로 실행할 때와 같은 상황이다.
         PairProperties p = new PairProperties("pilot-data", null, null, null, null, new PairProperties.Grader("grader", 4), null);
         Path grader = Path.of(p.grader().dir());
         assertTrue(Files.isDirectory(grader.resolve("samples")), grader.toString());
-        assertTrue(Files.isRegularFile(grader.getParent().resolve("settings.gradle")));
+        assertEquals("backend", grader.getParent().resolve("backend").getFileName().toString());
+        assertTrue(Files.isDirectory(grader.getParent().resolve("backend")));
         assertEquals(grader.getParent(), Path.of(p.dataDir()).getParent());
     }
 
