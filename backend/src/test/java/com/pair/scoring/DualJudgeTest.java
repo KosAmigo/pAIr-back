@@ -85,6 +85,44 @@ class DualJudgeTest {
         assertEquals(5, r.deducted()); // (10 + 0) / 2
     }
 
+    static final Judge B2 = new ScoringService.Repeated(B, 2);
+
+    static Map<Judge, Map<String, CheckVerdict>> three(CheckVerdict a, CheckVerdict b, CheckVerdict c) {
+        Map<Judge, Map<String, CheckVerdict>> m = both(a, b);
+        m.put(B2, c == null ? Map.of() : Map.of(c.code(), c));
+        return m;
+    }
+
+    @Test
+    void threeCalls_majorityDecides() {
+        // 셋 중 둘이 걸림 → 전부 감점
+        var r = ScoringService.combine(C4, three(v("C4", true, 0, "#T03"), v("C4", false, 0), v("C4", true, 0, "#T03")));
+        assertEquals("SPLIT", r.status());
+        assertEquals(2, r.deducted());
+        // 셋 중 하나만 걸림 → 감점 없음
+        r = ScoringService.combine(C4, three(v("C4", false, 0), v("C4", true, 0, "#T03"), v("C4", false, 0)));
+        assertEquals("SPLIT", r.status());
+        assertEquals(0, r.deducted());
+        // 셋 다 걸림
+        r = ScoringService.combine(C4, three(v("C4", true, 0, "#T01"), v("C4", true, 0, "#T01"), v("C4", true, 0, "#T02")));
+        assertEquals("DEDUCTED", r.status());
+        assertEquals(2, r.deducted());
+    }
+
+    @Test
+    void threeCalls_perUnitUsesMiddleCount() {
+        var r = ScoringService.combine(D1, three(v("D1", true, 1, "기획안.md"), v("D1", true, 3, "기획안.md"), v("D1", true, 2, "기획안.md")));
+        assertEquals(10, r.deducted()); // 5, 15, 10 의 가운데
+        r = ScoringService.combine(D1, three(v("D1", true, 2, "기획안.md"), v("D1", false, 0), v("D1", false, 0)));
+        assertEquals(0, r.deducted());
+    }
+
+    @Test
+    void threeCalls_oneFailed_fallsBackToAverage() {
+        Map<Judge, Map<String, CheckVerdict>> m = both(v("C4", true, 0, "#T03"), v("C4", false, 0));
+        assertEquals(1, ScoringService.combine(C4, m).deducted()); // 남은 두 호출의 평균
+    }
+
     @Test
     void singleJudgeFallback_usesThatJudgeAlone() {
         Map<Judge, Map<String, CheckVerdict>> m = Map.of(A, Map.of("C4", v("C4", true, 0, "#T02")));

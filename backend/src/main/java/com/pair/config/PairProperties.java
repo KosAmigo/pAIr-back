@@ -44,8 +44,15 @@ public record PairProperties(
         }
     }
 
-    /** effort: OpenAI 는 reasoning_effort(none/minimal/low/medium/high). Claude 는 output_config.effort(low/medium/high/xhigh/max). */
-    public record Model(String model, String effort, long maxTokens) {}
+    /**
+     * effort: OpenAI 는 reasoning_effort(none/minimal/low/medium/high). Claude 는 output_config.effort(low/medium/high/xhigh/max).
+     * calls: 채점 1건에 이 모델을 부르는 횟수(기본 1). 모든 호출의 판정을 합쳐 다수결로 정한다.
+     */
+    public record Model(String model, String effort, long maxTokens, int calls) {
+        public int callsOrOne() {
+            return Math.max(1, calls);
+        }
+    }
 
     public record Run(int timeoutSeconds) {}
 
