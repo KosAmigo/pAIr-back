@@ -16,7 +16,12 @@ build_image() {
 
 # --init: 끝난 자식 프로세스를 거둬 좀비가 쌓이지 않게 한다(쌓이면 프로세스 128개 제한을 차지)
 # 격리 설정: 인터넷 차단, 메모리 512MB(스왑 없음), CPU 1개, 프로세스 128개, 루트 읽기 전용, 일반 사용자, 권한 모두 제거
+# 작업 폴더: 크기 제한 tmpfs 볼륨(기본 64MB, 파일 2만 개). 일반 볼륨은 호스트 디스크를 끝까지 채울 수 있다.
+#   tmpfs 라 컨테이너가 모두 내려가면 내용이 사라진다 → 응시 중에는 상자를 계속 띄워 두고, 보관은 체크포인트 tar 로 한다.
+WS_SIZE=${WS_SIZE:-64m}; WS_INODES=${WS_INODES:-20000}
+make_ws() { docker volume create --opt type=tmpfs --opt device=tmpfs --opt o=size=$WS_SIZE,nr_inodes=$WS_INODES,uid=10001,mode=0755 "$1-ws" >/dev/null; }
 start_box() {
+  docker volume inspect "$1-ws" >/dev/null 2>&1 || make_ws "$1"
   docker run -d --init --name "$1" --network none --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 \
     --read-only --tmpfs /tmp:size=64m,exec,uid=10001 --security-opt no-new-privileges --cap-drop ALL \
     -v "$1-ws:/workspace" $IMAGE sleep infinity >/dev/null
