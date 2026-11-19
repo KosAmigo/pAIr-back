@@ -117,9 +117,14 @@ class ExamFlowIntegrationTest {
     /** 테스트끼리 DB 를 같이 쓰므로 응시 ID 가 겹치지 않게 static */
     private static final AtomicInteger attemptSeq = new AtomicInteger();
 
+    @Autowired com.pair.taskconsole.TaskConsoleService taskConsole;
+
     @BeforeEach
     void setUp() {
         clock.set(T0);
+        // 테스트 DB 는 Flyway 를 안 돌리므로 V3 시드 대신 공개해 둔다
+        taskConsole.changeStatus(TASK, com.pair.taskconsole.TaskPublication.Status.OPEN, 1L);
+        taskConsole.changeStatus(TASK2, com.pair.taskconsole.TaskPublication.Status.OPEN, 1L);
         when(attempts.start(anyString())).thenAnswer(inv -> "att-test-" + attemptSeq.incrementAndGet());
         when(attempts.submitAll(anyMap())).thenAnswer(inv -> ((Map<?, ?>) inv.getArgument(0)).size());
         when(attempts.submitOne(anyString())).thenReturn(true);
@@ -188,6 +193,23 @@ class ExamFlowIntegrationTest {
         sessions.update(s.id(), new SessionRequest(115L, s.title(), s.startsAt().plusSeconds(60), s.endsAt(), true, List.of(TASK)));
         assertThat(appEvents.stream(SessionNotice.class)).singleElement()
                 .satisfies(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CHANGED));
+    }
+
+    @Test
+    @DisplayName("명단에서 빼기: 시작 전·입장 전만, 다른 회차 번호로는 못 뺀다")
+    void removeParticipant() {
+        SessionSummary s = createSession(121L, false);
+        String entered = invite(s.id(), "in@test.dev");
+        invite(s.id(), "out@test.dev");
+        entry.enter(entered);
+        Long out = participant(s.id(), "out@test.dev").getId();
+        Long in = participant(s.id(), "in@test.dev").getId();
+
+        assertThatThrownBy(() -> sessions.removeParticipant(s.id() + 999, out)).isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> sessions.removeParticipant(s.id(), in)).hasMessageContaining("입장한");
+        sessions.removeParticipant(s.id(), out);
+
+        assertThat(participants.findBySessionIdOrderByIdAsc(s.id())).extracting(ExamParticipant::getEmail).containsExactly("in@test.dev");
     }
 
     @Test
