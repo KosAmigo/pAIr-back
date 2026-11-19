@@ -56,6 +56,7 @@ public class ScoringService {
     private final PairProperties props;
     private final PromptStore prompts;
     private final ReferenceDocs referenceDocs;
+    private final ScoringRecords records;
     /** 채점 작업(실제 응시 채점, 채점 툴 실험 채점). 여러 건을 동시에 채점한다. */
     private final ExecutorService executor;
     /** 두 채점 모델을 동시에 부를 때 쓴다. */
@@ -67,7 +68,7 @@ public class ScoringService {
 
     public ScoringService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
                           ClaudeJudge claudeJudge, OpenAiJudge openAiJudge, PairProperties props,
-                          PromptStore prompts, ReferenceDocs referenceDocs) {
+                          PromptStore prompts, ReferenceDocs referenceDocs, ScoringRecords records) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -75,6 +76,7 @@ public class ScoringService {
         this.props = props;
         this.prompts = prompts;
         this.referenceDocs = referenceDocs;
+        this.records = records;
         int parallel = props.grader() == null || props.grader().parallel() < 1 ? 4 : props.grader().parallel();
         this.executor = Executors.newFixedThreadPool(parallel, r -> {
             Thread t = new Thread(r, "scoring");
@@ -141,16 +143,31 @@ public class ScoringService {
     /** 채점 모델 하나의 판정. */
     public record JudgeView(String judge, String model, boolean violated, int count, List<String> evidence, String reason) {}
 
+    /** 채점 모델 호출 한 번의 토큰. judge 는 JudgeView.judge() 와 같은 이름(예: openai#2). */
+    public record JudgeCall(String judge, String model, long input, long output, long cached) {}
+
     public record ItemResult(String key, String name, int max, int score, List<CheckResult> checks) {}
 
     /** 실제 응시 채점: 지정한 버전으로 채점하고 report.json 에 저장한다. */
     public void score(String attemptId) {
-        Map<String, Object> report = evaluate(store, attemptId, defaultOptions());
+        Options opt = defaultOptions();
+        long scoringId = records.start(Long.parseLong(attemptId), opt.version());
+        try {
+            scoreAndSave(attemptId, opt, scoringId);
+        } catch (RuntimeException | Error e) {
+            records.fail(scoringId, e.getMessage() == null ? e.toString() : e.getMessage());
+            throw e;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void scoreAndSave(String attemptId, Options opt, long scoringId) {
+        Map<String, Object> report = evaluate(store, attemptId, opt);
         Attempt a = store.load(attemptId);
+        List<ItemResult> items = (List<ItemResult>) report.get("items");
+        records.finish(scoringId, tasks.get(a.taskId()).isDev(), items, (List<JudgeCall>) report.get("judgeCalls"));
         store.writeReport(a.id(), report);
         store.save(store.load(a.id()).withStatus(Attempt.Status.DONE));
-        @SuppressWarnings("unchecked")
-        List<ItemResult> items = (List<ItemResult>) report.get("items");
         logSummary(a, tasks.get(a.taskId()), (int) report.get("total"), items);
     }
 
@@ -299,11 +316,13 @@ public class ScoringService {
             }
         }
         Map<Judge, Map<String, CheckVerdict>> byJudge = new LinkedHashMap<>();
+        List<JudgeCall> judgeCallList = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         for (var e : judgeCalls.entrySet()) {
             try {
                 Judge.Result<JudgeResult> jr = e.getValue().join();
                 addTokens(judgeTokens, e.getKey(), jr);
+                judgeCallList.add(new JudgeCall(e.getKey().name(), e.getKey().model(), jr.inputTokens(), jr.outputTokens(), jr.cachedInputTokens()));
                 Map<String, CheckVerdict> m = new HashMap<>();
                 for (CheckVerdict v : jr.value().verdicts()) m.put(v.code(), v);
                 byJudge.put(e.getKey(), m);
@@ -337,8 +356,8 @@ public class ScoringService {
 
         notes.add("채점 기준: pAIr-docs 평가/채점_기준표.md (감점식, 총점 " + Rubric.total() + "점)");
         notes.add("이중 채점: 판정 체크는 두 채점 모델(" + String.join(", ", judges.stream().map(Judge::model).toList())
-                + ")의 감점을 평균함" + (repeat > 1 ? "(모델마다 " + repeat + "번씩 불러 모든 호출을 평균)" : "")
-                + ". 근거(대화 턴, 파일) 없이 걸렸다고 한 판정은 감점하지 않음. 일부만 걸렸다고 하면 '판정 엇갈림'으로 평균만큼 감점(소수점 버림)");
+                + ")을 여러 번 불러(Haiku 1번 + terra 2번 등) 호출마다 감점을 정한 뒤 합침" + (repeat > 1 ? "(모델마다 " + repeat + "배로 호출)" : "")
+                + ". 남은 호출이 홀수면 다수결(가운데 값), 2개만 남으면 평균(소수점 버림), 1개만 남으면 그 판정을 씀. 근거(대화 턴, 파일) 없이 걸렸다고 한 판정은 감점하지 않음. 일부만 걸렸다고 하면 '판정 엇갈림'으로 표시");
         notes.add("프롬프트 버전: " + opt.version().id() + " (" + opt.version().name() + ")");
 
         Map<String, Object> report = new LinkedHashMap<>();
@@ -370,6 +389,7 @@ public class ScoringService {
             tokens.put("judge_" + j.name(), Map.of("model", j.model(), "input", t[0], "output", t[1], "cachedInput", t[2]));
         }
         report.put("tokens", tokens);
+        report.put("judgeCalls", judgeCallList);
         report.put("transcript", turns.stream().map(t -> Map.of(
                 "turn", t.turn(), "role", t.role(), "time", clock(a.startedAt(), t.at()), "text", t.text())).toList());
         return report;
