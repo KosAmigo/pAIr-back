@@ -4,13 +4,18 @@ server:
 spring:
   application:
     name: pair-backend
+  # 비밀번호·API 키는 저장소 루트(pAIr-back)의 application-secret.yml 에 둔다 (.gitignore 처리, 커밋 금지).
+  # 키 이름: PAIR_DB_PASSWORD, OPENAI_API_KEY, ANTHROPIC_API_KEY (PAIR_DB_URL, PAIR_DB_USER 로 주소·계정도 바꿀 수 있다)
+  # bootRun 은 pAIr-back 에서, IDE 는 backend 에서 실행될 수 있어 두 위치를 모두 본다
   config:
-    import: optional:file:./application-secret.yml
-  # 실전 시험 회차 DB. 저장소 루트에서 docker compose up -d 로 PostgreSQL 과 Mailpit 을 띄운다
+    import:
+      - optional:file:./application-secret.yml
+      - optional:file:../application-secret.yml
+  # DB 는 AWS RDS(PostgreSQL). 비밀번호가 없으면 서버가 켜지지 않는다
   datasource:
     url: ${PAIR_DB_URL:jdbc:postgresql://pair-db.c9806yki8nbh.ap-northeast-2.rds.amazonaws.com:5432/pair}
     username: ${PAIR_DB_USER:postgres}
-    password: ${PAIR_DB_PASSWORD:}
+    password: ${PAIR_DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -19,6 +24,10 @@ spring:
       hibernate.jdbc.time_zone: UTC
   flyway:
     enabled: true
+    # RDS 는 ERD(V1)로 먼저 만들어져 있어 Flyway 기록이 없다. 비어 있지 않은 DB 는 V1 까지 적용된 것으로 표시하고 V2 부터 적용한다.
+    # 빈 DB 에서는 V1 부터 차례로 적용한다
+    baseline-on-migrate: true
+    baseline-version: 1
   mail:
     host: ${PAIR_MAIL_HOST:localhost}
     port: ${PAIR_MAIL_PORT:1025}

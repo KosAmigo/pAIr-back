@@ -41,9 +41,12 @@ public class ProctorService {
     private final ObjectMapper json;
     private final ExamProperties props;
     private final Clock clock;
+    private final com.pair.attempt.AttemptRecordRepository attempts;
 
     public ProctorService(ExamParticipantRepository participants, ProctorEventRepository events, SnapshotValidator snapshots,
-            SnapshotStorage storage, ObjectMapper json, ExamProperties props, Clock clock) {
+            SnapshotStorage storage, ObjectMapper json, ExamProperties props, Clock clock,
+            com.pair.attempt.AttemptRecordRepository attempts) {
+        this.attempts = attempts;
         this.participants = participants;
         this.events = events;
         this.snapshots = snapshots;
@@ -59,17 +62,17 @@ public class ProctorService {
         ExamParticipant p = findParticipant(token);
         ExamSession s = p.getSession();
         if (!s.isProctoring()) throw new IllegalStateException("감독을 쓰지 않는 회차입니다.");
-        if (p.getStartedAt() == null) throw new IllegalStateException("시작하지 않은 시험입니다.");
+        if (!attempts.existsByParticipantId(p.getId())) throw new IllegalStateException("시작하지 않은 시험입니다.");
         if (now.isAfter(s.getEndsAt().plus(LATE_GRACE))) throw new IllegalStateException("끝난 시험의 감독 이벤트는 받지 않습니다.");
         if (req.startedAt().isBefore(s.getStartsAt().minus(CLOCK_SKEW)) || req.startedAt().isAfter(now.plus(CLOCK_SKEW))) {
             throw new IllegalArgumentException("이벤트 시각이 시험 시간 밖입니다.");
         }
 
         byte[] jpeg = req.snapshot() == null || req.snapshot().isBlank() ? null : snapshots.decode(req.snapshot());
-        if (jpeg != null && req.source() == ProctorEvent.Source.BROWSER) {
+        if (jpeg != null && req.type().source() == ProctorEvent.Source.BROWSER) {
             throw new IllegalArgumentException("브라우저 이벤트에는 사진을 붙이지 않습니다.");
         }
-        ProctorEvent e = events.save(new ProctorEvent(p.getId(), req.type(), req.source(), req.startedAt(), req.durationMs(),
+        ProctorEvent e = events.save(new ProctorEvent(p.getId(), req.type(), req.startedAt(), req.durationMs(),
                 req.confidence(), detail(req), now));
         if (jpeg != null) {
             // 파일 서버 업로드가 실패하면 예외 → 이벤트도 롤백 → 브라우저 아웃박스가 다시 보낸다.

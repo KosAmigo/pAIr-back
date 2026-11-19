@@ -77,6 +77,15 @@ public class AttemptStore {
 
     public synchronized void save(Attempt a) {
         writeJson(dir(a.id()).resolve("attempt.json"), a);
+        java.util.function.Consumer<Attempt> l = onSave;
+        if (l != null) l.accept(a);
+    }
+
+    /** 응시 상태를 저장할 때마다 불린다 (AttemptRegistry 가 DB attempts 행을 맞춘다). 채점 툴 샘플용 저장소에는 없다 */
+    private volatile java.util.function.Consumer<Attempt> onSave;
+
+    public void onSave(java.util.function.Consumer<Attempt> listener) {
+        this.onSave = listener;
     }
 
     public Attempt load(String id) {

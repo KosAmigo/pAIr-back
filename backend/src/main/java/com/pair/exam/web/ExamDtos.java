@@ -43,14 +43,14 @@ public final class ExamDtos {
             ExamSession.Phase phase, List<String> taskIds, long participants, long entered, long submitted,
             Instant canceledAt, long unreviewedEvents, Instant createdAt) {}
 
+    /** startedAt·submittedAt·attempts 는 과제별 응시(attempts)에서 계산한다 (ParticipantProgress). attempts: 과제 code → 응시 ID */
     public record ParticipantView(Long id, String name, String email, ExamParticipant.InviteStatus inviteStatus,
             String inviteError, Instant invitedAt, Instant remindedAt, Instant enteredAt, Instant startedAt,
-            Instant submittedAt, ExamParticipant.SubmitKind submitKind, Map<String, String> attempts) {
+            Instant submittedAt, Map<String, String> attempts) {
 
-        public static ParticipantView from(ExamParticipant p) {
+        public static ParticipantView from(ExamParticipant p, com.pair.exam.service.ParticipantProgress.Progress pr) {
             return new ParticipantView(p.getId(), p.getName(), p.getEmail(), p.getInviteStatus(), p.getInviteError(),
-                    p.getInvitedAt(), p.getRemindedAt(), p.getEnteredAt(), p.getStartedAt(), p.getSubmittedAt(),
-                    p.getSubmitKind(), p.getAttempts());
+                    p.getInvitedAt(), p.getRemindedAt(), p.getEnteredAt(), pr.startedAt(), pr.submittedAt(), pr.attempts());
         }
     }
 
@@ -73,7 +73,7 @@ public final class ExamDtos {
     // ── 응시자: 입장 ──
 
     /**
-     * companyName: 기업 테이블이 아직 없어 null (명세상 선택 필드).
+     * companyName: 아직 채우지 않는다 (명세상 선택 필드).
      * submittedAt: 모든 과제를 제출한 시각. 과제별 제출 여부는 tasks.
      */
     public record EntryInfo(String sessionTitle, String companyName, String name, String email, Instant startsAt, Instant endsAt, Instant serverNow,

@@ -1,19 +1,20 @@
 package com.pair.exam.service;
 
-import java.util.Map;
+import java.util.Collection;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import com.pair.attempt.Attempt;
+import com.pair.attempt.AttemptRecord;
 import com.pair.attempt.AttemptService;
 import com.pair.attempt.AttemptStore;
 
 /**
- * 회차와 기존 응시(attempt, 파일 저장) 사이의 경계.
+ * 회차와 응시 파일(AttemptStore) 사이의 경계. 응시 행(DB attempts)은 회차 서비스가 만들고, 여기서는 파일만 다룬다.
  * 아직 풀고 있는(SOLVING) 응시만 제출한다. 이미 제출했거나 후속 질문 단계면 건드리지 않는다.
- * 제출 뒤 후속 질문·채점 큐는 팀원 1 영역(AttemptService)이 이어 받는다.
+ * 제출 뒤 후속 질문·채점 큐는 AttemptService 가 이어 받는다.
  */
 @Component
 public class AttemptSubmitter {
@@ -27,14 +28,15 @@ public class AttemptSubmitter {
         this.store = store;
     }
 
-    public String start(String taskId) {
-        return attempts.start(taskId).id();
+    /** 응시 행에 작업 파일을 만든다. definitionCode: 과제 내용이 있는 원본 code */
+    public void prepare(AttemptRecord r, String definitionCode) {
+        attempts.createFiles(r, definitionCode);
     }
 
     /** @return 실제로 제출한 응시 수 */
-    public int submitAll(Map<String, String> taskToAttempt) {
+    public int submitAll(Collection<String> attemptIds) {
         int n = 0;
-        for (String attemptId : taskToAttempt.values()) {
+        for (String attemptId : attemptIds) {
             try {
                 if (submitOne(attemptId)) n++;
             } catch (RuntimeException e) {
@@ -48,7 +50,7 @@ public class AttemptSubmitter {
     /** 과제 하나 제출. 이미 제출했으면 false (두 번 불러도 안전) */
     public boolean submitOne(String attemptId) {
         try {
-            if (isSubmitted(attemptId)) return false;
+            if (store.load(attemptId).status() != Attempt.Status.SOLVING) return false;
             attempts.submit(attemptId);
             return true;
         } catch (IllegalStateException e) {
@@ -56,10 +58,5 @@ public class AttemptSubmitter {
             log.debug("이미 제출된 응시: {}", attemptId);
             return false;
         }
-    }
-
-    /** 풀이 중(SOLVING)이 아니면 제출한 것으로 본다 (후속 질문·채점 단계 포함) */
-    public boolean isSubmitted(String attemptId) {
-        return store.load(attemptId).status() != Attempt.Status.SOLVING;
     }
 }

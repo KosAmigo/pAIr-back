@@ -2,6 +2,9 @@ package com.pair.exam.domain;
 
 import java.time.Instant;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -20,7 +23,8 @@ public class ProctorConsent {
     private String consentVersion;
 
     /** 환경 점검 결과 JSON (cam-proctor 의 checks 와 같은 모양) */
-    @Column(name = "env_check", nullable = false, columnDefinition = "text")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "env_check", nullable = false)
     private String envCheck;
 
     @Column(name = "consented_at", nullable = false)

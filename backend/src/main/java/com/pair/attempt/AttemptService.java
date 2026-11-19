@@ -1,8 +1,6 @@
 package com.pair.attempt;
 
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -10,9 +8,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeSet;
-import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.pair.ai.AiUnavailableException;
 import com.pair.ai.AssistantClient;
@@ -21,7 +19,9 @@ import com.pair.attempt.ChatTurn.Message;
 import com.pair.config.PairProperties;
 import com.pair.run.CodeRunner;
 import com.pair.scoring.ScoringService;
+import com.pair.task.TaskCatalog;
 import com.pair.task.TaskDef;
+import com.pair.task.TaskRecord;
 import com.pair.task.TaskRepository;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -29,34 +29,53 @@ import com.fasterxml.jackson.databind.JsonNode;
 @Service
 public class AttemptService {
 
-    private static final DateTimeFormatter ID_TIME = DateTimeFormatter.ofPattern("yyMMdd-HHmm").withZone(ZoneId.systemDefault());
-
     private final AttemptStore store;
     private final TaskRepository tasks;
     private final CodeRunner runner;
     private final AssistantClient assistant;
     private final ScoringService scoring;
     private final PairProperties props;
+    private final TaskCatalog catalog;
+    private final AttemptRegistry registry;
 
     public AttemptService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
-                          AssistantClient assistant, ScoringService scoring, PairProperties props) {
+                          AssistantClient assistant, ScoringService scoring, PairProperties props,
+                          TaskCatalog catalog, AttemptRegistry registry) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
         this.assistant = assistant;
         this.scoring = scoring;
         this.props = props;
+        this.catalog = catalog;
+        this.registry = registry;
     }
 
-    public Attempt start(String taskId) {
-        TaskDef task = tasks.get(taskId);
+    /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
+    @Transactional
+    public Attempt startSelf(String taskCode, Long userId) {
+        TaskRecord t = catalog.require(taskCode);
+        if (t.getUsage() != TaskRecord.Usage.SELF) throw new IllegalArgumentException("자가진단 과제가 아닙니다: " + taskCode);
+        if (t.getStatus() != TaskRecord.Status.OPEN) throw new IllegalStateException("지금은 응시할 수 없는 과제입니다.");
         Instant now = Instant.now();
-        String id = "att-" + ID_TIME.format(now) + "-" + Integer.toString(ThreadLocalRandom.current().nextInt(36 * 36 * 36), 36);
-        Attempt a = new Attempt(id, task.id(), props.assistant().provider(), props.assistant().model(),
-                now, null, null, null, Attempt.Status.SOLVING, List.of(), null, null);
+        AttemptRecord r = registry.save(AttemptRecord.self(userId, t.getId(), props.assistant().model(), now));
+        return createFiles(r, catalog.definitionCode(t));
+    }
+
+    /** 실전 회차: 이미 만든 응시 행(DB)에 작업 파일을 만든다 */
+    public Attempt createFiles(AttemptRecord r, String definitionCode) {
+        TaskDef task = tasks.get(definitionCode);
+        String id = String.valueOf(r.getId());
+        Attempt a = new Attempt(id, task.id(), props.assistant().provider(), r.getAssistantModel(),
+                r.getStartedAt(), null, null, null, Attempt.Status.SOLVING, List.of(), null, null);
         store.create(a, tasks.visibleFiles(task.id()));
         store.appendEvent(id, "start", Map.of("taskId", task.id()));
         return a;
+    }
+
+    /** 응시 시작에 쓰는 어시스턴트 모델 이름 */
+    public String assistantModel() {
+        return props.assistant().model();
     }
 
     public void saveFile(String id, String path, String content) {

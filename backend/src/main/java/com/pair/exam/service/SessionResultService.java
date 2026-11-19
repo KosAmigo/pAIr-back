@@ -18,7 +18,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.pair.attempt.Attempt;
 import com.pair.attempt.AttemptStore;
 import com.pair.exam.domain.ExamParticipant;
 import com.pair.exam.domain.ExamSession;
@@ -44,7 +43,7 @@ public class SessionResultService {
     public enum State { NOT_ENTERED, WAITING, SOLVING, SUBMITTED }
 
     public record Row(int rank, Long participantId, String name, String email, State state, Instant enteredAt,
-            Instant startedAt, Instant submittedAt, ExamParticipant.SubmitKind submitKind, Integer score, Integer maxScore,
+            Instant startedAt, Instant submittedAt, Integer score, Integer maxScore,
             Map<String, Integer> items, Map<ProctorEvent.Type, Long> events) {}
 
     public record Bucket(int from, int to, int count) {}
@@ -66,14 +65,16 @@ public class SessionResultService {
     private final ExamParticipantRepository participants;
     private final ProctorEventRepository events;
     private final AttemptStore attempts;
+    private final ParticipantProgress progress;
     private final Clock clock;
 
     public SessionResultService(ExamSessionService sessions, ExamParticipantRepository participants,
-            ProctorEventRepository events, AttemptStore attempts, Clock clock) {
+            ProctorEventRepository events, AttemptStore attempts, ParticipantProgress progress, Clock clock) {
         this.sessions = sessions;
         this.participants = participants;
         this.events = events;
         this.attempts = attempts;
+        this.progress = progress;
         this.clock = clock;
     }
 
@@ -84,13 +85,14 @@ public class SessionResultService {
         List<ExamParticipant> ps = participants.findBySessionIdOrderByIdAsc(sessionId);
         List<Long> ids = ps.stream().map(ExamParticipant::getId).toList();
         Map<Long, Map<ProctorEvent.Type, Long>> eventCounts = eventCounts(ids);
+        Map<Long, ParticipantProgress.Progress> states = progress.of(ps);
 
         List<Row> rows = new ArrayList<>();
         for (ExamParticipant p : ps) {
-            Score sc = score(p);
-            rows.add(new Row(0, p.getId(), p.getName(), p.getEmail(), state(p), p.getEnteredAt(), p.getStartedAt(),
-                    p.getSubmittedAt(), p.getSubmitKind(), sc.total, sc.max, sc.items,
-                    eventCounts.getOrDefault(p.getId(), Map.of())));
+            ParticipantProgress.Progress pr = states.get(p.getId());
+            Score sc = score(pr);
+            rows.add(new Row(0, p.getId(), p.getName(), p.getEmail(), state(p, pr), p.getEnteredAt(), pr.startedAt(),
+                    pr.submittedAt(), sc.total, sc.max, sc.items, eventCounts.getOrDefault(p.getId(), Map.of())));
         }
         rows = ranked(rows);
 
@@ -99,9 +101,9 @@ public class SessionResultService {
         Map<ProctorEvent.Type, Long> totals = new EnumMap<>(ProctorEvent.Type.class);
         eventCounts.values().forEach(m -> m.forEach((t, c) -> totals.merge(t, c, Long::sum)));
 
-        int started = (int) ps.stream().filter(p -> p.getStartedAt() != null).count();
+        int started = (int) states.values().stream().filter(ParticipantProgress.Progress::started).count();
         return new Result(s.getId(), s.getTitle(), s.phase(now), ps.size(), started,
-                (int) ps.stream().filter(p -> p.getSubmittedAt() != null).count(), scored.size(), average(scored),
+                (int) states.values().stream().filter(ParticipantProgress.Progress::finished).count(), scored.size(), average(scored),
                 distribution(scored), itemAverages(scored), itemAverages(scored.subList(0, topN)),
                 itemAverages(scored.subList(scored.size() - topN, scored.size())), totals,
                 metrics(s, ps, ids, started), rows);
@@ -112,7 +114,7 @@ public class SessionResultService {
     public String csv(Long sessionId) {
         Result r = result(sessionId);
         List<String> itemKeys = new ArrayList<>(r.itemAverages().keySet());
-        List<String> header = new ArrayList<>(List.of("순위", "이름", "이메일", "상태", "입장", "시작", "제출", "제출 방식", "총점", "만점"));
+        List<String> header = new ArrayList<>(List.of("순위", "이름", "이메일", "상태", "입장", "시작", "제출", "총점", "만점"));
         header.addAll(itemKeys);
         for (ProctorEvent.Type t : ProctorEvent.Type.values()) header.add("감독:" + t.name());
 
@@ -121,7 +123,7 @@ public class SessionResultService {
         for (Row row : r.rows()) {
             List<String> cells = new ArrayList<>(List.of(row.rank() == 0 ? "" : String.valueOf(row.rank()), row.name(),
                     row.email(), row.state().name(), str(row.enteredAt()), str(row.startedAt()), str(row.submittedAt()),
-                    row.submitKind() == null ? "" : row.submitKind().name(), str(row.score()), str(row.maxScore())));
+                    str(row.score()), str(row.maxScore())));
             for (String k : itemKeys) cells.add(str(row.items().get(k)));
             for (ProctorEvent.Type t : ProctorEvent.Type.values()) cells.add(String.valueOf(row.events().getOrDefault(t, 0L)));
             line(sb, cells);
@@ -152,8 +154,8 @@ public class SessionResultService {
     private record Score(Integer total, Integer max, Map<String, Integer> items) {}
 
     /** 과제가 여러 개면 합산. 한 과제라도 채점이 안 끝났으면 점수 없음 */
-    private Score score(ExamParticipant p) {
-        Map<String, String> as = p.getAttempts();
+    private Score score(ParticipantProgress.Progress pr) {
+        Map<String, String> as = pr.attempts();
         if (as.isEmpty()) return new Score(null, null, Map.of());
         int total = 0;
         int max = 0;
@@ -176,22 +178,11 @@ public class SessionResultService {
         return new Score(total, max, items);
     }
 
-    private State state(ExamParticipant p) {
-        if (p.getSubmittedAt() != null) return State.SUBMITTED;
-        if (p.getStartedAt() != null) {
-            // 응시자가 응시 화면에서 직접 제출했을 수도 있다 (회차 제출 버튼 대신)
-            boolean allDone = !p.getAttempts().isEmpty() && p.getAttempts().values().stream().allMatch(this::notSolving);
-            return allDone ? State.SUBMITTED : State.SOLVING;
-        }
+    /** 응시 화면에서 과제를 직접 제출해도 응시 행(attempts)의 제출 시각이 채워지므로 같은 기준으로 본다 */
+    private static State state(ExamParticipant p, ParticipantProgress.Progress pr) {
+        if (pr.finished()) return State.SUBMITTED;
+        if (pr.started()) return State.SOLVING;
         return p.getEnteredAt() != null ? State.WAITING : State.NOT_ENTERED;
-    }
-
-    private boolean notSolving(String attemptId) {
-        try {
-            return attempts.load(attemptId).status() != Attempt.Status.SOLVING;
-        } catch (RuntimeException e) {
-            return false;
-        }
     }
 
     /** 같은 점수는 같은 순위 (1, 2, 2, 4). 점수 없는 응시자는 순위 0 으로 맨 뒤 */
@@ -206,7 +197,7 @@ public class SessionResultService {
             if (r.score() != null && !r.score().equals(prev)) rank = i + 1;
             prev = r.score();
             out.add(new Row(r.score() == null ? 0 : rank, r.participantId(), r.name(), r.email(), r.state(), r.enteredAt(),
-                    r.startedAt(), r.submittedAt(), r.submitKind(), r.score(), r.maxScore(), r.items(), r.events()));
+                    r.startedAt(), r.submittedAt(), r.score(), r.maxScore(), r.items(), r.events()));
         }
         return out;
     }

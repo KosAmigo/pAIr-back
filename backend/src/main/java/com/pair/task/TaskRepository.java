@@ -40,6 +40,11 @@ public class TaskRepository {
         return java.util.List.copyOf(tasks.values());
     }
 
+    /** 이 code 의 과제 내용 파일이 있는지 (실전 복사본은 없다) */
+    public boolean has(String id) {
+        return tasks.containsKey(id);
+    }
+
     public TaskDef get(String id) {
         TaskDef t = tasks.get(id);
         if (t == null) throw new NoSuchElementException("없는 과제입니다: " + id);

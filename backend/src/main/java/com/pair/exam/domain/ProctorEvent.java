@@ -3,6 +3,9 @@ package com.pair.exam.domain;
 import java.math.BigDecimal;
 import java.time.Instant;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -18,10 +21,24 @@ import jakarta.persistence.Table;
 public class ProctorEvent {
 
     /** 브라우저 이벤트(frontend/anti-cheating)와 카메라 이벤트(cam-proctor)를 함께 받는다 */
+    /** 감지 위치는 종류마다 정해져 있다 (ERD proctor_event_types.source 와 같다) */
     public enum Type {
-        TAB_HIDDEN, WINDOW_BLUR, MOUSE_LEAVE, PASTE, FULLSCREEN_EXIT,
-        NO_FACE, MULTI_FACE, HEAD_TURN, HEAD_DOWN, GAZE_AWAY, TORSO_SHIFT, TORSO_TURN,
-        HAND_MISSING, HAND_MOVED, ARM_MOVE, PHONE, EXTRA_SCREEN, BOOK, PHONE_DISCONNECTED
+        TAB_HIDDEN(Source.BROWSER), WINDOW_BLUR(Source.BROWSER), MOUSE_LEAVE(Source.BROWSER), PASTE(Source.BROWSER),
+        FULLSCREEN_EXIT(Source.BROWSER),
+        NO_FACE(Source.PC_CAM), MULTI_FACE(Source.PC_CAM), HEAD_TURN(Source.PC_CAM), HEAD_DOWN(Source.PC_CAM),
+        GAZE_AWAY(Source.PC_CAM), TORSO_SHIFT(Source.PC_CAM), TORSO_TURN(Source.PC_CAM),
+        HAND_MISSING(Source.PHONE_CAM), HAND_MOVED(Source.PHONE_CAM), ARM_MOVE(Source.PHONE_CAM), PHONE(Source.PHONE_CAM),
+        EXTRA_SCREEN(Source.PHONE_CAM), BOOK(Source.PHONE_CAM), PHONE_DISCONNECTED(Source.PHONE_CAM);
+
+        private final Source source;
+
+        Type(Source source) {
+            this.source = source;
+        }
+
+        public Source source() {
+            return source;
+        }
     }
 
     public enum Source { BROWSER, PC_CAM, PHONE_CAM }
@@ -41,10 +58,6 @@ public class ProctorEvent {
     @Column(nullable = false, length = 20)
     private Type type;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 10)
-    private Source source;
-
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
 
@@ -54,7 +67,9 @@ public class ProctorEvent {
     @Column(precision = 4, scale = 3)
     private BigDecimal confidence;
 
-    @Column(columnDefinition = "text")
+    /** 감지 세부 정보 JSON */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column
     private String detail;
 
     @Column(name = "snapshot_key", length = 255)
@@ -76,7 +91,7 @@ public class ProctorEvent {
     @Column(name = "review_note", columnDefinition = "text")
     private String reviewNote;
 
-    /** 판정한 회원 ID. users 가 DB 로 옮겨지면 외래 키를 건다 */
+    /** 판정한 회원 ID (users 외래 키) */
     @Column(name = "reviewed_by")
     private Long reviewedBy;
 
@@ -85,11 +100,10 @@ public class ProctorEvent {
 
     protected ProctorEvent() {}
 
-    public ProctorEvent(Long participantId, Type type, Source source, Instant startedAt, int durationMs,
+    public ProctorEvent(Long participantId, Type type, Instant startedAt, int durationMs,
             BigDecimal confidence, String detail, Instant receivedAt) {
         this.participantId = participantId;
         this.type = type;
-        this.source = source;
         this.startedAt = startedAt;
         this.durationMs = durationMs;
         this.confidence = confidence;
@@ -118,7 +132,7 @@ public class ProctorEvent {
     public Long getId() { return id; }
     public Long getParticipantId() { return participantId; }
     public Type getType() { return type; }
-    public Source getSource() { return source; }
+    public Source getSource() { return type.source(); }
     public Instant getStartedAt() { return startedAt; }
     public int getDurationMs() { return durationMs; }
     public BigDecimal getConfidence() { return confidence; }

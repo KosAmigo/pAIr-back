@@ -13,11 +13,11 @@ import com.pair.exam.domain.ExamSession;
 
 public interface ExamSessionRepository extends JpaRepository<ExamSession, Long> {
 
-    @EntityGraph(attributePaths = "taskIds")
+    @EntityGraph(attributePaths = "tasks")
     List<ExamSession> findByCompanyIdOrderByStartsAtDesc(Long companyId);
 
     /** 관리자용 전체 목록 */
-    @EntityGraph(attributePaths = "taskIds")
+    @EntityGraph(attributePaths = "tasks")
     List<ExamSession> findAllByOrderByStartsAtDesc();
 
     /** 권한 확인용: 회차의 회사만 (엔티티를 다 읽지 않는다) */

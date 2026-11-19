@@ -3,7 +3,6 @@ package com.pair.exam.service;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Service;
@@ -11,6 +10,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pair.attempt.AttemptRecord;
+import com.pair.attempt.AttemptRegistry;
+import com.pair.config.PairProperties;
 import com.pair.exam.domain.ExamParticipant;
 import com.pair.exam.domain.ExamSession;
 import com.pair.exam.domain.ProctorConsent;
@@ -19,6 +21,8 @@ import com.pair.exam.repository.ProctorConsentRepository;
 import com.pair.exam.web.ExamDtos.ConsentRequest;
 import com.pair.exam.web.ExamDtos.EntryInfo;
 import com.pair.exam.web.ExamDtos.TaskStatus;
+import com.pair.task.TaskCatalog;
+import com.pair.task.TaskRecord;
 
 /**
  * 응시자 입장 흐름: 링크(초대 토큰) → 시험 정보 → 동의·환경 점검 → 대기실 → 시작 → 과제별 제출.
@@ -33,14 +37,23 @@ public class ExamEntryService {
     private final ExamParticipantRepository participants;
     private final ProctorConsentRepository consents;
     private final AttemptSubmitter attempts;
+    private final AttemptRegistry registry;
+    private final ParticipantProgress progress;
+    private final TaskCatalog catalog;
+    private final PairProperties props;
     private final ObjectMapper json;
     private final Clock clock;
 
     public ExamEntryService(ExamParticipantRepository participants, ProctorConsentRepository consents,
-            AttemptSubmitter attempts, ObjectMapper json, Clock clock) {
+            AttemptSubmitter attempts, AttemptRegistry registry, ParticipantProgress progress, TaskCatalog catalog,
+            PairProperties props, ObjectMapper json, Clock clock) {
         this.participants = participants;
         this.consents = consents;
         this.attempts = attempts;
+        this.registry = registry;
+        this.progress = progress;
+        this.catalog = catalog;
+        this.props = props;
         this.json = json;
         this.clock = clock;
     }
@@ -89,15 +102,20 @@ public class ExamEntryService {
             case CANCELED -> throw new IllegalStateException("취소된 시험입니다.");
             case LIVE -> { }
         }
-        if (p.getSubmittedAt() != null) throw new IllegalStateException("이미 제출했습니다.");
+        ParticipantProgress.Progress pr = progress.of(p);
+        if (pr.finished()) throw new IllegalStateException("이미 제출했습니다.");
         if (s.isProctoring() && !consents.existsById(p.getId())) {
             throw new IllegalStateException("감독 동의와 환경 점검을 먼저 마쳐 주세요.");
         }
         p.markEntered(now);
-        for (String taskId : s.getTaskIds()) {
-            if (!p.getAttempts().containsKey(taskId)) p.linkAttempt(taskId, attempts.start(taskId));
+        // 과제마다 응시 행(DB)을 만들고 그 ID 로 작업 파일을 만든다. 이미 있는 과제는 건너뛴다 (대상자 행 잠금으로 한 번만)
+        var have = pr.records().stream().map(AttemptRecord::getTaskId).collect(java.util.stream.Collectors.toSet());
+        for (Long taskId : s.getTaskIds()) {
+            if (have.contains(taskId)) continue;
+            TaskRecord t = catalog.require(taskId);
+            AttemptRecord r = registry.save(AttemptRecord.live(p.getId(), taskId, props.assistant().model(), now));
+            attempts.prepare(r, catalog.definitionCode(t));
         }
-        p.markStarted(now);
         return view(p, now);
     }
 
@@ -109,14 +127,13 @@ public class ExamEntryService {
     public EntryInfo submitTask(String token, String taskId) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
-        requireSubmittable(p, now);
-        String attemptId = p.getAttempts().get(taskId);
+        ParticipantProgress.Progress pr = progress.of(p);
+        requireSubmittable(p, pr, now);
+        String attemptId = pr.attempts().get(taskId);
         if (attemptId == null) throw new NoSuchElementException("이 시험의 과제가 아닙니다.");
-        if (p.getSubmittedAt() == null) {
+        if (!pr.finished()) {
             attempts.submitOne(attemptId);
-            if (p.getAttempts().values().stream().allMatch(attempts::isSubmitted)) {
-                p.markSubmitted(now, ExamParticipant.SubmitKind.MANUAL);
-            }
+            registry.markSubmitted(attemptId, now);
         }
         return view(p, now);
     }
@@ -126,16 +143,23 @@ public class ExamEntryService {
     public EntryInfo submit(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
-        requireSubmittable(p, now);
-        if (p.getSubmittedAt() != null) return view(p, now);
-        attempts.submitAll(p.getAttempts());
-        p.markSubmitted(now, ExamParticipant.SubmitKind.MANUAL);
+        ParticipantProgress.Progress pr = progress.of(p);
+        requireSubmittable(p, pr, now);
+        if (pr.finished()) return view(p, now);
+        submitAll(attempts, registry, pr, now);
         return view(p, now);
     }
 
-    private static void requireSubmittable(ExamParticipant p, Instant now) {
-        if (p.getStartedAt() == null) throw new IllegalStateException("시작하지 않은 시험입니다.");
-        if (p.getSubmittedAt() == null && p.getSession().phase(now) == ExamSession.Phase.ENDED) {
+    /** 남은 과제를 모두 제출한다 (파일, DB). 직접 제출과 종료 시각 자동 제출이 같이 쓴다 */
+    static void submitAll(AttemptSubmitter attempts, AttemptRegistry registry, ParticipantProgress.Progress pr, Instant now) {
+        var open = pr.records().stream().filter(r -> !r.isSubmitted()).map(r -> String.valueOf(r.getId())).toList();
+        attempts.submitAll(open);
+        open.forEach(id -> registry.markSubmitted(id, now));
+    }
+
+    private static void requireSubmittable(ExamParticipant p, ParticipantProgress.Progress pr, Instant now) {
+        if (!pr.started()) throw new IllegalStateException("시작하지 않은 시험입니다.");
+        if (!pr.finished() && p.getSession().phase(now) == ExamSession.Phase.ENDED) {
             throw new IllegalStateException("종료 시각이 지나 자동 제출을 기다리는 중입니다.");
         }
     }
@@ -157,22 +181,12 @@ public class ExamEntryService {
 
     private EntryInfo view(ExamParticipant p, Instant now) {
         ExamSession s = p.getSession();
-        Map<String, String> as = p.getAttempts();
-        List<TaskStatus> tasks = s.getTaskIds().stream().map(taskId -> {
-            String attemptId = as.get(taskId);
-            boolean submitted = attemptId != null && (p.getSubmittedAt() != null || submittedSafely(attemptId));
-            return new TaskStatus(taskId, attemptId, submitted);
-        }).toList();
+        ParticipantProgress.Progress pr = progress.of(p);
+        List<String> codes = catalog.codesInOrder(s.getTaskIds());
+        List<TaskStatus> tasks = codes.stream()
+                .map(code -> new TaskStatus(code, pr.attempts().get(code), pr.submitted().getOrDefault(code, false)))
+                .toList();
         return new EntryInfo(s.getTitle(), null, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
-                consents.existsById(p.getId()), p.getStartedAt(), p.getSubmittedAt(), s.getTaskIds(), as, tasks);
-    }
-
-    /** 응시 파일을 못 읽어도 입장 화면은 보여 준다 (제출 안 한 것으로 표시) */
-    private boolean submittedSafely(String attemptId) {
-        try {
-            return attempts.isSubmitted(attemptId);
-        } catch (RuntimeException e) {
-            return false;
-        }
+                consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks);
     }
 }

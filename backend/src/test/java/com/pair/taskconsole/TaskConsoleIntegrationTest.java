@@ -43,6 +43,12 @@ class TaskConsoleIntegrationTest {
 
     @Autowired MockMvc mvc;
     @MockitoBean JavaMailSender mail;
+    @Autowired com.pair.task.TaskRecordRepository taskRecords;
+
+    @org.junit.jupiter.api.BeforeEach
+    void seedTasks() {
+        com.pair.task.TestTasks.seed(taskRecords);
+    }
 
     private static MockHttpServletRequestBuilder admin(MockHttpServletRequestBuilder b) {
         return b.header(HeaderCurrentUserResolver.USER_ID, 1).header(HeaderCurrentUserResolver.ROLE, "ADMIN");
@@ -63,18 +69,18 @@ class TaskConsoleIntegrationTest {
     @Test
     @DisplayName("숨긴 과제는 매니저 목록에서 빠지고 회차에 못 건다. 공개하면 걸 수 있고 공개 시각이 남는다")
     void publishFlow() throws Exception {
-        mvc.perform(admin(post("/api/console/tasks/pricing-plan/hide")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("HIDDEN")).andExpect(jsonPath("$.updatedBy").value(1));
+        mvc.perform(admin(post("/api/console/tasks/pricing-plan-live/hide")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("HIDDEN"));
         mvc.perform(manager(get("/api/console/tasks"))).andExpect(status().isOk())
-                .andExpect(jsonPath("$[*].id", not(hasItem("pricing-plan"))));
-        mvc.perform(manager(post("/api/console/sessions")).contentType(MediaType.APPLICATION_JSON).content(session("pricing-plan")))
+                .andExpect(jsonPath("$[*].id", not(hasItem("pricing-plan-live"))));
+        mvc.perform(manager(post("/api/console/sessions")).contentType(MediaType.APPLICATION_JSON).content(session("pricing-plan-live")))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("공개")));
 
-        mvc.perform(admin(post("/api/console/tasks/pricing-plan/publish")))
+        mvc.perform(admin(post("/api/console/tasks/pricing-plan-live/publish")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("OPEN"))
                 .andExpect(jsonPath("$.publishedAt").isNotEmpty());
-        mvc.perform(manager(get("/api/console/tasks"))).andExpect(jsonPath("$[*].id", hasItem("pricing-plan")));
-        mvc.perform(manager(post("/api/console/sessions")).contentType(MediaType.APPLICATION_JSON).content(session("pricing-plan")))
+        mvc.perform(manager(get("/api/console/tasks"))).andExpect(jsonPath("$[*].id", hasItem("pricing-plan-live")));
+        mvc.perform(manager(post("/api/console/sessions")).contentType(MediaType.APPLICATION_JSON).content(session("pricing-plan-live")))
                 .andExpect(status().isCreated());
     }
 

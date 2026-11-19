@@ -16,11 +16,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pair.attempt.Attempt;
+import com.pair.attempt.AttemptRecord;
+import com.pair.attempt.AttemptRecordRepository;
 import com.pair.attempt.AttemptService;
 import com.pair.attempt.AttemptStore;
 import com.pair.attempt.ChatTurn;
 import com.pair.run.CodeRunner;
+import com.pair.task.TaskCatalog;
 import com.pair.task.TaskDef;
+import com.pair.web.auth.CurrentUser;
 import com.pair.task.TaskRepository;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -33,12 +37,17 @@ public class ApiController {
     private final AttemptService attempts;
     private final AttemptStore store;
     private final com.pair.config.PairProperties props;
+    private final AttemptRecordRepository records;
+    private final TaskCatalog catalog;
 
-    public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.config.PairProperties props) {
+    public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.config.PairProperties props,
+            AttemptRecordRepository records, TaskCatalog catalog) {
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
         this.props = props;
+        this.records = records;
+        this.catalog = catalog;
     }
 
     public record StartRequest(String taskId) {}
@@ -55,62 +64,66 @@ public class ApiController {
 
     @GetMapping("/tasks/{taskId}")
     public TaskDef task(@PathVariable String taskId) {
-        return tasks.get(taskId);
+        return catalog.definition(taskId);
     }
 
     @PostMapping("/attempts")
-    public Map<String, Object> start(@RequestBody StartRequest req) {
-        Attempt a = attempts.start(req.taskId());
+    public Map<String, Object> start(CurrentUser user, @RequestBody StartRequest req) {
+        Attempt a = attempts.startSelf(req.taskId(), user.userId());
         return Map.of("attemptId", a.id());
     }
 
-    /** 내 기록: 실제 응시 목록 (최근 순). 채점이 끝난 응시는 항목 점수를 함께 준다. */
+    /** 내 기록: 내 자가진단 응시 목록 (DB attempts, 최근 순). 채점이 끝난 응시는 항목 점수를 함께 준다. */
     @GetMapping("/attempts")
-    public List<Map<String, Object>> list() {
+    public List<Map<String, Object>> list(CurrentUser user) {
+        List<AttemptRecord> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), AttemptRecord.Mode.SELF);
+        Map<Long, String> codes = catalog.codes(rows.stream().map(AttemptRecord::getTaskId).distinct().toList());
         List<Map<String, Object>> out = new java.util.ArrayList<>();
-        try (var dirs = java.nio.file.Files.list(store.root())) {
-            for (var dir : dirs.filter(java.nio.file.Files::isDirectory).toList()) {
-                Attempt a;
-                try {
-                    a = store.load(dir.getFileName().toString());
-                } catch (RuntimeException e) {
-                    continue;
-                }
-                if (isEmpty(a)) continue; // 응시 화면에 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
-                TaskDef task = tasks.get(a.taskId());
-                Map<String, Object> m = new LinkedHashMap<>();
-                m.put("id", a.id());
-                m.put("taskId", task.id());
-                m.put("taskTitle", task.title());
-                m.put("taskType", task.type());
-                m.put("startedAt", a.startedAt());
-                m.put("status", a.status());
-                if (a.status() == Attempt.Status.DONE) {
-                    JsonNode r = store.readReport(a.id());
-                    if (r != null) {
-                        // version 2(감점식)만 총점이 있다. 이전 형식은 다시 채점해야 한다.
-                        m.put("total", r.path("version").asInt() >= 2 ? r.path("total").asInt() : null);
-                        m.put("legacyReport", r.path("version").asInt() < 2);
-                        for (JsonNode it : r.path("items")) {
-                            JsonNode sc = it.path("score");
-                            m.put(it.path("key").asText(), sc.isNumber() ? sc.asDouble() : null);
-                        }
+        for (AttemptRecord r : rows) {
+            String id = String.valueOf(r.getId());
+            if (r.getStatus() == Attempt.Status.SOLVING && isEmpty(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
+            TaskDef task = catalog.definition(codes.get(r.getTaskId()));
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", id);
+            m.put("taskId", codes.get(r.getTaskId()));
+            m.put("taskTitle", task.title());
+            m.put("taskType", task.type());
+            m.put("startedAt", r.getStartedAt());
+            m.put("status", r.getStatus());
+            if (r.getStatus() == Attempt.Status.DONE) {
+                JsonNode rep = readReportSafely(id);
+                if (rep != null) {
+                    // version 2(감점식)만 총점이 있다. 이전 형식은 다시 채점해야 한다.
+                    m.put("total", rep.path("version").asInt() >= 2 ? rep.path("total").asInt() : null);
+                    m.put("legacyReport", rep.path("version").asInt() < 2);
+                    for (JsonNode it : rep.path("items")) {
+                        JsonNode sc = it.path("score");
+                        m.put(it.path("key").asText(), sc.isNumber() ? sc.asDouble() : null);
                     }
                 }
-                out.add(m);
             }
-        } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
+            out.add(m);
         }
-        out.sort((x, y) -> String.valueOf(y.get("startedAt")).compareTo(String.valueOf(x.get("startedAt"))));
         return out;
     }
 
-    /** 빈 응시: 풀이 중이고, AI 질문도, 파일 저장, 빌드, 실행도 없는 기록. */
-    private boolean isEmpty(Attempt a) {
-        if (a.status() != Attempt.Status.SOLVING) return false;
-        if (!store.turns(a.id()).isEmpty()) return false;
-        return store.events(a.id()).stream().allMatch(e -> "start".equals(e.path("type").asText()));
+    /** 리포트 파일이 없거나 깨져도 목록은 보여 준다 */
+    private JsonNode readReportSafely(String id) {
+        try {
+            return store.readReport(id);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** 빈 응시: 풀이 중이고, AI 질문도, 파일 저장, 빌드, 실행도 없는 기록. 파일이 없으면 빈 것으로 본다 */
+    private boolean isEmpty(String id) {
+        try {
+            if (!store.turns(id).isEmpty()) return false;
+            return store.events(id).stream().allMatch(e -> "start".equals(e.path("type").asText()));
+        } catch (RuntimeException e) {
+            return true;
+        }
     }
 
     @GetMapping("/attempts/{id}")

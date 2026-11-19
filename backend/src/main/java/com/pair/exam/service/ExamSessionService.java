@@ -28,7 +28,7 @@ import com.pair.exam.web.ExamDtos.Rejected;
 import com.pair.exam.web.ExamDtos.SessionDetail;
 import com.pair.exam.web.ExamDtos.SessionRequest;
 import com.pair.exam.web.ExamDtos.SessionSummary;
-import com.pair.task.TaskRepository;
+import com.pair.task.TaskCatalog;
 import com.pair.taskconsole.TaskConsoleService;
 
 /** 기업 콘솔: 회차 생성·수정·취소와 대상자 등록. */
@@ -42,20 +42,25 @@ public class ExamSessionService {
 
     private final ExamSessionRepository sessions;
     private final ExamParticipantRepository participants;
-    private final TaskRepository tasks;
+    private final TaskCatalog tasks;
     private final ApplicationEventPublisher events;
     private final SnapshotStorage storage;
     private final TaskConsoleService publications;
     private final com.pair.exam.repository.ProctorEventRepository proctorEvents;
+    private final com.pair.attempt.AttemptRecordRepository attemptRecords;
+    private final ParticipantProgress progress;
     private final ExamProperties props;
     private final Clock clock;
 
-    public ExamSessionService(ExamSessionRepository sessions, ExamParticipantRepository participants, TaskRepository tasks,
+    public ExamSessionService(ExamSessionRepository sessions, ExamParticipantRepository participants, TaskCatalog tasks,
             ApplicationEventPublisher events, SnapshotStorage storage, TaskConsoleService publications,
-            com.pair.exam.repository.ProctorEventRepository proctorEvents, ExamProperties props, Clock clock) {
+            com.pair.exam.repository.ProctorEventRepository proctorEvents, com.pair.attempt.AttemptRecordRepository attemptRecords,
+            ParticipantProgress progress, ExamProperties props, Clock clock) {
         this.sessions = sessions;
         this.participants = participants;
         this.tasks = tasks;
+        this.attemptRecords = attemptRecords;
+        this.progress = progress;
         this.events = events;
         this.storage = storage;
         this.publications = publications;
@@ -64,16 +69,20 @@ public class ExamSessionService {
         this.clock = clock;
     }
 
+    /** createdBy: 만든 회원 (같은 회사 MANAGER 또는 관리자) */
     @Transactional
-    public SessionSummary create(SessionRequest req) {
+    public SessionSummary create(SessionRequest req, Long createdBy) {
         Instant now = clock.instant();
         if (req.companyId() == null) throw new IllegalArgumentException("회사를 알 수 없습니다.");
         validateSchedule(req, now);
-        req.taskIds().forEach(tasks::get); // 없는 과제면 404
-        publications.requireOpen(req.taskIds()); // 검수해 공개한 과제만
+        List<Long> taskIds = liveTaskIds(req.taskIds()); // 없는 과제면 404, 공개한 실전 과제만
         ExamSession s = sessions.save(new ExamSession(req.companyId(), req.title().trim(), req.startsAt(), req.endsAt(),
-                req.proctoring(), req.taskIds(), now));
+                req.proctoring(), taskIds, createdBy, now));
         return summary(s, null, now);
+    }
+
+    private List<Long> liveTaskIds(List<String> codes) {
+        return publications.requireOpenLive(codes).stream().map(com.pair.task.TaskRecord::getId).toList();
     }
 
     @Transactional(readOnly = true)
@@ -87,10 +96,14 @@ public class ExamSessionService {
         List<Long> ids = list.stream().map(ExamSession::getId).toList();
         Map<Long, ExamParticipantRepository.SessionCounts> counts = participants.countBySessionIds(ids).stream()
                 .collect(Collectors.toMap(ExamParticipantRepository.SessionCounts::getSessionId, Function.identity()));
+        Map<Long, Long> submitted = attemptRecords.countSubmittedBySessionIds(ids).stream()
+                .collect(Collectors.toMap(com.pair.attempt.AttemptRecordRepository.SessionSubmitted::getSessionId,
+                        com.pair.attempt.AttemptRecordRepository.SessionSubmitted::getSubmitted));
         Map<Long, Long> open = proctorEvents.countUnreviewedBySessionIds(ids).stream()
                 .collect(Collectors.toMap(com.pair.exam.repository.ProctorEventRepository.SessionOpenCount::getSessionId,
                         com.pair.exam.repository.ProctorEventRepository.SessionOpenCount::getOpen));
-        return list.stream().map(s -> summary(s, counts.get(s.getId()), open.getOrDefault(s.getId(), 0L), now)).toList();
+        return list.stream().map(s -> summary(s, counts.get(s.getId()), submitted.getOrDefault(s.getId(), 0L),
+                open.getOrDefault(s.getId(), 0L), now)).toList();
     }
 
     /** 관리자: 모든 회사의 회차 */
@@ -104,11 +117,12 @@ public class ExamSessionService {
         Instant now = clock.instant();
         ExamSession s = require(sessionId);
         List<ExamParticipant> ps = participants.findBySessionIdOrderByIdAsc(sessionId);
+        Map<Long, ParticipantProgress.Progress> states = progress.of(ps);
         long entered = ps.stream().filter(p -> p.getEnteredAt() != null).count();
-        long submitted = ps.stream().filter(p -> p.getSubmittedAt() != null).count();
+        long submitted = states.values().stream().filter(ParticipantProgress.Progress::finished).count();
         SessionSummary sum = new SessionSummary(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(),
-                s.phase(now), s.getTaskIds(), ps.size(), entered, submitted, s.getCanceledAt(), 0, s.getCreatedAt());
-        return new SessionDetail(sum, now, s.getClosedAt(), ps.stream().map(ParticipantView::from).toList());
+                s.phase(now), tasks.codesInOrder(s.getTaskIds()), ps.size(), entered, submitted, s.getCanceledAt(), 0, s.getCreatedAt());
+        return new SessionDetail(sum, now, s.getClosedAt(), ps.stream().map(p -> ParticipantView.from(p, states.get(p.getId()))).toList());
     }
 
     /** 시작 전에만 고칠 수 있다 (진행 중에 시각을 바꾸면 응시자마다 조건이 달라진다). 바뀌면 대상자에게 안내 메일 */
@@ -118,11 +132,10 @@ public class ExamSessionService {
         ExamSession s = requireUpcoming(sessionId, now, "고칠");
         if (!s.getCompanyId().equals(req.companyId())) throw new IllegalArgumentException("다른 회사의 회차로 옮길 수 없습니다.");
         validateSchedule(req, now);
-        req.taskIds().forEach(tasks::get);
-        publications.requireOpen(req.taskIds());
+        List<Long> taskIds = liveTaskIds(req.taskIds());
         boolean changed = !s.getTitle().equals(req.title().trim()) || !s.getStartsAt().equals(req.startsAt())
-                || !s.getEndsAt().equals(req.endsAt()) || !s.getTaskIds().equals(req.taskIds());
-        s.update(req.title().trim(), req.startsAt(), req.endsAt(), req.proctoring(), req.taskIds());
+                || !s.getEndsAt().equals(req.endsAt()) || !s.getTaskIds().equals(taskIds);
+        s.update(req.title().trim(), req.startsAt(), req.endsAt(), req.proctoring(), taskIds);
         if (changed) notifyParticipants(s, SessionNotice.Kind.CHANGED);
         return summary(s, null, now);
     }
@@ -294,13 +307,13 @@ public class ExamSessionService {
         return null;
     }
 
-    private static SessionSummary summary(ExamSession s, ExamParticipantRepository.SessionCounts c, Instant now) {
-        return summary(s, c, 0, now);
+    private SessionSummary summary(ExamSession s, ExamParticipantRepository.SessionCounts c, Instant now) {
+        return summary(s, c, 0, 0, now);
     }
 
-    private static SessionSummary summary(ExamSession s, ExamParticipantRepository.SessionCounts c, long open, Instant now) {
+    private SessionSummary summary(ExamSession s, ExamParticipantRepository.SessionCounts c, long submitted, long open, Instant now) {
         return new SessionSummary(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(), s.phase(now),
-                s.getTaskIds(), c == null ? 0 : c.getTotal(), c == null ? 0 : c.getEntered(), c == null ? 0 : c.getSubmitted(),
+                tasks.codesInOrder(s.getTaskIds()), c == null ? 0 : c.getTotal(), c == null ? 0 : c.getEntered(), submitted,
                 s.getCanceledAt(), open, s.getCreatedAt());
     }
 }

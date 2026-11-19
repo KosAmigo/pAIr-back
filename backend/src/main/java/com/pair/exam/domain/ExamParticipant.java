@@ -1,15 +1,11 @@
 package com.pair.exam.domain;
 
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
-import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -19,17 +15,18 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.Table;
 
-/** 회차 대상자. 초대 토큰(입장 링크)으로만 입장한다. */
+/**
+ * 회차 대상자. 초대 토큰(입장 링크)으로만 입장한다.
+ * 시험 시작·제출은 과제별 응시(ERD attempts, participant_id)에 남는다 → ParticipantProgress
+ */
 @Entity
 @Table(name = "exam_participants")
 public class ExamParticipant {
 
     public enum InviteStatus { PENDING, SENT, FAILED }
 
-    public enum SubmitKind { AUTO, MANUAL }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -68,25 +65,6 @@ public class ExamParticipant {
     @Column(name = "entered_at")
     private Instant enteredAt;
 
-    @Column(name = "started_at")
-    private Instant startedAt;
-
-    @Column(name = "submitted_at")
-    private Instant submittedAt;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "submit_kind", length = 10)
-    private SubmitKind submitKind;
-
-    /**
-     * 과제 ID → 응시 ID (응시 자체는 아직 pilot-data 파일에 있다).
-     * ERD 에서는 attempts.participant_id 로 잇는다. attempts 가 DB 로 옮겨지면 이 표를 없앤다.
-     */
-    @ElementCollection
-    @CollectionTable(name = "participant_attempts", joinColumns = @JoinColumn(name = "participant_id"))
-    @MapKeyColumn(name = "task_id", length = 64)
-    @Column(name = "attempt_id", length = 64, nullable = false, unique = true)
-    private Map<String, String> attempts = new HashMap<>();
 
     protected ExamParticipant() {}
 
@@ -112,20 +90,6 @@ public class ExamParticipant {
         if (enteredAt == null) enteredAt = at;
     }
 
-    public void markStarted(Instant at) {
-        if (startedAt == null) startedAt = at;
-    }
-
-    public void linkAttempt(String taskId, String attemptId) {
-        attempts.put(taskId, attemptId);
-    }
-
-    public void markSubmitted(Instant at, SubmitKind kind) {
-        if (submittedAt != null) return;
-        submittedAt = at;
-        submitKind = kind;
-    }
-
     /** invite_error 컬럼 길이에 맞춘다 */
     public static String trimInviteError(String error) {
         return error == null ? null : error.substring(0, Math.min(255, error.length()));
@@ -141,8 +105,4 @@ public class ExamParticipant {
     public Instant getInvitedAt() { return invitedAt; }
     public Instant getRemindedAt() { return remindedAt; }
     public Instant getEnteredAt() { return enteredAt; }
-    public Instant getStartedAt() { return startedAt; }
-    public Instant getSubmittedAt() { return submittedAt; }
-    public SubmitKind getSubmitKind() { return submitKind; }
-    public Map<String, String> getAttempts() { return Map.copyOf(attempts); }
 }

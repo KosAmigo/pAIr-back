@@ -3,7 +3,8 @@ package com.pair.exam;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
@@ -19,7 +20,6 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -76,8 +76,9 @@ import com.pair.exam.web.ExamDtos.SessionSummary;
 class ExamFlowIntegrationTest {
 
     static final Instant T0 = Instant.parse("2026-12-01T00:00:00Z");
-    static final String TASK = "order-deadlock";
-    static final String TASK2 = "pricing-plan";
+    /** 회차에는 기업 실전(LIVE) 과제를 건다. 내용 파일은 원본(order-deadlock, pricing-plan) 것을 쓴다 */
+    static final String TASK = com.pair.task.TestTasks.LIVE_DEV;
+    static final String TASK2 = com.pair.task.TestTasks.LIVE_BIZ;
     /** 최소한의 JPEG (FF D8 FF 로 시작) */
     static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 16, 'J', 'F', 'I', 'F'};
 
@@ -114,19 +115,14 @@ class ExamFlowIntegrationTest {
     @MockitoBean AttemptSubmitter attempts;
     @MockitoBean JavaMailSender mail;
 
-    /** 테스트끼리 DB 를 같이 쓰므로 응시 ID 가 겹치지 않게 static */
-    private static final AtomicInteger attemptSeq = new AtomicInteger();
-
-    @Autowired com.pair.taskconsole.TaskConsoleService taskConsole;
+    @Autowired com.pair.task.TaskRecordRepository taskRecords;
 
     @BeforeEach
     void setUp() {
         clock.set(T0);
-        // 테스트 DB 는 Flyway 를 안 돌리므로 V3 시드 대신 공개해 둔다
-        taskConsole.changeStatus(TASK, com.pair.taskconsole.TaskPublication.Status.OPEN, 1L);
-        taskConsole.changeStatus(TASK2, com.pair.taskconsole.TaskPublication.Status.OPEN, 1L);
-        when(attempts.start(anyString())).thenAnswer(inv -> "att-test-" + attemptSeq.incrementAndGet());
-        when(attempts.submitAll(anyMap())).thenAnswer(inv -> ((Map<?, ?>) inv.getArgument(0)).size());
+        // 테스트 DB 는 Flyway 를 안 돌리므로 V3 시드와 같은 과제 행을 넣는다
+        com.pair.task.TestTasks.seed(taskRecords);
+        when(attempts.submitAll(anyCollection())).thenAnswer(inv -> ((java.util.Collection<?>) inv.getArgument(0)).size());
         when(attempts.submitOne(anyString())).thenReturn(true);
     }
 
@@ -216,7 +212,7 @@ class ExamFlowIntegrationTest {
     @DisplayName("없는 과제로는 회차를 만들 수 없다")
     void rejectsUnknownTask() {
         SessionRequest req = new SessionRequest(103L, "t", T0.plusSeconds(60), T0.plusSeconds(3600), true, List.of("no-such-task"));
-        assertThatThrownBy(() -> sessions.create(req)).isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> sessions.create(req, 1L)).isInstanceOf(NoSuchElementException.class);
     }
 
     // ── 대상자 ──
@@ -297,7 +293,7 @@ class ExamFlowIntegrationTest {
     void reminderOncePerParticipant() throws InterruptedException {
         SessionRequest req = new SessionRequest(118L, "알림 회차", T0.plus(Duration.ofDays(3)), T0.plus(Duration.ofDays(3)).plusSeconds(3600),
                 false, List.of(TASK));
-        SessionSummary s = sessions.create(req);
+        SessionSummary s = sessions.create(req, 1L);
         invite(s.id(), "early@test.dev");
         awaitInviteStatus(s.id(), "early@test.dev", ExamParticipant.InviteStatus.SENT);
 
@@ -350,21 +346,20 @@ class ExamFlowIntegrationTest {
         assertThat(started.attempts()).containsOnlyKeys(TASK);
         assertThat(started.tasks()).singleElement().satisfies(t -> assertThat(t.submitted()).isFalse());
         assertThat(again.attempts()).isEqualTo(started.attempts());
-        verify(attempts, times(1)).start(TASK); // 두 번 눌러도 응시는 하나
+        verify(attempts, times(1)).prepare(any(), eq(com.pair.task.TestTasks.SELF_DEV)); // 두 번 눌러도 응시는 하나 (내용은 원본 과제)
     }
 
     @Test
     @DisplayName("과제별 제출: 한 과제만 제출하면 그 과제만 넘기고, 모든 과제를 내면 대상자도 제출 완료")
     void submitPerTask() {
         SessionSummary s = sessions.create(new SessionRequest(119L, "두 과제", clock.instant().plus(Duration.ofMinutes(10)),
-                clock.instant().plus(Duration.ofMinutes(70)), false, List.of(TASK, TASK2)));
+                clock.instant().plus(Duration.ofMinutes(70)), false, List.of(TASK, TASK2)), 1L);
         String token = invite(s.id(), "multi@test.dev");
         clock.set(s.startsAt());
         EntryInfo started = entry.start(token);
         String a1 = started.attempts().get(TASK);
         String a2 = started.attempts().get(TASK2);
 
-        when(attempts.isSubmitted(a1)).thenReturn(true);
         EntryInfo afterFirst = entry.submitTask(token, TASK);
 
         verify(attempts).submitOne(a1);
@@ -372,11 +367,9 @@ class ExamFlowIntegrationTest {
         assertThat(afterFirst.submittedAt()).isNull();
         assertThat(afterFirst.tasks()).extracting(t -> t.taskId() + ":" + t.submitted()).containsExactly(TASK + ":true", TASK2 + ":false");
 
-        when(attempts.isSubmitted(a2)).thenReturn(true);
         EntryInfo afterAll = entry.submitTask(token, TASK2);
 
         assertThat(afterAll.submittedAt()).isEqualTo(s.startsAt());
-        assertThat(participant(s.id(), "multi@test.dev").getSubmitKind()).isEqualTo(ExamParticipant.SubmitKind.MANUAL);
         assertThatThrownBy(() -> entry.submitTask(token, "not-in-session")).isInstanceOf(NoSuchElementException.class);
     }
 
@@ -407,8 +400,7 @@ class ExamFlowIntegrationTest {
 
         assertThat(n).isEqualTo(1);
         assertThat(entry.info(solving).submittedAt()).isEqualTo(s.endsAt().plusMillis(800));
-        assertThat(participant(s.id(), "solving@test.dev").getSubmitKind()).isEqualTo(ExamParticipant.SubmitKind.AUTO);
-        assertThat(participant(s.id(), "manual@test.dev").getSubmitKind()).isEqualTo(ExamParticipant.SubmitKind.MANUAL);
+        assertThat(entry.info(manual).submittedAt()).isEqualTo(s.startsAt()); // 직접 제출한 시각 그대로
         assertThat(entry.info(absent).submittedAt()).isNull();
         assertThat(autoSubmit.dueSessionIds()).doesNotContain(s.id());
         assertThat(autoSubmit.close(s.id())).isZero(); // 두 번 돌아도 안전
@@ -535,7 +527,7 @@ class ExamFlowIntegrationTest {
     // ── 도우미 ──
 
     private SessionSummary createSession(Long company, boolean proctoring) {
-        return sessions.create(request(company, proctoring));
+        return sessions.create(request(company, proctoring), 1L);
     }
 
     private SessionRequest request(Long company, boolean proctoring) {

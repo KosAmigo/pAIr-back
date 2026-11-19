@@ -44,11 +44,11 @@ class ConsoleAuthIntegrationTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     @MockitoBean JavaMailSender mail;
-    @Autowired com.pair.taskconsole.TaskConsoleService taskConsole;
+    @Autowired com.pair.task.TaskRecordRepository taskRecords;
 
     @org.junit.jupiter.api.BeforeEach
-    void publishTasks() {
-        taskConsole.changeStatus("order-deadlock", com.pair.taskconsole.TaskPublication.Status.OPEN, 1L);
+    void seedTasks() {
+        com.pair.task.TestTasks.seed(taskRecords);
     }
 
     private static MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder b, long user, String role, Long company) {
@@ -59,7 +59,7 @@ class ConsoleAuthIntegrationTest {
     private String sessionBody(Long companyId) {
         Instant start = Instant.now().plusSeconds(3600);
         return """
-                {"companyId": %s, "title": "auth", "startsAt": "%s", "endsAt": "%s", "proctoring": false, "taskIds": ["order-deadlock"]}
+                {"companyId": %s, "title": "auth", "startsAt": "%s", "endsAt": "%s", "proctoring": false, "taskIds": ["order-deadlock-live"]}
                 """.formatted(companyId, start, start.plusSeconds(3600));
     }
 

@@ -74,7 +74,7 @@ public class ExamConsoleController {
     @ResponseStatus(HttpStatus.CREATED)
     public SessionSummary create(CurrentUser user, @Valid @RequestBody SessionRequest req) {
         access.requireManager(user);
-        return sessions.create(req.withCompany(access.companyFor(user, req.companyId())));
+        return sessions.create(req.withCompany(access.companyFor(user, req.companyId())), user.userId());
     }
 
     @GetMapping("/{sessionId}")

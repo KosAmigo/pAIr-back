@@ -2,79 +2,80 @@ package com.pair.taskconsole;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.task.TaskDef;
-import com.pair.task.TaskRepository;
+import com.pair.task.TaskCatalog;
+import com.pair.task.TaskRecord;
+import com.pair.task.TaskRecordRepository;
 
 /**
  * 관리자 과제 콘솔: 과제 목록, 검수 뒤 공개(HIDDEN 에서 OPEN), 다시 숨기기.
- * 과제 내용(정의·파일)은 TaskRepository(팀원 2·3)가 맡고, 여기는 공개 상태만 다룬다.
+ * 목록·상태는 ERD tasks 테이블, 과제 내용(정의·파일)은 TaskRepository 가 맡는다.
  */
 @Service
 public class TaskConsoleService {
 
-    public record TaskSummary(String id, String type, String title, int minutes, TaskPublication.Status status,
-            Instant publishedAt, Instant updatedAt, Long updatedBy) {}
+    /**
+     * id: 과제 code. type: dev | biz (응시 화면 TaskDef.type 과 같은 값).
+     * usage: SELF 자가진단 / LIVE 기업 실전(회차에 거는 과제). parentId: 실전 복사본이면 원본 code
+     */
+    public record TaskSummary(String id, String type, String title, int minutes, TaskRecord.Usage usage, String parentId,
+            TaskRecord.Status status, Instant publishedAt, Instant updatedAt) {}
 
-    private final TaskRepository tasks;
-    private final TaskPublicationRepository publications;
+    private final TaskRecordRepository records;
+    private final TaskCatalog catalog;
     private final Clock clock;
 
-    public TaskConsoleService(TaskRepository tasks, TaskPublicationRepository publications, Clock clock) {
-        this.tasks = tasks;
-        this.publications = publications;
+    public TaskConsoleService(TaskRecordRepository records, TaskCatalog catalog, Clock clock) {
+        this.records = records;
+        this.catalog = catalog;
         this.clock = clock;
     }
 
     @Transactional(readOnly = true)
     public List<TaskSummary> list() {
-        List<TaskDef> all = tasks.all();
-        Map<String, TaskPublication> pubs = byId(all.stream().map(TaskDef::id).toList());
-        return all.stream().map(t -> summary(t, pubs.get(t.id()))).toList();
+        List<TaskRecord> all = records.findAllByOrderByIdAsc();
+        var codes = catalog.codes(all.stream().map(TaskRecord::getParentTaskId).filter(java.util.Objects::nonNull).toList());
+        return all.stream().map(t -> summary(t, t.getParentTaskId() == null ? null : codes.get(t.getParentTaskId()))).toList();
     }
 
     @Transactional(readOnly = true)
-    public TaskSummary get(String taskId) {
-        TaskDef t = tasks.get(taskId);
-        return summary(t, publications.findById(taskId).orElse(null));
+    public TaskSummary get(String code) {
+        return summary(catalog.require(code));
     }
 
     @Transactional
-    public TaskSummary changeStatus(String taskId, TaskPublication.Status status, Long adminId) {
-        TaskDef t = tasks.get(taskId); // 없는 과제면 404
-        TaskPublication p = publications.findById(taskId).orElseGet(() -> new TaskPublication(taskId));
-        p.change(status, adminId, clock.instant());
-        return summary(t, publications.save(p));
+    public TaskSummary changeStatus(String code, TaskRecord.Status status) {
+        TaskRecord t = catalog.require(code); // 없는 과제면 404
+        t.changeStatus(status, clock.instant());
+        return summary(t);
     }
 
-    /** 회차에 걸 수 있는지: 모두 OPEN 이어야 한다. 아니면 IllegalArgumentException */
+    /** 회차에 걸 수 있는 과제: 기업 실전(LIVE)용이고 공개(OPEN)여야 한다. 아니면 IllegalArgumentException */
     @Transactional(readOnly = true)
-    public void requireOpen(Collection<String> taskIds) {
-        Map<String, TaskPublication> pubs = byId(taskIds);
-        for (String id : taskIds) {
-            TaskPublication p = pubs.get(id);
-            if (p == null || p.getStatus() != TaskPublication.Status.OPEN) {
-                throw new IllegalArgumentException("공개(OPEN)하지 않은 과제는 회차에 넣을 수 없습니다: " + id);
+    public List<TaskRecord> requireOpenLive(List<String> codes) {
+        List<TaskRecord> rows = catalog.requireAll(codes); // 없는 과제면 404
+        for (TaskRecord t : rows) {
+            if (t.getUsage() != TaskRecord.Usage.LIVE) {
+                throw new IllegalArgumentException("기업 실전용(LIVE) 과제만 회차에 넣을 수 있습니다: " + t.getCode());
+            }
+            if (t.getStatus() != TaskRecord.Status.OPEN) {
+                throw new IllegalArgumentException("공개(OPEN)하지 않은 과제는 회차에 넣을 수 없습니다: " + t.getCode());
             }
         }
+        return rows;
     }
 
-    private Map<String, TaskPublication> byId(Collection<String> ids) {
-        return publications.findByTaskIdIn(ids).stream()
-                .collect(Collectors.toMap(TaskPublication::getTaskId, Function.identity()));
+    private TaskSummary summary(TaskRecord t) {
+        String parent = t.getParentTaskId() == null ? null : catalog.require(t.getParentTaskId()).getCode();
+        return summary(t, parent);
     }
 
-    private static TaskSummary summary(TaskDef t, TaskPublication p) {
-        if (p == null) return new TaskSummary(t.id(), t.type(), t.title(), t.minutes(), TaskPublication.Status.HIDDEN, null, null, null);
-        return new TaskSummary(t.id(), t.type(), t.title(), t.minutes(), p.getStatus(), p.getPublishedAt(), p.getUpdatedAt(),
-                p.getUpdatedBy());
+    private static TaskSummary summary(TaskRecord t, String parentCode) {
+        return new TaskSummary(t.getCode(), t.getTrack().toLowerCase(), t.getTitle(), t.getTimeLimitMin(), t.getUsage(), parentCode,
+                t.getStatus(), t.getPublishedAt(), t.getUpdatedAt());
     }
 }

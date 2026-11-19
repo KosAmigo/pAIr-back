@@ -27,13 +27,17 @@ public class AutoSubmitService {
     private final ExamSessionRepository sessions;
     private final ExamParticipantRepository participants;
     private final AttemptSubmitter attempts;
+    private final com.pair.attempt.AttemptRegistry registry;
+    private final ParticipantProgress progress;
     private final Clock clock;
 
     public AutoSubmitService(ExamSessionRepository sessions, ExamParticipantRepository participants,
-            AttemptSubmitter attempts, Clock clock) {
+            AttemptSubmitter attempts, com.pair.attempt.AttemptRegistry registry, ParticipantProgress progress, Clock clock) {
         this.sessions = sessions;
         this.participants = participants;
         this.attempts = attempts;
+        this.registry = registry;
+        this.progress = progress;
         this.clock = clock;
     }
 
@@ -52,10 +56,11 @@ public class AutoSubmitService {
         // 응시자가 같은 순간 직접 제출하는 것과 겹치지 않도록 잠근다
         List<ExamParticipant> ps = participants.lockBySessionId(sessionId);
         int submitted = 0;
+        var states = progress.of(ps);
         for (ExamParticipant p : ps) {
-            if (p.getStartedAt() == null || p.getSubmittedAt() != null) continue;
-            attempts.submitAll(p.getAttempts());
-            p.markSubmitted(now, ExamParticipant.SubmitKind.AUTO);
+            ParticipantProgress.Progress pr = states.get(p.getId());
+            if (!pr.started() || pr.finished()) continue;
+            ExamEntryService.submitAll(attempts, registry, pr, now);
             submitted++;
         }
         s.close(now);

@@ -23,10 +23,9 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
         Long getSessionId();
         long getTotal();
         long getEntered();
-        long getSubmitted();
     }
 
-    @EntityGraph(attributePaths = {"session", "attempts"})
+    @EntityGraph(attributePaths = "session")
     Optional<ExamParticipant> findByInviteTokenHash(String inviteTokenHash);
 
     /** 시작·제출처럼 두 번 눌리면 안 되는 요청용. 같은 대상자의 요청은 줄을 세운다 */
@@ -38,7 +37,7 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
     @Query("select p from ExamParticipant p where p.session.id = :sessionId order by p.id")
     List<ExamParticipant> lockBySessionId(@Param("sessionId") Long sessionId);
 
-    @EntityGraph(attributePaths = "attempts")
+    @EntityGraph(attributePaths = "session")
     List<ExamParticipant> findBySessionIdOrderByIdAsc(Long sessionId);
 
     @Query("select p.id from ExamParticipant p where p.session.id = :sessionId order by p.id")
@@ -80,8 +79,7 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
     List<String> findExistingEmails(@Param("sessionId") Long sessionId, @Param("emails") Collection<String> emails);
 
     @Query("""
-            select p.session.id as sessionId, count(p) as total,
-                   count(p.enteredAt) as entered, count(p.submittedAt) as submitted
+            select p.session.id as sessionId, count(p) as total, count(p.enteredAt) as entered
             from ExamParticipant p where p.session.id in :sessionIds group by p.session.id
             """)
     List<SessionCounts> countBySessionIds(@Param("sessionIds") Collection<Long> sessionIds);
