@@ -3,7 +3,7 @@
 source "$(dirname "$0")/common.sh"
 build_image
 OUT=$(mktemp -d)
-TASK="$ROOT/backend/src/main/resources/tasks/order-deadlock/files"
+TASK="$ROOT/src/main/resources/tasks/order-deadlock/files"
 A=pair-poc-a; B=pair-poc-b; stop_box $A; stop_box $B
 
 save()     { local t=$(ms); docker exec $1 tar -C /workspace -cf - . > "$OUT/$2.tar"; echo "[저장 $2] $(( $(ms) - t ))ms, $(( $(wc -c < "$OUT/$2.tar") / 1024 ))KB"; }
@@ -17,7 +17,7 @@ save $A cp1; manifest $A > "$OUT/cp1.sum"
 echo "[CP1 테스트] $(tests $A)"
 
 # 응시자가 이어서 작업: 정답 코드로 고치고, 새 파일 추가, 기존 파일 삭제
-docker exec -i $A sh -c 'cat > src/shop/OrderService.java' < "$ROOT/backend/src/test/resources/solutions/order-deadlock/OrderService.java"
+docker exec -i $A sh -c 'cat > src/shop/OrderService.java' < "$ROOT/src/test/resources/solutions/order-deadlock/OrderService.java"
 docker exec $A sh -c 'echo "class Extra {}" > src/shop/Extra.java; rm NOTES.md'
 save $A cp2; manifest $A > "$OUT/cp2.sum"
 echo "[CP2 테스트] $(tests $A)"
