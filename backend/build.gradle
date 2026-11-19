@@ -8,6 +8,11 @@ group = 'com.pair'
 version = '0.0.1-SNAPSHOT'
 description = 'pAIr pilot backend'
 
+// 하위 프로젝트 이름은 backend 지만, 만들어지는 jar 이름은 예전과 같이 pair-backend 로 둔다
+base {
+    archivesName = 'pair-backend'
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
@@ -65,5 +70,5 @@ tasks.named('test') {
 
 tasks.named('bootRun') {
     // 응시 데이터는 저장소 루트의 pilot-data/ 에 쌓는다 (.gitignore 처리됨)
-    workingDir = rootProject.projectDir.parentFile
+    workingDir = rootProject.projectDir
 }

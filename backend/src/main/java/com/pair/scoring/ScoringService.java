@@ -39,7 +39,7 @@ import jakarta.annotation.PreDestroy;
 import com.fasterxml.jackson.databind.JsonNode;
 
 /**
- * 감점식 채점 (docs/evaluation/채점_기준표.md).
+ * 감점식 채점 (pAIr-docs 평가/채점_기준표.md).
  * 자동 체크는 기록(숨은 테스트, 이벤트)으로, 판정 체크는 채점 모델이 근거와 함께 판정한다.
  * 결과는 report.json 과 콘솔 요약으로 남긴다.
  */
@@ -332,7 +332,7 @@ public class ScoringService {
             items.add(new ItemResult(item.key(), item.name(), item.max(), score, list));
         }
 
-        notes.add("채점 기준: docs/evaluation/채점_기준표.md (감점식, 총점 " + Rubric.total() + "점)");
+        notes.add("채점 기준: pAIr-docs 평가/채점_기준표.md (감점식, 총점 " + Rubric.total() + "점)");
         notes.add("이중 채점: 판정 체크는 두 채점 모델(" + String.join(", ", judges.stream().map(Judge::model).toList())
                 + ")의 감점을 평균함" + (repeat > 1 ? "(모델마다 " + repeat + "번씩 불러 모든 호출을 평균)" : "")
                 + ". 근거(대화 턴, 파일) 없이 걸렸다고 한 판정은 감점하지 않음. 일부만 걸렸다고 하면 '판정 엇갈림'으로 평균만큼 감점(소수점 버림)");
