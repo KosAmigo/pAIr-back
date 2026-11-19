@@ -8,13 +8,12 @@ B=pair-poc-perm; stop_box $B
 TASK="$ROOT/backend/src/main/resources/tasks/order-deadlock/files"
 EDITABLE="src/shop/OrderService.java src/shop/InventoryService.java test/shop/OrderServiceTest.java NOTES.md"
 
-# 준비 단계(서버가 하는 일): 권한 있는 임시 컨테이너로 볼륨에 파일을 넣고 규칙 적용
-docker volume create $B-ws >/dev/null
+# 준비 단계(서버가 하는 일): 상자를 띄운 뒤(tmpfs 볼륨이 살아 있도록) 권한 있는 임시 컨테이너로 파일을 넣고 규칙 적용
+start_box $B
 tar -C "$TASK" -cf - . | docker run --rm -i -v $B-ws:/workspace $IMAGE-setup sh -c "
   tar -C /workspace -xf - --no-same-owner && chown -R 0:0 /workspace &&
   find /workspace -type d -exec chmod 555 {} + && find /workspace -type f -exec chmod 444 {} + &&
   cd /workspace && chmod 666 $EDITABLE"
-start_box $B
 
 check() { # 이름, 기대(허용/차단), 명령
   docker exec $B sh -c "$3" >/dev/null 2>&1 && got=허용 || got=차단
