@@ -1,0 +1,89 @@
+{
+ "attemptId": "att-261111-1842-l5r",
+ "repeat": 2,
+ "claude": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 20,
+    "reason": "첫 질문에 목표와 자료를 함께 제시했고, 이후 질문마다 형식(표, 1줄, 단계별 식)이나 검산 범위를 정했으며 AI 답변을 받은 뒤 바로 검증 질문을 이어 갔습니다."
+   },
+   {
+    "key": "control",
+    "score": 15,
+    "reason": "AI가 낸 베이직 잠식 수치를 T05에서 직접 검산해 2,000명 기준과 62,000명 기준의 차이를 짚었고, 최종 문서의 이탈 수치(약 6,800명)와 잠식액도 CSV와 대조해 맞춰 넣었습니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 10,
+    "reason": "이탈 방지 효과와 잠식 손실을 나눠 요청하고 결과를 확인한 뒤 보정, 검산, 리스크 순서로 진행해 단계가 분명합니다."
+   },
+   {
+    "key": "delegation",
+    "score": 10,
+    "reason": "결론의 근거가 되는 잠식 비교를 응시자가 자료 수치로 직접 계산해 검산했고, 파일에 있는 내용을 다시 묻는 반복 질문도 없습니다."
+   },
+   {
+    "key": "delivery",
+    "score": 27,
+    "reason": "결론(조건부 출시), 자료 수치를 인용한 근거 3개, 기존 이용자 잠식 다루기, 리스크와 대응이 모두 있으며 설문 의향을 50~60%로 보정하고 출처 파일명도 밝혔습니다."
+   },
+   {
+    "key": "potential",
+    "score": 15,
+    "reason": "후속 답변에서 결정적 근거와 수치 검산 과정을 구체적으로 설명했고, 채택하지 않은 AI 계산을 이유와 함께 밝혔으며, 문서에 설문 의향의 한계와 콘텐츠 부족 이탈의 미해결 문제를 명시했습니다."
+   }
+  ]
+ },
+ "openai": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 20,
+    "reason": "목표와 판단 자료를 제시하고 계산 및 검산을 단계적으로 요청했습니다. 질문 4개 중 출력 형식이나 범위를 정하지 않은 질문은 0개입니다."
+   },
+   {
+    "key": "control",
+    "score": 15,
+    "reason": "AI의 잠식 계산을 실제 베이직 가입자 수와 대조해 바로잡았습니다. 최종 수치는 제공 자료와 대체로 일치합니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 10,
+    "reason": "계산, 전환율 보정, 핵심 수치 검산, 리스크 정리를 나누어 진행했습니다."
+   },
+   {
+    "key": "delegation",
+    "score": 10,
+    "reason": "자료 수치를 직접 제시하고 AI 계산의 기준 인원을 검토해 결론의 근거를 마련했습니다."
+   },
+   {
+    "key": "delivery",
+    "score": 27,
+    "reason": "필수 항목 미충족은 없습니다. 조건부 결론과 수치 근거, 잠식 및 대응을 제시하고 설문 의향도 보정했습니다."
+   },
+   {
+    "key": "potential",
+    "score": 11,
+    "reason": "결론의 근거와 한계를 설명했습니다. 다만 AI가 처음 계산에서 전환율 보정을 빠뜨렸다는 후속 답변은 실제 대화 기록과 다릅니다."
+   }
+  ]
+ },
+ "claudeUsd": 0.00257775,
+ "openaiUsage": {
+  "prompt_tokens": 8310,
+  "completion_tokens": 909,
+  "total_tokens": 9219,
+  "prompt_tokens_details": {
+   "cached_tokens": 8307,
+   "cache_write_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 614,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ }
+}

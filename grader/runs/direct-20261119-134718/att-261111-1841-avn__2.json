@@ -1,0 +1,89 @@
+{
+ "attemptId": "att-261111-1841-avn",
+ "repeat": 2,
+ "claude": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 17,
+    "reason": "첫 질문에 장애 목표와 로그를 붙여 원인 후보를 3줄로 요청했고, 코드도 이후 턴에 붙여 확인했습니다. 다만 T05 이후 질문 턴 중 출력 형식을 정하지 않은 질문이 있고, 답변 확인 질문은 충분해 대부분 양호합니다. 5개 중 일부 형식 미지정(T05 외 T09 등)으로 소폭 감점했습니다."
+   },
+   {
+    "key": "control",
+    "score": 11,
+    "reason": "AI 코드에 대해 T03에서 근거를 묻고, T05에서 타임아웃 증액의 위험을 되물어 확인했습니다. 최종 수정 코드는 테스트 실행(passed=3)으로 검증했으나, 테스트 메서드 원본 AI 코드의 직접 대조 흔적은 제한적이라 일부 감점했습니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 8,
+    "reason": "원인 후보 확인, 코드 검토, 타임아웃 근거, 수정, 테스트 순으로 단계를 나눠 진행했습니다. 로그와 코드를 먼저 붙인 뒤 해결을 요청해 순서도 맞습니다."
+   },
+   {
+    "key": "delegation",
+    "score": 8,
+    "reason": "원인 판단은 AI 후보를 바탕으로 로그 줄(21:02:09 역순 주문, 21:05 재고 차이)을 근거로 직접 확인했습니다. 다만 반복 작업을 AI에게 맡긴 흔적은 없어 판단 위임 면에서는 양호하나 가점 요소는 제한적입니다."
+   },
+   {
+    "key": "delivery",
+    "score": 3,
+    "reason": "NOTES.md에 잠금 순서 불일치로 인한 교착을 원인으로 명확히 설명했고, 재고 미복구도 함께 기술했습니다."
+   },
+   {
+    "key": "potential",
+    "score": 12,
+    "reason": "Q1에서 로그 근거와 교착 설명을 구체적으로 답했고, Q2에서 타임아웃 증액과 synchronized를 채택하지 않은 이유를 설명했습니다. Q3는 절차를 제시했고 한계(실제 DB 행 잠금)도 언급했으나, 테스트 실패 반복 흔적은 없어 감점은 최소입니다."
+   }
+  ]
+ },
+ "openai": {
+  "items": [
+   {
+    "key": "usage",
+    "score": 20,
+    "reason": "목표와 로그·코드를 제공하고 원인과 대안을 이어서 확인했습니다. 질문 5개 중 출력 형식이나 범위를 정하지 않은 질문은 0개입니다."
+   },
+   {
+    "key": "control",
+    "score": 15,
+    "reason": "타임아웃 연장의 효과를 따져 보고, 수정 후 테스트를 실행해 모두 통과한 것을 확인했습니다."
+   },
+   {
+    "key": "decomposition",
+    "score": 10,
+    "reason": "로그를 통한 원인 후보 파악, 코드 확인, 수정, 테스트를 순서대로 나누어 진행했습니다."
+   },
+   {
+    "key": "delegation",
+    "score": 10,
+    "reason": "AI의 원인 분석을 활용하되 로그의 역순 주문과 타임아웃을 자신의 판단 근거로 제시했습니다."
+   },
+   {
+    "key": "delivery",
+    "score": 3,
+    "reason": "NOTES.md와 후속 답변에 잠금 순서 불일치로 인한 교착과 로그 근거를 설명했습니다."
+   },
+   {
+    "key": "potential",
+    "score": 15,
+    "reason": "원인과 지시 순서를 근거와 함께 설명하고, 채택하지 않은 대안 및 실제 DB에서 추가 확인할 위험을 언급했습니다."
+   }
+  ]
+ },
+ "claudeUsd": 0.0011765500000000002,
+ "openaiUsage": {
+  "prompt_tokens": 7795,
+  "completion_tokens": 404,
+  "total_tokens": 8199,
+  "prompt_tokens_details": {
+   "cached_tokens": 7792,
+   "cache_write_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 137,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ }
+}
