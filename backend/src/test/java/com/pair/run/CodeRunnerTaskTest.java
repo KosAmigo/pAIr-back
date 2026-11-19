@@ -21,7 +21,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 class CodeRunnerTaskTest {
 
     private final TaskRepository tasks = new TaskRepository(JsonMapper.builder().findAndAddModules().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build());
-    private final CodeRunner runner = new CodeRunner(new PairProperties(null, null, null, null,
+    private final CodeRunner runner = new LocalJvmRunner(new PairProperties(null, null, null, null,
             new PairProperties.Run(60), null, null));
 
     private Map<String, String> srcPlusHidden(Map<String, String> src) {
