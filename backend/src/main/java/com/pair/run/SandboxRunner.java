@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,11 +43,23 @@ public class SandboxRunner implements CodeRunner {
     private final int timeoutSeconds;
     private final String dockerBin;
     private final String image;
+    /** 동시 실행 상한. 공정(fair)이라 먼저 온 순서대로 자리가 난다. */
+    private final Semaphore slots;
+    private final int queueWaitSeconds;
 
     public SandboxRunner(PairProperties props) {
         this.timeoutSeconds = props.run().timeoutSeconds();
         this.dockerBin = props.run().dockerBin();
         this.image = props.run().dockerImage();
+        this.slots = new Semaphore(props.run().maxConcurrent(), true);
+        this.queueWaitSeconds = props.run().queueWaitSeconds();
+    }
+
+    /** 실행 대기열이 너무 길어 자리를 못 얻었다. 잠시 뒤 다시 시도하면 된다. */
+    public static class BusyException extends RuntimeException {
+        BusyException(String message) {
+            super(message);
+        }
     }
 
     @Override
@@ -88,7 +101,27 @@ public class SandboxRunner implements CodeRunner {
                         List<String> runLines, List<String> reports, long millis) {}
 
     private Exec exec(String mode, Map<String, String> sources) {
-        long started = System.nanoTime();
+        acquireSlot();
+        try {
+            return execInContainer(mode, sources);
+        } finally {
+            slots.release();
+        }
+    }
+
+    private void acquireSlot() {
+        try {
+            if (!slots.tryAcquire(queueWaitSeconds, TimeUnit.SECONDS)) {
+                throw new BusyException("실행 요청이 많아 " + queueWaitSeconds + "초 안에 자리를 얻지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private Exec execInContainer(String mode, Map<String, String> sources) {
+        long started = System.nanoTime(); // 대기 시간은 제외하고 실제 실행 시간만 잰다
         Path work = null;
         String name = "pair-run-" + UUID.randomUUID();
         try {
