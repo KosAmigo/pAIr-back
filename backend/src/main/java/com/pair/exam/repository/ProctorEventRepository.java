@@ -31,11 +31,15 @@ public interface ProctorEventRepository extends JpaRepository<ProctorEvent, Long
     @Query("select coalesce(sum(e.snapshotBytes), 0) from ProctorEvent e where e.participantId in :participantIds")
     long sumSnapshotBytes(@Param("participantIds") Collection<Long> participantIds);
 
-    /** 보관 기간이 지난 사진 (한 번에 너무 많이 잡지 않게 Pageable 로 끊는다) */
+    /**
+     * 보관 기간이 지난 사진: 회차 종료 시각이 endedBefore 보다 앞선 회차의 사진.
+     * 한 번에 너무 많이 잡지 않게 Pageable 로 끊는다.
+     */
     @Query("""
-            select e from ProctorEvent e
-            where e.snapshotKey is not null and e.snapshotDeletedAt is null and e.receivedAt < :before
-            order by e.receivedAt
+            select e from ProctorEvent e, ExamParticipant p
+            where p.id = e.participantId and p.session.endsAt < :endedBefore
+              and e.snapshotKey is not null and e.snapshotDeletedAt is null
+            order by e.id
             """)
-    List<ProctorEvent> findExpiredSnapshots(@Param("before") Instant before, Pageable page);
+    List<ProctorEvent> findExpiredSnapshots(@Param("endedBefore") Instant endedBefore, Pageable page);
 }

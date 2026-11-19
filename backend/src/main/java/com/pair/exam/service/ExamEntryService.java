@@ -2,6 +2,8 @@ package com.pair.exam.service;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Service;
@@ -16,9 +18,11 @@ import com.pair.exam.repository.ExamParticipantRepository;
 import com.pair.exam.repository.ProctorConsentRepository;
 import com.pair.exam.web.ExamDtos.ConsentRequest;
 import com.pair.exam.web.ExamDtos.EntryInfo;
+import com.pair.exam.web.ExamDtos.TaskStatus;
 
 /**
- * 응시자 입장 흐름: 링크(초대 토큰) → 시험 정보 → 동의·환경 점검 → 대기실 → 시작 → 제출.
+ * 응시자 입장 흐름: 링크(초대 토큰) → 시험 정보 → 동의·환경 점검 → 대기실 → 시작 → 과제별 제출.
+ * 토큰은 해시로 바꿔 찾는다 (DB 에는 해시만 있다).
  * 시작 가능 여부는 서버 시각으로만 판단한다. 응시자 PC 시계가 틀려도 모두 같은 순간에 시작한다.
  */
 @Service
@@ -82,6 +86,7 @@ public class ExamEntryService {
         switch (s.phase(now)) {
             case UPCOMING -> throw new IllegalStateException("아직 시작 시각이 아닙니다.");
             case ENDED -> throw new IllegalStateException("이미 끝난 시험입니다.");
+            case CANCELED -> throw new IllegalStateException("취소된 시험입니다.");
             case LIVE -> { }
         }
         if (p.getSubmittedAt() != null) throw new IllegalStateException("이미 제출했습니다.");
@@ -96,38 +101,78 @@ public class ExamEntryService {
         return view(p, now);
     }
 
-    /** 응시자가 직접 제출. 종료 시각이 지나면 스케줄러가 대신 제출하므로 여기서는 막는다 */
+    /**
+     * 과제 하나 직접 제출. 제출한 과제부터 채점을 시작한다(팀원 1 채점 큐).
+     * 모든 과제를 제출하면 대상자도 제출 완료로 본다. 종료 시각이 지나면 스케줄러가 남은 과제를 대신 제출하므로 막는다.
+     */
+    @Transactional
+    public EntryInfo submitTask(String token, String taskId) {
+        Instant now = clock.instant();
+        ExamParticipant p = lock(token);
+        requireSubmittable(p, now);
+        String attemptId = p.getAttempts().get(taskId);
+        if (attemptId == null) throw new NoSuchElementException("이 시험의 과제가 아닙니다.");
+        if (p.getSubmittedAt() == null) {
+            attempts.submitOne(attemptId);
+            if (p.getAttempts().values().stream().allMatch(attempts::isSubmitted)) {
+                p.markSubmitted(now, ExamParticipant.SubmitKind.MANUAL);
+            }
+        }
+        return view(p, now);
+    }
+
+    /** 남은 과제를 모두 직접 제출 (시험 끝내기) */
     @Transactional
     public EntryInfo submit(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
-        if (p.getStartedAt() == null) throw new IllegalStateException("시작하지 않은 시험입니다.");
+        requireSubmittable(p, now);
         if (p.getSubmittedAt() != null) return view(p, now);
-        if (p.getSession().phase(now) == ExamSession.Phase.ENDED) {
-            throw new IllegalStateException("종료 시각이 지나 자동 제출을 기다리는 중입니다.");
-        }
         attempts.submitAll(p.getAttempts());
         p.markSubmitted(now, ExamParticipant.SubmitKind.MANUAL);
         return view(p, now);
     }
 
+    private static void requireSubmittable(ExamParticipant p, Instant now) {
+        if (p.getStartedAt() == null) throw new IllegalStateException("시작하지 않은 시험입니다.");
+        if (p.getSubmittedAt() == null && p.getSession().phase(now) == ExamSession.Phase.ENDED) {
+            throw new IllegalStateException("종료 시각이 지나 자동 제출을 기다리는 중입니다.");
+        }
+    }
+
     ExamParticipant find(String token) {
         if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.findByInviteToken(token).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
+        return participants.findByInviteTokenHash(InviteTokens.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 
     private ExamParticipant lock(String token) {
         if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.lockByInviteToken(token).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
+        return participants.lockByInviteTokenHash(InviteTokens.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 
     private static void requireNotEnded(ExamSession s, Instant now) {
+        if (s.phase(now) == ExamSession.Phase.CANCELED) throw new IllegalStateException("취소된 시험입니다.");
         if (s.phase(now) == ExamSession.Phase.ENDED) throw new IllegalStateException("이미 끝난 시험입니다.");
     }
 
     private EntryInfo view(ExamParticipant p, Instant now) {
         ExamSession s = p.getSession();
+        Map<String, String> as = p.getAttempts();
+        List<TaskStatus> tasks = s.getTaskIds().stream().map(taskId -> {
+            String attemptId = as.get(taskId);
+            boolean submitted = attemptId != null && (p.getSubmittedAt() != null || submittedSafely(attemptId));
+            return new TaskStatus(taskId, attemptId, submitted);
+        }).toList();
         return new EntryInfo(s.getTitle(), null, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
-                consents.existsById(p.getId()), p.getStartedAt(), p.getSubmittedAt(), s.getTaskIds(), p.getAttempts());
+                consents.existsById(p.getId()), p.getStartedAt(), p.getSubmittedAt(), s.getTaskIds(), as, tasks);
+    }
+
+    /** 응시 파일을 못 읽어도 입장 화면은 보여 준다 (제출 안 한 것으로 표시) */
+    private boolean submittedSafely(String attemptId) {
+        try {
+            return attempts.isSubmitted(attemptId);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 }

@@ -26,6 +26,9 @@ public class ProctorEvent {
 
     public enum Source { BROWSER, PC_CAM, PHONE_CAM }
 
+    /** 담당자 판정. 감독 이벤트는 자동 탈락이 아니라 사람이 확인하는 기록이다 */
+    public enum Review { OK, SUSPECT }
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "proctor_event_id")
@@ -66,6 +69,20 @@ public class ProctorEvent {
     @Column(name = "received_at", nullable = false)
     private Instant receivedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private Review review;
+
+    @Column(name = "review_note", columnDefinition = "text")
+    private String reviewNote;
+
+    /** 판정한 회원 ID. users 가 DB 로 옮겨지면 외래 키를 건다 */
+    @Column(name = "reviewed_by")
+    private Long reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private Instant reviewedAt;
+
     protected ProctorEvent() {}
 
     public ProctorEvent(Long participantId, Type type, Source source, Instant startedAt, int durationMs,
@@ -89,6 +106,15 @@ public class ProctorEvent {
         this.snapshotDeletedAt = at;
     }
 
+    /** 판정을 남기거나 바꾼다. review 가 null 이면 판정을 지워 미확인으로 되돌린다 */
+    public void review(Review review, String note, Long reviewerId, Instant at) {
+        if (review != null && reviewerId == null) throw new IllegalArgumentException("판정한 사람을 알 수 없습니다.");
+        this.review = review;
+        this.reviewNote = review == null ? null : note;
+        this.reviewedBy = review == null ? null : reviewerId;
+        this.reviewedAt = review == null ? null : at;
+    }
+
     public Long getId() { return id; }
     public Long getParticipantId() { return participantId; }
     public Type getType() { return type; }
@@ -101,4 +127,8 @@ public class ProctorEvent {
     public int getSnapshotBytes() { return snapshotBytes; }
     public Instant getSnapshotDeletedAt() { return snapshotDeletedAt; }
     public Instant getReceivedAt() { return receivedAt; }
+    public Review getReview() { return review; }
+    public String getReviewNote() { return reviewNote; }
+    public Long getReviewedBy() { return reviewedBy; }
+    public Instant getReviewedAt() { return reviewedAt; }
 }

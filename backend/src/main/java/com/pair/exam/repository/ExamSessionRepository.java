@@ -13,6 +13,6 @@ public interface ExamSessionRepository extends JpaRepository<ExamSession, Long> 
     @EntityGraph(attributePaths = "taskIds")
     List<ExamSession> findByCompanyIdOrderByStartsAtDesc(Long companyId);
 
-    /** 종료 시각이 지났는데 아직 자동 제출 처리가 안 된 회차 */
-    List<ExamSession> findByEndsAtLessThanEqualAndClosedAtIsNull(Instant now);
+    /** 종료 시각이 지났는데 아직 자동 제출 처리가 안 된 회차 (취소한 회차는 닫을 것이 없다) */
+    List<ExamSession> findByEndsAtLessThanEqualAndClosedAtIsNullAndCanceledAtIsNull(Instant now);
 }

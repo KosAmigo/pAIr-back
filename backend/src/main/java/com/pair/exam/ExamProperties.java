@@ -8,7 +8,7 @@ public record ExamProperties(
         String entryBaseUrl,
         String mailFrom,
         long autoSubmitIntervalMs,
-        long snapshotRetentionHours,
+        long snapshotRetentionDays,
         int snapshotMaxBytes,
         int maxParticipantsPerUpload) {
 
@@ -16,7 +16,7 @@ public record ExamProperties(
         if (entryBaseUrl == null || entryBaseUrl.isBlank()) entryBaseUrl = "http://localhost:5173";
         if (mailFrom == null || mailFrom.isBlank()) mailFrom = "no-reply@pair.test";
         if (autoSubmitIntervalMs <= 0) autoSubmitIntervalMs = 2000;
-        if (snapshotRetentionHours <= 0) snapshotRetentionHours = 168;
+        if (snapshotRetentionDays <= 0) snapshotRetentionDays = 30;
         if (snapshotMaxBytes <= 0) snapshotMaxBytes = 200_000;
         if (maxParticipantsPerUpload <= 0) maxParticipantsPerUpload = 1000;
     }

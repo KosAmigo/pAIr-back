@@ -5,7 +5,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
-import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -14,19 +13,18 @@ import org.springframework.stereotype.Component;
 import com.pair.config.PairProperties;
 
 /**
- * 개발용 사진 저장소: pilot-data/exam-snapshots/{회차}/{이벤트}.jpg
+ * 개발용 파일 저장소: pilot-data/{key} (예: pilot-data/exam-snapshots/{회차}/{이벤트}.jpg)
  * pair.exam.snapshot-storage=local (기본값). 파일 서버 구현은 다른 값(예: s3)으로 켠다.
  */
 @Component
 @ConditionalOnProperty(name = "pair.exam.snapshot-storage", havingValue = "local", matchIfMissing = true)
 public class LocalSnapshotStorage implements SnapshotStorage {
-    private static final Pattern KEY = Pattern.compile("\\d{1,19}/\\d{1,19}\\.jpg");
 
     private final Path root;
 
     @Autowired
     public LocalSnapshotStorage(PairProperties pair) {
-        this(Path.of(pair.dataDir(), "exam-snapshots"));
+        this(Path.of(pair.dataDir()));
     }
 
     LocalSnapshotStorage(Path root) {
@@ -34,13 +32,13 @@ public class LocalSnapshotStorage implements SnapshotStorage {
     }
 
     @Override
-    public void put(String key, byte[] jpeg) {
+    public void put(String key, byte[] bytes) {
         Path p = resolve(key);
         try {
             Files.createDirectories(p.getParent());
-            Files.write(p, jpeg);
+            Files.write(p, bytes);
         } catch (IOException e) {
-            throw new UncheckedIOException("사진 저장 실패", e);
+            throw new UncheckedIOException("파일 저장 실패", e);
         }
     }
 
@@ -51,7 +49,7 @@ public class LocalSnapshotStorage implements SnapshotStorage {
         try {
             return Optional.of(Files.readAllBytes(p));
         } catch (IOException e) {
-            throw new UncheckedIOException("사진 읽기 실패", e);
+            throw new UncheckedIOException("파일 읽기 실패", e);
         }
     }
 
@@ -60,15 +58,15 @@ public class LocalSnapshotStorage implements SnapshotStorage {
         try {
             Files.deleteIfExists(resolve(key));
         } catch (IOException e) {
-            throw new UncheckedIOException("사진 삭제 실패", e);
+            throw new UncheckedIOException("파일 삭제 실패", e);
         }
     }
 
     /** 키는 서버가 만든 숫자뿐이지만, 경로 조작을 한 번 더 막는다 */
     private Path resolve(String key) {
-        if (key == null || !KEY.matcher(key).matches()) throw new IllegalArgumentException("잘못된 사진 키");
+        SnapshotStorage.requireValid(key);
         Path p = root.resolve(key).normalize();
-        if (!p.startsWith(root)) throw new IllegalArgumentException("잘못된 사진 키");
+        if (!p.startsWith(root)) throw new IllegalArgumentException("잘못된 파일 키");
         return p;
     }
 }
