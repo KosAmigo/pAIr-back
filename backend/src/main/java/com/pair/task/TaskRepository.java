@@ -35,6 +35,11 @@ public class TaskRepository {
         }
     }
 
+    /** 모든 과제 (읽은 순서). 관리자 과제 콘솔 목록용 */
+    public java.util.List<TaskDef> all() {
+        return java.util.List.copyOf(tasks.values());
+    }
+
     public TaskDef get(String id) {
         TaskDef t = tasks.get(id);
         if (t == null) throw new NoSuchElementException("없는 과제입니다: " + id);

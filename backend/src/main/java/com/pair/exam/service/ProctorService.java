@@ -89,6 +89,11 @@ public class ProctorService {
         return events.findByParticipantIdOrderByStartedAtAsc(p.getId()).stream().map(ProctorEventView::from).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<ProctorEventView> eventsOfSession(Long sessionId) {
+        return events.findBySessionId(sessionId).stream().map(ProctorEventView::from).toList();
+    }
+
     /** 담당자 판정 (OK/SUSPECT). review 가 null 이면 판정을 지운다 */
     @Transactional
     public ProctorEventView review(Long sessionId, Long eventId, ProctorEvent.Review review, String note, Long reviewerId) {
