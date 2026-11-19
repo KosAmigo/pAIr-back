@@ -33,6 +33,12 @@ public class ApiExceptionHandler {
         return body(HttpStatus.FORBIDDEN, e.getMessage());
     }
 
+    /** 이미 등록된 이메일로 가입을 요청한 경우 409를 반환한다. */
+    @ExceptionHandler(com.pair.web.auth.ConflictException.class)
+    ResponseEntity<Map<String, String>> conflict(RuntimeException e) {
+        return body(HttpStatus.CONFLICT, e.getMessage());
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<Map<String, String>> notFound(NoSuchElementException e) {
         return body(HttpStatus.NOT_FOUND, e.getMessage());
