@@ -42,6 +42,11 @@ public class OpenAiJudge implements Judge {
         return cfg.model();
     }
 
+    @Override
+    public int calls() {
+        return cfg.callsOrOne();
+    }
+
     private OpenAiChatModel chatModel() {
         if (chatModel == null) {
             synchronized (this) {

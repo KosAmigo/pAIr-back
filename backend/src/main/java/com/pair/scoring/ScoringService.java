@@ -92,7 +92,7 @@ public class ScoringService {
     /**
      * 채점 설정.
      * @param version 프롬프트 버전 (판정 기준, 공통 규칙)
-     * @param judgeRepeat 채점 모델마다 부를 횟수 (2 이상이면 모든 호출의 감점을 평균)
+     * @param judgeRepeat 채점 툴 실험용 배수. 모델마다 calls × judgeRepeat 번 부른다
      */
     public record Options(PromptVersion version, int judgeRepeat) {}
 
@@ -128,7 +128,7 @@ public class ScoringService {
 
     /**
      * @param status DEDUCTED(감점), PASSED(통과), SKIPPED(적용 안 함), NO_EVIDENCE(걸렸다고 했지만 근거가 없어 감점 안 함),
-     *               SPLIT(판정 엇갈림: 두 채점 모델 중 한쪽만 걸렸다고 봄, 두 모델 감점의 평균만큼 감점)
+     *               SPLIT(판정 엇갈림: 일부 호출만 걸렸다고 봄. 호출이 홀수면 다수결, 짝수면 평균만큼 감점)
      * @param judges 판정 체크에서 채점 모델별 판정 (자동 체크는 빈 목록)
      */
     public record CheckResult(String code, String label, String method, int points, int deducted,
@@ -284,13 +284,16 @@ public class ScoringService {
                 a.followUpQuestions() != null && !a.followUpQuestions().isEmpty() ? a.followUpQuestions() : task.followUps(),
                 a.followUpAnswers(), eventSummary(events, a.startedAt()));
         // 두 채점 모델을 동시에 부른다. 한쪽이 실패하면 남은 한쪽으로만 판정한다.
-        // 채점 모델마다 judgeRepeat 번 부른다. 모든 호출의 감점을 평균한다(combine).
+        // 채점 모델마다 calls(설정) × judgeRepeat(채점 툴 실험) 번 부른다. 모든 호출의 판정을 합친다(combine: 홀수면 다수결).
         Map<Judge, CompletableFuture<Judge.Result<JudgeResult>>> judgeCalls = new LinkedHashMap<>();
         String judgeSystem = opt.version().judgeSystem();
         int repeat = Math.max(1, opt.judgeRepeat());
+        Map<String, Integer> callCounts = new LinkedHashMap<>();
         for (Judge base : judges) {
-            for (int r = 1; r <= repeat; r++) {
-                Judge j = repeat == 1 ? base : new Repeated(base, r);
+            int n = base.calls() * repeat;
+            callCounts.put(base.model(), n);
+            for (int r = 1; r <= n; r++) {
+                Judge j = n == 1 ? base : new Repeated(base, r);
                 int rr = r;
                 judgeCalls.put(j, CompletableFuture.supplyAsync(() -> calls.judge(base, rr, judgeSystem, prefix, body), judgePool));
             }
@@ -347,7 +350,7 @@ public class ScoringService {
         report.put("assistant", a.provider() + " / " + a.model());
         report.put("judgeModel", String.join(" + ", judges.stream().map(Judge::model).toList()));
         report.put("promptVersion", opt.version().id());
-        report.put("settings", Map.of("judgeRepeat", repeat));
+        report.put("settings", Map.of("judgeRepeat", repeat, "judgeCalls", callCounts));
         report.put("startedAt", a.startedAt());
         report.put("submittedAt", a.submittedAt());
         report.put("durationSec", a.submittedAt() == null ? null : Duration.between(a.startedAt(), a.submittedAt()).toSeconds());
@@ -373,7 +376,7 @@ public class ScoringService {
     }
 
     /** 같은 채점 모델을 여러 번 부를 때 호출마다 다른 이름(claude#2)을 붙인다. 토큰은 원래 모델 이름으로 모은다. */
-    record Repeated(Judge base, int n) implements Judge {
+    static record Repeated(Judge base, int n) implements Judge {
         public String name() {
             return base.name() + "#" + n;
         }
@@ -485,8 +488,10 @@ public class ScoringService {
     static final Set<String> NEEDS_AI = Set.of("usage", "control", "decomposition", "delegation");
 
     /**
-     * 두 채점 모델의 판정을 합친다. 모델마다 감점을 정하고(근거를 대고 걸렸다고 하면 배점, D1은 개수 × 배점) 평균을 낸다(소수점 버림).
-     * 둘 다 걸렸다고 하면 감점, 한쪽만 그렇다고 하면 판정 엇갈림(절반 감점). 한쪽 모델만 살아 있으면 그 모델 판정만 쓴다.
+     * 채점 호출들의 판정을 합친다. 호출마다 감점을 정하고(근거를 대고 걸렸다고 하면 배점, D1은 개수 × 배점)
+     * 호출 수가 홀수면 가운데 값(다수결), 짝수면 평균(소수점 버림)을 쓴다.
+     * 예: Haiku 1번 + terra 2번이면 셋 중 둘 이상이 걸렸다고 할 때만 감점. 두 번이면 한쪽만 걸렸다고 할 때 절반 감점.
+     * 호출이 실패해 빠지면 남은 호출만으로 같은 규칙을 쓴다.
      * 판정이 빠진 모델은 "안 걸림"(감점 0)으로 본다.
      */
     static CheckResult combine(Check c, Map<? extends Judge, Map<String, CheckVerdict>> byJudge) {
@@ -501,9 +506,15 @@ public class ScoringService {
             return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), 0, "SKIPPED", List.of(), "채점 모델이 판정하지 않음", views);
         }
         List<JudgeView> withEvidence = views.stream().filter(v -> v.violated() && !v.evidence().isEmpty()).toList();
-        int sum = 0;
-        for (JudgeView v : withEvidence) sum += c.code().equals("D1") ? Math.min(4 * c.points(), Math.max(1, v.count()) * c.points()) : c.points();
-        int deducted = sum / byJudge.size();
+        List<Integer> each = new ArrayList<>();
+        for (int i = 0; i < byJudge.size(); i++) each.add(0);
+        for (int i = 0; i < withEvidence.size(); i++) {
+            JudgeView v = withEvidence.get(i);
+            each.set(i, c.code().equals("D1") ? Math.min(4 * c.points(), Math.max(1, v.count()) * c.points()) : c.points());
+        }
+        boolean majority = each.size() % 2 == 1;
+        int deducted = majority ? each.stream().sorted().toList().get(each.size() / 2)
+                : each.stream().mapToInt(Integer::intValue).sum() / each.size();
         List<String> ev = withEvidence.stream().flatMap(v -> v.evidence().stream()).distinct().toList();
         if (withEvidence.size() == byJudge.size()) {
             return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), deducted, "DEDUCTED", ev, withEvidence.get(0).reason(), views);
@@ -511,7 +522,8 @@ public class ScoringService {
         if (!withEvidence.isEmpty()) {
             JudgeView v = withEvidence.get(0);
             return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), deducted, "SPLIT", ev,
-                    "판정 엇갈림: " + withEvidence.size() + "/" + byJudge.size() + " 판정만 걸렸다고 봐서 평균(" + deducted + "점) 감점. " + v.reason(), views);
+                    "판정 엇갈림: " + withEvidence.size() + "/" + byJudge.size() + " 판정만 걸렸다고 봐서 "
+                            + (majority ? "다수결로 " + deducted + "점 감점. " : "평균(" + deducted + "점) 감점. ") + v.reason(), views);
         }
         var noEvidence = views.stream().filter(JudgeView::violated).findFirst();
         if (noEvidence.isPresent()) {

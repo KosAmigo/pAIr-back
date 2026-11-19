@@ -43,6 +43,11 @@ public class ClaudeJudge implements Judge {
         return cfg.model();
     }
 
+    @Override
+    public int calls() {
+        return cfg.callsOrOne();
+    }
+
     private AnthropicChatModel chatModel() {
         if (chatModel == null) {
             synchronized (this) {

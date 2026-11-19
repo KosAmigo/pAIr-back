@@ -85,8 +85,8 @@ pair:
       사용자가 대화에 직접 붙여 넣은 내용만 볼 수 있습니다.
       한국어로 간결하고 정확하게 답하세요.
 
-  # 채점: 서로 다른 회사 모델 두 개로 이중 채점한다.
-  # 판정 체크는 두 모델의 감점을 평균한다(한쪽만 걸림이면 '판정 엇갈림', 절반 감점).
+  # 채점: 서로 다른 회사 모델로 채점한다. calls 는 채점 1건에 그 모델을 부르는 횟수.
+  # Haiku 1번 + terra 2번, 세 판정의 다수결(가운데 값)로 감점한다. 한 번씩만 부르면 엇갈릴 때 절반 감점이 되어 총점이 흔들린다(기술검증 3번).
   judge:
     claude:
       model: claude-haiku-5-5      # 비용 우선. 더 정확하게 보려면 claude-sonnet-5-5
@@ -96,6 +96,7 @@ pair:
       model: gpt-6.1-terra
       effort: medium
       max-tokens: 16000
+      calls: 2
     # 비개발 채점의 제공 자료: full(통째로) 또는 rag(제출물 문장으로 검색한 조각만, CSV 표는 통째로)
     reference-docs: ${PAIR_REFERENCE_DOCS:full}
 

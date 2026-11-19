@@ -227,21 +227,26 @@ public class GraderService {
         double usd;
         if (rep == null) {
             // 기본값: 채점 모델 입력 1.2만, 출력 3천 토큰씩
-            usd = judgeRepeat * (cost(props.judge().claude().model(), 12000, 3000) + cost(props.judge().openai().model(), 12000, 3000));
+            usd = judgeRepeat * (props.judge().claude().callsOrOne() * cost(props.judge().claude().model(), 12000, 3000)
+                    + props.judge().openai().callsOrOne() * cost(props.judge().openai().model(), 12000, 3000));
         } else {
             // 예전 리포트의 다시 실행(R1) 토큰은 빼고 채점 모델 토큰만 본다
-            usd = scaledCost(rep.path("tokens"), judgeRepeat, rep.path("settings").path("judgeRepeat").asInt(1));
+            usd = scaledCost(rep.path("tokens"), judgeRepeat, rep.path("settings"));
         }
         return new AttemptEstimate(ref.source(), ref.id(), round4(usd), basis);
     }
 
     /** 지난 채점의 토큰을 새 설정에 맞게 늘리거나 줄여 비용을 계산한다. */
-    private double scaledCost(JsonNode tokens, int judgeRepeat, int oldRepeat) {
-        double j = (double) judgeRepeat / Math.max(1, oldRepeat);
+    private double scaledCost(JsonNode tokens, int judgeRepeat, JsonNode oldSettings) {
+        int oldRepeat = Math.max(1, oldSettings.path("judgeRepeat").asInt(1));
         double usd = 0;
         for (String k : List.of("judge_claude", "judge_openai")) {
             JsonNode t = tokens.path(k);
-            usd += j * cost(t.path("model").asText(), t.path("input").asLong(), t.path("output").asLong());
+            String model = t.path("model").asText();
+            // 지난 채점의 호출 수(예전 리포트는 모델마다 judgeRepeat 번)와 지금 설정의 호출 수 비율로 늘리거나 줄인다
+            int oldCalls = oldSettings.path("judgeCalls").path(model).asInt(oldRepeat);
+            int nowCalls = judgeRepeat * (k.equals("judge_claude") ? props.judge().claude().callsOrOne() : props.judge().openai().callsOrOne());
+            usd += (double) nowCalls / Math.max(1, oldCalls) * cost(model, t.path("input").asLong(), t.path("output").asLong());
         }
         return usd;
     }

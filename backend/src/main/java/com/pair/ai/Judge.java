@@ -15,5 +15,10 @@ public interface Judge {
 
     String model();
 
+    /** 채점 1건에 이 모델을 부르는 횟수 (pair.judge.*.calls). */
+    default int calls() {
+        return 1;
+    }
+
     <T> Result<T> judge(String system, String cachedPrefix, String user, Class<T> type);
 }
