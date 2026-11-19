@@ -5,7 +5,7 @@
 source "$(dirname "$0")/common.sh"
 build_image
 B=pair-poc-perm; stop_box $B
-TASK="$ROOT/src/main/resources/tasks/order-deadlock/files"
+TASK="$ROOT/backend/src/main/resources/tasks/order-deadlock/files"
 EDITABLE="src/shop/OrderService.java src/shop/InventoryService.java test/shop/OrderServiceTest.java NOTES.md"
 
 # 준비 단계(서버가 하는 일): 권한 있는 임시 컨테이너로 볼륨에 파일을 넣고 규칙 적용
