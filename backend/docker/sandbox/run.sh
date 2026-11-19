@@ -15,6 +15,7 @@ echo '$ junit execute --scan-class-path'
 env -u PAIR_MARK java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 \
   -jar /opt/junit.jar execute --class-path "$OUT" --scan-class-path --disable-banner --disable-ansi-colors \
   --details=tree --details-theme=ascii --reports-dir /tmp/reports 2>&1
+echo "$M JUNIT-EXIT $?"
 for f in /tmp/reports/TEST-*.xml; do
   [ -f "$f" ] || continue
   echo "$M FILE"; cat "$f"; echo; echo "$M END"

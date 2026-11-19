@@ -66,8 +66,9 @@ public class SandboxRunner implements CodeRunner {
         if (e.timedOut) {
             lines.add("[TIMEOUT] " + timeoutSeconds + "초 안에 끝나지 않아 실행을 중단했습니다. 교착 상태일 수 있습니다.");
             failed = Math.max(1, failed);
-        } else if (tests.isEmpty() && e.exitCode != 0) {
-            lines.add("[ERROR] 컨테이너가 비정상 종료했습니다 (exit " + e.exitCode + "). 메모리 초과일 수 있습니다.");
+        } else if (tests.isEmpty() && (e.exitCode != 0 || e.junitExit == null || e.junitExit != 0)) {
+            // 리포트 없이 끝남: 테스트 실행기가 죽었다 (메모리 초과, 디스크 가득 참 등)
+            lines.add("[ERROR] 테스트 실행이 비정상 종료했습니다 (exit " + (e.junitExit != null ? e.junitExit : e.exitCode) + "). 메모리 초과나 저장공간 초과일 수 있습니다.");
             failed = 1;
         }
         return new RunResult(true, lines, passed, failed, tests, diags, e.millis);
@@ -83,7 +84,7 @@ public class SandboxRunner implements CodeRunner {
         return new BuildResult(e.compiled, lines, diags, e.millis);
     }
 
-    private record Exec(boolean compiled, boolean timedOut, int exitCode, List<String> compileLines,
+    private record Exec(boolean compiled, boolean timedOut, int exitCode, Integer junitExit, List<String> compileLines,
                         List<String> runLines, List<String> reports, long millis) {}
 
     private Exec exec(String mode, Map<String, String> sources) {
@@ -126,13 +127,13 @@ public class SandboxRunner implements CodeRunner {
             int exit = done ? proc.exitValue() : -1;
             if (c.compileResult == null && !done) {
                 // 컴파일도 끝내지 못했다
-                return new Exec(false, true, exit, c.compileLines, c.runLines, c.reports, elapsed(started));
+                return new Exec(false, true, exit, c.junitExit, c.compileLines, c.runLines, c.reports, elapsed(started));
             }
             if (c.compileResult == null) {
                 throw new IllegalStateException("샌드박스 컨테이너가 실행되지 않았습니다 (exit " + exit + "): "
                         + String.join(" | ", c.compileLines.stream().limit(5).toList()));
             }
-            return new Exec(c.compileResult, !done, exit, c.compileLines, c.runLines, c.reports, elapsed(started));
+            return new Exec(c.compileResult, !done, exit, c.junitExit, c.compileLines, c.runLines, c.reports, elapsed(started));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         } catch (InterruptedException e) {
@@ -190,11 +191,12 @@ public class SandboxRunner implements CodeRunner {
 
     /** 컨테이너 출력 한 줄씩 받아 컴파일 출력 / 테스트 출력 / 리포트 XML 로 나눈다. */
     private static final class Collected {
-        private final String compiledMark, failedMark, fileMark, endMark;
+        private final String compiledMark, failedMark, fileMark, endMark, exitMark;
         final List<String> compileLines = new ArrayList<>();
         final List<String> runLines = new ArrayList<>();
         final List<String> reports = new ArrayList<>();
         volatile Boolean compileResult;
+        volatile Integer junitExit;
         private StringBuilder current;
         private int reportChars;
 
@@ -203,6 +205,7 @@ public class SandboxRunner implements CodeRunner {
             failedMark = mark + " COMPILE-FAILED";
             fileMark = mark + " FILE";
             endMark = mark + " END";
+            exitMark = mark + " JUNIT-EXIT ";
         }
 
         synchronized void accept(String line) {
@@ -220,6 +223,8 @@ public class SandboxRunner implements CodeRunner {
                 }
             } else if (line.equals(fileMark)) {
                 current = new StringBuilder();
+            } else if (line.startsWith(exitMark)) {
+                try { junitExit = Integer.parseInt(line.substring(exitMark.length()).trim()); } catch (NumberFormatException ignored) { }
             } else if (runLines.size() < MAX_LINES) {
                 runLines.add(line);
             }
