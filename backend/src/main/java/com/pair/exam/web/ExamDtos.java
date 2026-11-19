@@ -25,17 +25,23 @@ public final class ExamDtos {
 
     // ── 콘솔: 회차 ──
 
+    /** companyId: 관리자만 넣는다. 기업 회원은 비워도 되고, 넣어도 로그인한 회사로 바뀐다 */
     public record SessionRequest(
-            @NotNull Long companyId,
+            Long companyId,
             @NotBlank @Size(max = 100) String title,
             @NotNull Instant startsAt,
             @NotNull Instant endsAt,
             boolean proctoring,
-            @NotEmpty @Size(max = 10) List<@NotBlank @Size(max = 64) String> taskIds) {}
+            @NotEmpty @Size(max = 10) List<@NotBlank @Size(max = 64) String> taskIds) {
 
-    public record SessionSummary(Long id, String title, Instant startsAt, Instant endsAt, boolean proctoring,
+        public SessionRequest withCompany(Long company) {
+            return new SessionRequest(company, title, startsAt, endsAt, proctoring, taskIds);
+        }
+    }
+
+    public record SessionSummary(Long id, Long companyId, String title, Instant startsAt, Instant endsAt, boolean proctoring,
             ExamSession.Phase phase, List<String> taskIds, long participants, long entered, long submitted,
-            Instant canceledAt) {}
+            Instant canceledAt, long unreviewedEvents, Instant createdAt) {}
 
     public record ParticipantView(Long id, String name, String email, ExamParticipant.InviteStatus inviteStatus,
             String inviteError, Instant invitedAt, Instant remindedAt, Instant enteredAt, Instant startedAt,
@@ -91,23 +97,20 @@ public final class ExamDtos {
             /** data:image/jpeg;base64,... 또는 base64 본문. 카메라 이벤트만 */
             String snapshot) {}
 
-    public record ProctorEventView(Long id, ProctorEvent.Type type, ProctorEvent.Source source, Instant startedAt,
+    public record ProctorEventView(Long id, Long participantId, ProctorEvent.Type type, ProctorEvent.Source source, Instant startedAt,
             int durationMs, BigDecimal confidence, String detail, String snapshot, int snapshotBytes,
             ProctorEvent.Review review, String reviewNote, Long reviewedBy, Instant reviewedAt) {
 
         public static ProctorEventView from(ProctorEvent e) {
             String snap = e.getSnapshotKey() == null ? null : e.getSnapshotDeletedAt() != null ? "deleted" : "ok";
-            return new ProctorEventView(e.getId(), e.getType(), e.getSource(), e.getStartedAt(), e.getDurationMs(),
+            return new ProctorEventView(e.getId(), e.getParticipantId(), e.getType(), e.getSource(), e.getStartedAt(), e.getDurationMs(),
                     e.getConfidence(), e.getDetail(), snap, e.getSnapshotBytes(), e.getReview(), e.getReviewNote(),
                     e.getReviewedBy(), e.getReviewedAt());
         }
     }
 
-    /**
-     * 담당자 판정. review 가 null 이면 판정을 지운다.
-     * TODO(인증): reviewerId 는 로그인 정보에서 꺼내야 한다. 지금은 콘솔 API 가 열려 있어 요청 값으로 받는다
-     */
-    public record ReviewRequest(ProctorEvent.Review review, @Size(max = 1000) String note, Long reviewerId) {}
+    /** 담당자 판정. review 가 null 이면 판정을 지운다. 판정자는 로그인 정보에서 꺼낸다 */
+    public record ReviewRequest(ProctorEvent.Review review, @Size(max = 1000) String note) {}
 
     public record ServerTime(Instant serverNow) {}
 }

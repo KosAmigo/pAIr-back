@@ -29,6 +29,7 @@ import com.pair.exam.web.ExamDtos.SessionDetail;
 import com.pair.exam.web.ExamDtos.SessionRequest;
 import com.pair.exam.web.ExamDtos.SessionSummary;
 import com.pair.task.TaskRepository;
+import com.pair.taskconsole.TaskConsoleService;
 
 /** 기업 콘솔: 회차 생성·수정·취소와 대상자 등록. */
 @Service
@@ -44,16 +45,21 @@ public class ExamSessionService {
     private final TaskRepository tasks;
     private final ApplicationEventPublisher events;
     private final SnapshotStorage storage;
+    private final TaskConsoleService publications;
+    private final com.pair.exam.repository.ProctorEventRepository proctorEvents;
     private final ExamProperties props;
     private final Clock clock;
 
     public ExamSessionService(ExamSessionRepository sessions, ExamParticipantRepository participants, TaskRepository tasks,
-            ApplicationEventPublisher events, SnapshotStorage storage, ExamProperties props, Clock clock) {
+            ApplicationEventPublisher events, SnapshotStorage storage, TaskConsoleService publications,
+            com.pair.exam.repository.ProctorEventRepository proctorEvents, ExamProperties props, Clock clock) {
         this.sessions = sessions;
         this.participants = participants;
         this.tasks = tasks;
         this.events = events;
         this.storage = storage;
+        this.publications = publications;
+        this.proctorEvents = proctorEvents;
         this.props = props;
         this.clock = clock;
     }
@@ -61,8 +67,10 @@ public class ExamSessionService {
     @Transactional
     public SessionSummary create(SessionRequest req) {
         Instant now = clock.instant();
+        if (req.companyId() == null) throw new IllegalArgumentException("회사를 알 수 없습니다.");
         validateSchedule(req, now);
         req.taskIds().forEach(tasks::get); // 없는 과제면 404
+        publications.requireOpen(req.taskIds()); // 검수해 공개한 과제만
         ExamSession s = sessions.save(new ExamSession(req.companyId(), req.title().trim(), req.startsAt(), req.endsAt(),
                 req.proctoring(), req.taskIds(), now));
         return summary(s, null, now);
@@ -71,12 +79,24 @@ public class ExamSessionService {
     @Transactional(readOnly = true)
     public List<SessionSummary> list(Long companyId) {
         Instant now = clock.instant();
-        List<ExamSession> list = sessions.findByCompanyIdOrderByStartsAtDesc(companyId);
+        return summaries(sessions.findByCompanyIdOrderByStartsAtDesc(companyId), now);
+    }
+
+    private List<SessionSummary> summaries(List<ExamSession> list, Instant now) {
         if (list.isEmpty()) return List.of();
-        Map<Long, ExamParticipantRepository.SessionCounts> counts = participants
-                .countBySessionIds(list.stream().map(ExamSession::getId).toList()).stream()
+        List<Long> ids = list.stream().map(ExamSession::getId).toList();
+        Map<Long, ExamParticipantRepository.SessionCounts> counts = participants.countBySessionIds(ids).stream()
                 .collect(Collectors.toMap(ExamParticipantRepository.SessionCounts::getSessionId, Function.identity()));
-        return list.stream().map(s -> summary(s, counts.get(s.getId()), now)).toList();
+        Map<Long, Long> open = proctorEvents.countUnreviewedBySessionIds(ids).stream()
+                .collect(Collectors.toMap(com.pair.exam.repository.ProctorEventRepository.SessionOpenCount::getSessionId,
+                        com.pair.exam.repository.ProctorEventRepository.SessionOpenCount::getOpen));
+        return list.stream().map(s -> summary(s, counts.get(s.getId()), open.getOrDefault(s.getId(), 0L), now)).toList();
+    }
+
+    /** 관리자: 모든 회사의 회차 */
+    @Transactional(readOnly = true)
+    public List<SessionSummary> listAll() {
+        return summaries(sessions.findAllByOrderByStartsAtDesc(), clock.instant());
     }
 
     @Transactional(readOnly = true)
@@ -86,8 +106,8 @@ public class ExamSessionService {
         List<ExamParticipant> ps = participants.findBySessionIdOrderByIdAsc(sessionId);
         long entered = ps.stream().filter(p -> p.getEnteredAt() != null).count();
         long submitted = ps.stream().filter(p -> p.getSubmittedAt() != null).count();
-        SessionSummary sum = new SessionSummary(s.getId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(),
-                s.phase(now), s.getTaskIds(), ps.size(), entered, submitted, s.getCanceledAt());
+        SessionSummary sum = new SessionSummary(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(),
+                s.phase(now), s.getTaskIds(), ps.size(), entered, submitted, s.getCanceledAt(), 0, s.getCreatedAt());
         return new SessionDetail(sum, now, s.getClosedAt(), ps.stream().map(ParticipantView::from).toList());
     }
 
@@ -99,6 +119,7 @@ public class ExamSessionService {
         if (!s.getCompanyId().equals(req.companyId())) throw new IllegalArgumentException("다른 회사의 회차로 옮길 수 없습니다.");
         validateSchedule(req, now);
         req.taskIds().forEach(tasks::get);
+        publications.requireOpen(req.taskIds());
         boolean changed = !s.getTitle().equals(req.title().trim()) || !s.getStartsAt().equals(req.startsAt())
                 || !s.getEndsAt().equals(req.endsAt()) || !s.getTaskIds().equals(req.taskIds());
         s.update(req.title().trim(), req.startsAt(), req.endsAt(), req.proctoring(), req.taskIds());
@@ -165,6 +186,19 @@ public class ExamSessionService {
         List<Rejected> mapped = r.rejected().stream()
                 .map(x -> new Rejected(rows.get(x.line() - 1).line(), x.name(), x.email(), x.reason())).toList();
         return new AddParticipantsResult(r.added(), mapped);
+    }
+
+    /** 명단에서 빼기. 시작 전 회차에서, 아직 입장하지 않은 대상자만 (입장·동의·감독 기록이 생긴 뒤에는 지우지 않는다) */
+    @Transactional
+    public void removeParticipant(Long sessionId, Long participantId) {
+        ExamParticipant p = participants.findById(participantId)
+                .filter(x -> x.getSession().getId().equals(sessionId))
+                .orElseThrow(() -> new NoSuchElementException("없는 대상자입니다."));
+        if (p.getSession().phase(clock.instant()) != ExamSession.Phase.UPCOMING) {
+            throw new IllegalStateException("시작 전 회차에서만 명단을 고칠 수 있습니다.");
+        }
+        if (p.getEnteredAt() != null) throw new IllegalStateException("이미 입장한 대상자는 뺄 수 없습니다.");
+        participants.delete(p);
     }
 
     /** 초대 메일 다시 보내기. 새 토큰을 만들어 이전 링크는 쓸 수 없게 한다 */
@@ -261,8 +295,12 @@ public class ExamSessionService {
     }
 
     private static SessionSummary summary(ExamSession s, ExamParticipantRepository.SessionCounts c, Instant now) {
-        return new SessionSummary(s.getId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(), s.phase(now),
+        return summary(s, c, 0, now);
+    }
+
+    private static SessionSummary summary(ExamSession s, ExamParticipantRepository.SessionCounts c, long open, Instant now) {
+        return new SessionSummary(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(), s.phase(now),
                 s.getTaskIds(), c == null ? 0 : c.getTotal(), c == null ? 0 : c.getEntered(), c == null ? 0 : c.getSubmitted(),
-                s.getCanceledAt());
+                s.getCanceledAt(), open, s.getCreatedAt());
     }
 }
