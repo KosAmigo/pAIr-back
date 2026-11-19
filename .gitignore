@@ -63,3 +63,7 @@ desktop.ini
 
 # 실험 채점 기록: 판정 기준을 계속 고치는 중이라 각자 로컬에만 보관
 grader/runs/
+
+# Python 실행 캐시
+__pycache__/
+*.pyc
