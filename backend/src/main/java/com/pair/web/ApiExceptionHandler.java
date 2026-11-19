@@ -23,6 +23,16 @@ public class ApiExceptionHandler {
         return body(HttpStatus.NOT_FOUND, "없는 경로입니다. 화면은 http://localhost:5173 에서 여세요.");
     }
 
+    @ExceptionHandler(com.pair.web.auth.UnauthorizedException.class)
+    ResponseEntity<Map<String, String>> unauthorized(RuntimeException e) {
+        return body(HttpStatus.UNAUTHORIZED, e.getMessage());
+    }
+
+    @ExceptionHandler(com.pair.web.auth.ForbiddenException.class)
+    ResponseEntity<Map<String, String>> forbidden(RuntimeException e) {
+        return body(HttpStatus.FORBIDDEN, e.getMessage());
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<Map<String, String>> notFound(NoSuchElementException e) {
         return body(HttpStatus.NOT_FOUND, e.getMessage());
