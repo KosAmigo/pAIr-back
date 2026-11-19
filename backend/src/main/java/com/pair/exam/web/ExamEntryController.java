@@ -63,6 +63,13 @@ public class ExamEntryController {
         return entry.start(token);
     }
 
+    /** 과제 하나 제출 */
+    @PostMapping("/api/entry/{token}/tasks/{taskId}/submit")
+    public EntryInfo submitTask(@PathVariable String token, @PathVariable String taskId) {
+        return entry.submitTask(token, taskId);
+    }
+
+    /** 남은 과제 모두 제출 (시험 끝내기) */
     @PostMapping("/api/entry/{token}/submit")
     public EntryInfo submit(@PathVariable String token) {
         return entry.submit(token);

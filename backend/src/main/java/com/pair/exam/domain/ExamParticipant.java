@@ -4,6 +4,9 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
@@ -43,8 +46,10 @@ public class ExamParticipant {
     @Column(nullable = false, length = 50)
     private String name;
 
-    @Column(name = "invite_token", nullable = false, unique = true, length = 64)
-    private String inviteToken;
+    /** 입장 링크 토큰의 SHA-256 (hex). 원문은 메일에만 담고 저장하지 않는다 */
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "invite_token_hash", nullable = false, unique = true, length = 64)
+    private String inviteTokenHash;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "invite_status", nullable = false, length = 10)
@@ -55,6 +60,10 @@ public class ExamParticipant {
 
     @Column(name = "invited_at", nullable = false)
     private Instant invitedAt;
+
+    /** 시작 하루 전 알림 메일을 보낸(보내려고 잡은) 시각 */
+    @Column(name = "reminded_at")
+    private Instant remindedAt;
 
     @Column(name = "entered_at")
     private Instant enteredAt;
@@ -69,7 +78,10 @@ public class ExamParticipant {
     @Column(name = "submit_kind", length = 10)
     private SubmitKind submitKind;
 
-    /** 과제 ID → 응시 ID (응시 자체는 아직 pilot-data 파일에 있다) */
+    /**
+     * 과제 ID → 응시 ID (응시 자체는 아직 pilot-data 파일에 있다).
+     * ERD 에서는 attempts.participant_id 로 잇는다. attempts 가 DB 로 옮겨지면 이 표를 없앤다.
+     */
     @ElementCollection
     @CollectionTable(name = "participant_attempts", joinColumns = @JoinColumn(name = "participant_id"))
     @MapKeyColumn(name = "task_id", length = 64)
@@ -78,13 +90,22 @@ public class ExamParticipant {
 
     protected ExamParticipant() {}
 
-    public ExamParticipant(ExamSession session, String email, String name, String inviteToken, Instant invitedAt) {
+    public ExamParticipant(ExamSession session, String email, String name, String inviteTokenHash, Instant invitedAt) {
         this.session = session;
         this.email = email;
         this.name = name;
-        this.inviteToken = inviteToken;
+        this.inviteTokenHash = inviteTokenHash;
         this.invitedAt = invitedAt;
     }
+
+    /** 초대 메일을 다시 보낼 때: 새 토큰으로 바꿔 이전 링크를 무효로 하고, 발송 상태를 처음으로 되돌린다 */
+    public void reissueInvite(String newTokenHash, Instant at) {
+        this.inviteTokenHash = newTokenHash;
+        this.invitedAt = at;
+        this.inviteStatus = InviteStatus.PENDING;
+        this.inviteError = null;
+    }
+
 
     /** 처음 입장한 시각만 남긴다 (새로 고침해도 바뀌지 않음) */
     public void markEntered(Instant at) {
@@ -105,24 +126,20 @@ public class ExamParticipant {
         submitKind = kind;
     }
 
-    public void markInviteSent() {
-        inviteStatus = InviteStatus.SENT;
-        inviteError = null;
-    }
-
-    public void markInviteFailed(String error) {
-        inviteStatus = InviteStatus.FAILED;
-        inviteError = error == null ? null : error.substring(0, Math.min(255, error.length()));
+    /** invite_error 컬럼 길이에 맞춘다 */
+    public static String trimInviteError(String error) {
+        return error == null ? null : error.substring(0, Math.min(255, error.length()));
     }
 
     public Long getId() { return id; }
     public ExamSession getSession() { return session; }
     public String getEmail() { return email; }
     public String getName() { return name; }
-    public String getInviteToken() { return inviteToken; }
+    public String getInviteTokenHash() { return inviteTokenHash; }
     public InviteStatus getInviteStatus() { return inviteStatus; }
     public String getInviteError() { return inviteError; }
     public Instant getInvitedAt() { return invitedAt; }
+    public Instant getRemindedAt() { return remindedAt; }
     public Instant getEnteredAt() { return enteredAt; }
     public Instant getStartedAt() { return startedAt; }
     public Instant getSubmittedAt() { return submittedAt; }

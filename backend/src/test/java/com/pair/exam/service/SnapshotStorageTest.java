@@ -59,10 +59,10 @@ class SnapshotStorageTest {
     }
 
     @Test
-    @DisplayName("S3: 접두어를 붙여 서버 측 암호화로 올리고, 없는 키는 빈 값")
+    @DisplayName("S3: 키(폴더 포함)에 접두어를 붙여 서버 측 암호화로 올리고, 없는 키는 빈 값. CSV 는 text/csv")
     void s3() {
         S3Client client = mock(S3Client.class);
-        S3SnapshotStorage s = new S3SnapshotStorage(client, "pair-bucket", "exam-snapshots");
+        S3SnapshotStorage s = new S3SnapshotStorage(client, "pair-bucket", "pair");
         when(client.getObjectAsBytes(any(GetObjectRequest.class))).thenThrow(NoSuchKeyException.builder().build());
 
         s.put(SnapshotStorage.keyOf(7, 42), JPEG);
@@ -70,11 +70,17 @@ class SnapshotStorageTest {
         ArgumentCaptor<PutObjectRequest> req = ArgumentCaptor.forClass(PutObjectRequest.class);
         verify(client).putObject(req.capture(), any(RequestBody.class));
         assertThat(req.getValue().bucket()).isEqualTo("pair-bucket");
-        assertThat(req.getValue().key()).isEqualTo("exam-snapshots/7/42.jpg");
+        assertThat(req.getValue().key()).isEqualTo("pair/exam-snapshots/7/42.jpg");
         assertThat(req.getValue().contentType()).isEqualTo("image/jpeg");
         assertThat(req.getValue().serverSideEncryption()).isEqualTo(ServerSideEncryption.AES256);
         assertThat(s.get(SnapshotStorage.keyOf(7, 1))).isEmpty();
         assertThatThrownBy(() -> s.objectKey("../secret")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> s.objectKey("7/42.jpg")).isInstanceOf(IllegalArgumentException.class); // 폴더 없는 옛 키
+
+        s.put(SnapshotStorage.csvKeyOf(7, 1700000000000L), new byte[] {'a'});
+        verify(client, org.mockito.Mockito.times(2)).putObject(req.capture(), any(RequestBody.class));
+        assertThat(req.getValue().key()).isEqualTo("pair/participant-csv/7/1700000000000.csv");
+        assertThat(req.getValue().contentType()).isEqualTo("text/csv");
     }
 
     @Test

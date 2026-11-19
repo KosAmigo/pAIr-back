@@ -36,17 +36,30 @@ public class AttemptSubmitter {
         int n = 0;
         for (String attemptId : taskToAttempt.values()) {
             try {
-                if (store.load(attemptId).status() != Attempt.Status.SOLVING) continue;
-                attempts.submit(attemptId);
-                n++;
-            } catch (IllegalStateException e) {
-                // 그 사이 응시자가 직접 제출한 경우
-                log.debug("이미 제출된 응시: {}", attemptId);
+                if (submitOne(attemptId)) n++;
             } catch (RuntimeException e) {
                 // 한 응시 파일이 깨져도 나머지 응시자의 제출은 계속한다
                 log.error("응시 제출 실패: {}", attemptId, e);
             }
         }
         return n;
+    }
+
+    /** 과제 하나 제출. 이미 제출했으면 false (두 번 불러도 안전) */
+    public boolean submitOne(String attemptId) {
+        try {
+            if (isSubmitted(attemptId)) return false;
+            attempts.submit(attemptId);
+            return true;
+        } catch (IllegalStateException e) {
+            // 그 사이 응시자가 응시 화면에서 직접 제출한 경우
+            log.debug("이미 제출된 응시: {}", attemptId);
+            return false;
+        }
+    }
+
+    /** 풀이 중(SOLVING)이 아니면 제출한 것으로 본다 (후속 질문·채점 단계 포함) */
+    public boolean isSubmitted(String attemptId) {
+        return store.load(attemptId).status() != Attempt.Status.SOLVING;
     }
 }

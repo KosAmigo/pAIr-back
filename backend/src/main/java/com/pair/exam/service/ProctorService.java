@@ -89,22 +89,28 @@ public class ProctorService {
         return events.findByParticipantIdOrderByStartedAtAsc(p.getId()).stream().map(ProctorEventView::from).toList();
     }
 
+    /** 담당자 판정 (OK/SUSPECT). review 가 null 이면 판정을 지운다 */
+    @Transactional
+    public ProctorEventView review(Long sessionId, Long eventId, ProctorEvent.Review review, String note, Long reviewerId) {
+        ProctorEvent e = eventOf(sessionId, eventId);
+        e.review(review, note == null || note.isBlank() ? null : note.trim(), reviewerId, clock.instant());
+        return ProctorEventView.from(e);
+    }
+
     /** 콘솔에서 사진 보기. 보관 기간이 지나 지운 사진은 IllegalStateException */
     @Transactional(readOnly = true)
     public byte[] snapshot(Long sessionId, Long eventId) {
-        ProctorEvent e = events.findById(eventId).orElseThrow(() -> new NoSuchElementException("없는 이벤트입니다."));
-        ExamParticipant p = participants.findById(e.getParticipantId()).orElseThrow();
-        if (!p.getSession().getId().equals(sessionId)) throw new NoSuchElementException("없는 이벤트입니다.");
+        ProctorEvent e = eventOf(sessionId, eventId);
         if (e.getSnapshotKey() == null) throw new NoSuchElementException("사진이 없는 이벤트입니다.");
         if (e.getSnapshotDeletedAt() != null) throw new IllegalStateException("보관 기간이 지나 삭제된 사진입니다.");
         return storage.get(e.getSnapshotKey()).orElseThrow(() -> new NoSuchElementException("사진 파일이 없습니다."));
     }
 
-    /** 보관 기간이 지난 사진 파일을 지우고 기록만 남긴다. @return 지운 장수 */
+    /** 회차 종료 뒤 보관 기간(기본 30일)이 지난 사진 파일을 지우고 기록만 남긴다. @return 지운 장수 */
     @Transactional
     public int purgeExpiredSnapshots() {
         Instant now = clock.instant();
-        Instant before = now.minus(Duration.ofHours(props.snapshotRetentionHours()));
+        Instant before = now.minus(Duration.ofDays(props.snapshotRetentionDays()));
         int total = 0;
         List<ProctorEvent> batch;
         do {
@@ -119,9 +125,17 @@ public class ProctorService {
         return total;
     }
 
+    /** 다른 회차 번호로는 이벤트를 볼 수도 판정할 수도 없다 */
+    private ProctorEvent eventOf(Long sessionId, Long eventId) {
+        ProctorEvent e = events.findById(eventId).orElseThrow(() -> new NoSuchElementException("없는 이벤트입니다."));
+        ExamParticipant p = participants.findById(e.getParticipantId()).orElseThrow();
+        if (!p.getSession().getId().equals(sessionId)) throw new NoSuchElementException("없는 이벤트입니다.");
+        return e;
+    }
+
     private ExamParticipant findParticipant(String token) {
         if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.findByInviteToken(token).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
+        return participants.findByInviteTokenHash(InviteTokens.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 
     private String detail(ProctorEventRequest req) {
