@@ -20,7 +20,8 @@ import jakarta.persistence.Table;
 @Table(name = "exam_sessions")
 public class ExamSession {
 
-    public enum Phase { UPCOMING, LIVE, ENDED }
+    /** CANCELED: 시작 전에 취소한 회차. 시각과 상관없이 입장·시작이 막힌다 */
+    public enum Phase { UPCOMING, LIVE, ENDED, CANCELED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -47,6 +48,14 @@ public class ExamSession {
 
     @Column(name = "closed_at")
     private Instant closedAt;
+
+    /** 시작 전 취소 시각. 회차는 지우지 않고 기록을 남긴다 */
+    @Column(name = "canceled_at")
+    private Instant canceledAt;
+
+    /** 마지막으로 올린 대상자 CSV 원본의 저장 위치 */
+    @Column(name = "participants_csv_key", length = 255)
+    private String participantsCsvKey;
 
     /** 과제 순서 = 리스트 순서 (exam_session_tasks.sort_order) */
     @ElementCollection
@@ -77,6 +86,7 @@ public class ExamSession {
     }
 
     public Phase phase(Instant now) {
+        if (canceledAt != null) return Phase.CANCELED;
         if (now.isBefore(startsAt)) return Phase.UPCOMING;
         if (now.isBefore(endsAt)) return Phase.LIVE;
         return Phase.ENDED;
@@ -84,6 +94,17 @@ public class ExamSession {
 
     public void close(Instant at) {
         this.closedAt = at;
+    }
+
+    /** 시작 전에만 취소할 수 있다 (DB 에도 canceled_at < starts_at 검사가 있다) */
+    public void cancel(Instant at) {
+        if (canceledAt != null) throw new IllegalStateException("이미 취소한 회차입니다.");
+        if (!at.isBefore(startsAt)) throw new IllegalStateException("시작한 회차는 취소할 수 없습니다.");
+        this.canceledAt = at;
+    }
+
+    public void recordParticipantsCsv(String key) {
+        this.participantsCsvKey = key;
     }
 
     public Long getId() { return id; }
@@ -94,5 +115,7 @@ public class ExamSession {
     public boolean isProctoring() { return proctoring; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getClosedAt() { return closedAt; }
+    public Instant getCanceledAt() { return canceledAt; }
+    public String getParticipantsCsvKey() { return participantsCsvKey; }
     public List<String> getTaskIds() { return List.copyOf(taskIds); }
 }
