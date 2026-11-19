@@ -16,7 +16,7 @@ import com.pair.exam.repository.ExamParticipantRepository;
 import com.pair.exam.repository.ExamSessionRepository;
 
 /**
- * 종료 시각이 지난 회차를 닫는다: 시작했지만 아직 제출하지 않은 응시자를 전원 자동 제출.
+ * 종료 시각이 지난 회차를 닫는다: 시작했지만 아직 제출하지 않은 과제를 전원 자동 제출.
  * 시작하지 않은 대상자는 미응시로 남긴다.
  * 회차마다 트랜잭션을 따로 잡아서, 한 회차가 실패해도 다른 회차는 닫힌다.
  */
@@ -39,7 +39,7 @@ public class AutoSubmitService {
 
     @Transactional(readOnly = true)
     public List<Long> dueSessionIds() {
-        return sessions.findByEndsAtLessThanEqualAndClosedAtIsNull(clock.instant()).stream().map(ExamSession::getId).toList();
+        return sessions.findByEndsAtLessThanEqualAndClosedAtIsNullAndCanceledAtIsNull(clock.instant()).stream().map(ExamSession::getId).toList();
     }
 
     /** @return 자동 제출한 응시자 수 */

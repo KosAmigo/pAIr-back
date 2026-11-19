@@ -34,16 +34,17 @@ public final class ExamDtos {
             @NotEmpty @Size(max = 10) List<@NotBlank @Size(max = 64) String> taskIds) {}
 
     public record SessionSummary(Long id, String title, Instant startsAt, Instant endsAt, boolean proctoring,
-            ExamSession.Phase phase, List<String> taskIds, long participants, long entered, long submitted) {}
+            ExamSession.Phase phase, List<String> taskIds, long participants, long entered, long submitted,
+            Instant canceledAt) {}
 
     public record ParticipantView(Long id, String name, String email, ExamParticipant.InviteStatus inviteStatus,
-            String inviteError, Instant invitedAt, Instant enteredAt, Instant startedAt, Instant submittedAt,
-            ExamParticipant.SubmitKind submitKind, Map<String, String> attempts) {
+            String inviteError, Instant invitedAt, Instant remindedAt, Instant enteredAt, Instant startedAt,
+            Instant submittedAt, ExamParticipant.SubmitKind submitKind, Map<String, String> attempts) {
 
         public static ParticipantView from(ExamParticipant p) {
             return new ParticipantView(p.getId(), p.getName(), p.getEmail(), p.getInviteStatus(), p.getInviteError(),
-                    p.getInvitedAt(), p.getEnteredAt(), p.getStartedAt(), p.getSubmittedAt(), p.getSubmitKind(),
-                    p.getAttempts());
+                    p.getInvitedAt(), p.getRemindedAt(), p.getEnteredAt(), p.getStartedAt(), p.getSubmittedAt(),
+                    p.getSubmitKind(), p.getAttempts());
         }
     }
 
@@ -57,17 +58,24 @@ public final class ExamDtos {
 
     public record AddParticipantsRequest(@NotEmpty @Size(max = 1000) List<@NotNull ParticipantInput> participants) {}
 
-    /** line: 엑셀 행 번호(헤더 = 1) 또는 요청 목록 순서(1부터) */
+    /** line: CSV 줄 번호(헤더 = 1) 또는 요청 목록 순서(1부터) */
     public record Rejected(int line, String name, String email, String reason) {}
 
+    /** added: 등록한 인원 (미리 보기면 등록될 인원) */
     public record AddParticipantsResult(int added, List<Rejected> rejected) {}
 
     // ── 응시자: 입장 ──
 
-    /** companyName: 기업 테이블이 아직 없어 null (명세상 선택 필드) */
+    /**
+     * companyName: 기업 테이블이 아직 없어 null (명세상 선택 필드).
+     * submittedAt: 모든 과제를 제출한 시각. 과제별 제출 여부는 tasks.
+     */
     public record EntryInfo(String sessionTitle, String companyName, String name, String email, Instant startsAt, Instant endsAt, Instant serverNow,
             ExamSession.Phase phase, boolean proctoring, boolean consented, Instant startedAt, Instant submittedAt,
-            List<String> taskIds, Map<String, String> attempts) {}
+            List<String> taskIds, Map<String, String> attempts, List<TaskStatus> tasks) {}
+
+    /** 회차 과제 하나의 진행 상태. attemptId 는 시작 전이면 null */
+    public record TaskStatus(String taskId, String attemptId, boolean submitted) {}
 
     public record ConsentRequest(@NotBlank @Size(max = 20) String consentVersion, @NotNull JsonNode envCheck) {}
 
@@ -84,14 +92,22 @@ public final class ExamDtos {
             String snapshot) {}
 
     public record ProctorEventView(Long id, ProctorEvent.Type type, ProctorEvent.Source source, Instant startedAt,
-            int durationMs, BigDecimal confidence, String detail, String snapshot, int snapshotBytes) {
+            int durationMs, BigDecimal confidence, String detail, String snapshot, int snapshotBytes,
+            ProctorEvent.Review review, String reviewNote, Long reviewedBy, Instant reviewedAt) {
 
         public static ProctorEventView from(ProctorEvent e) {
             String snap = e.getSnapshotKey() == null ? null : e.getSnapshotDeletedAt() != null ? "deleted" : "ok";
             return new ProctorEventView(e.getId(), e.getType(), e.getSource(), e.getStartedAt(), e.getDurationMs(),
-                    e.getConfidence(), e.getDetail(), snap, e.getSnapshotBytes());
+                    e.getConfidence(), e.getDetail(), snap, e.getSnapshotBytes(), e.getReview(), e.getReviewNote(),
+                    e.getReviewedBy(), e.getReviewedAt());
         }
     }
+
+    /**
+     * 담당자 판정. review 가 null 이면 판정을 지운다.
+     * TODO(인증): reviewerId 는 로그인 정보에서 꺼내야 한다. 지금은 콘솔 API 가 열려 있어 요청 값으로 받는다
+     */
+    public record ReviewRequest(ProctorEvent.Review review, @Size(max = 1000) String note, Long reviewerId) {}
 
     public record ServerTime(Instant serverNow) {}
 }

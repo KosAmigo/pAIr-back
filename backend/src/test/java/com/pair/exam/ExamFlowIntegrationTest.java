@@ -10,9 +10,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,8 +21,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,6 +37,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.attempt.AttemptStore;
@@ -51,8 +50,13 @@ import com.pair.exam.service.AttemptSubmitter;
 import com.pair.exam.service.AutoSubmitService;
 import com.pair.exam.service.ExamEntryService;
 import com.pair.exam.service.ExamSessionService;
+import com.pair.exam.service.InviteTokens;
+import com.pair.exam.service.InvitesCreated;
 import com.pair.exam.service.ProctorService;
+import com.pair.exam.service.ReminderService;
+import com.pair.exam.service.SessionNotice;
 import com.pair.exam.service.SessionResultService;
+import com.pair.exam.service.SnapshotStorage;
 import com.pair.exam.web.ExamDtos.AddParticipantsResult;
 import com.pair.exam.web.ExamDtos.ConsentRequest;
 import com.pair.exam.web.ExamDtos.EntryInfo;
@@ -68,10 +72,12 @@ import com.pair.exam.web.ExamDtos.SessionSummary;
  */
 @SpringBootTest
 @ActiveProfiles("examtest")
+@RecordApplicationEvents
 class ExamFlowIntegrationTest {
 
     static final Instant T0 = Instant.parse("2026-12-01T00:00:00Z");
     static final String TASK = "order-deadlock";
+    static final String TASK2 = "pricing-plan";
     /** 최소한의 JPEG (FF D8 FF 로 시작) */
     static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 16, 'J', 'F', 'I', 'F'};
 
@@ -101,6 +107,9 @@ class ExamFlowIntegrationTest {
     @Autowired ExamParticipantRepository participants;
     @Autowired AttemptStore attemptStore;
     @Autowired ObjectMapper json;
+    @Autowired ReminderService reminders;
+    @Autowired SnapshotStorage storage;
+    @Autowired ApplicationEvents appEvents;
 
     @MockitoBean AttemptSubmitter attempts;
     @MockitoBean JavaMailSender mail;
@@ -113,6 +122,7 @@ class ExamFlowIntegrationTest {
         clock.set(T0);
         when(attempts.start(anyString())).thenAnswer(inv -> "att-test-" + attemptSeq.incrementAndGet());
         when(attempts.submitAll(anyMap())).thenAnswer(inv -> ((Map<?, ?>) inv.getArgument(0)).size());
+        when(attempts.submitOne(anyString())).thenReturn(true);
     }
 
     // ── 회차 ──
@@ -132,13 +142,52 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
-    @DisplayName("시작 시각이 지난 회차는 수정·삭제할 수 없다")
+    @DisplayName("시작 시각이 지난 회차는 수정·취소할 수 없다")
     void cannotEditAfterStart() {
         SessionSummary s = createSession(102L, true);
         clock.set(s.startsAt().plusSeconds(1));
 
-        assertThatThrownBy(() -> sessions.delete(s.id())).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> sessions.cancel(s.id())).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> sessions.update(s.id(), request(102L, true))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("취소: 지우지 않고 canceled_at 을 남기고, 입장·시작·자동 제출 대상에서 빠지며 대상자에게 안내 메일을 보낸다")
+    void cancelKeepsRecordAndNotifies() {
+        SessionSummary s = createSession(114L, false);
+        String token = invite(s.id(), "cancel@test.dev");
+
+        SessionSummary canceled = sessions.cancel(s.id());
+
+        assertThat(canceled.phase()).isEqualTo(ExamSession.Phase.CANCELED);
+        assertThat(canceled.canceledAt()).isEqualTo(T0);
+        assertThat(sessions.list(114L)).singleElement().extracting(SessionSummary::phase).isEqualTo(ExamSession.Phase.CANCELED);
+        assertThat(appEvents.stream(SessionNotice.class))
+                .anySatisfy(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CANCELED));
+        verify(mail, timeout(3000).atLeastOnce()).send(org.mockito.ArgumentMatchers.<SimpleMailMessage>argThat(
+                m -> m.getSubject() != null && m.getSubject().contains("취소")));
+
+        assertThatThrownBy(() -> entry.enter(token)).hasMessageContaining("취소");
+        assertThatThrownBy(() -> sessions.cancel(s.id())).hasMessageContaining("취소한 회차");
+        clock.set(s.startsAt());
+        assertThatThrownBy(() -> entry.start(token)).hasMessageContaining("취소");
+        clock.set(s.endsAt().plusSeconds(1));
+        assertThat(autoSubmit.dueSessionIds()).doesNotContain(s.id());
+    }
+
+    @Test
+    @DisplayName("시작 전 수정: 시간·과제가 바뀌면 대상자에게 변경 안내를 보내고, 같은 내용이면 보내지 않는다")
+    void updateNotifiesOnlyWhenChanged() {
+        SessionSummary s = createSession(115L, true);
+        invite(s.id(), "change@test.dev");
+        SessionRequest same = new SessionRequest(115L, s.title(), s.startsAt(), s.endsAt(), true, List.of(TASK));
+
+        sessions.update(s.id(), same);
+        assertThat(appEvents.stream(SessionNotice.class)).isEmpty();
+
+        sessions.update(s.id(), new SessionRequest(115L, s.title(), s.startsAt().plusSeconds(60), s.endsAt(), true, List.of(TASK)));
+        assertThat(appEvents.stream(SessionNotice.class)).singleElement()
+                .satisfies(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CHANGED));
     }
 
     @Test
@@ -168,23 +217,79 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
-    @DisplayName("엑셀 업로드: 헤더 순서가 달라도 읽고, 거절 사유는 엑셀 행 번호로 알려 준다")
-    void importExcel() throws Exception {
+    @DisplayName("CSV 업로드: 헤더 순서가 달라도 읽고, 거절 사유는 CSV 줄 번호로, 원본은 저장소에 남긴다")
+    void importCsv() {
         SessionSummary s = createSession(105L, true);
-        byte[] xlsx = xlsx(new String[][] {
-                {"이메일", "이름"},
-                {"x1@test.dev", "일번"},
-                {"", ""},
-                {"bad", "이번"},
-        });
+        byte[] csv = "\uFEFF이메일,이름\r\nx1@test.dev,일번\r\n,\r\nbad,\"이, 번\"\r\n".getBytes(StandardCharsets.UTF_8);
 
-        AddParticipantsResult r = sessions.importExcel(s.id(), new ByteArrayInputStream(xlsx));
+        AddParticipantsResult r = sessions.importCsv(s.id(), csv, false);
 
         assertThat(r.added()).isEqualTo(1);
         assertThat(r.rejected()).singleElement().satisfies(x -> {
             assertThat(x.line()).isEqualTo(4);
-            assertThat(x.name()).isEqualTo("이번");
+            assertThat(x.name()).isEqualTo("이, 번");
         });
+        String key = sessionsRepo().findById(s.id()).orElseThrow().getParticipantsCsvKey();
+        assertThat(key).startsWith("participant-csv/" + s.id() + "/");
+        assertThat(storage.get(key)).contains(csv);
+    }
+
+    @Test
+    @DisplayName("CSV 미리 보기: 저장하지 않고 들어갈 인원과 거절 사유만 돌려준다. 엑셀 한글판(MS949) CSV 도 읽는다")
+    void previewCsv() {
+        SessionSummary s = createSession(116L, true);
+        invite(s.id(), "dup@test.dev");
+        byte[] csv = "이름,이메일\r\n새사람,new@test.dev\r\n기존,dup@test.dev\r\n".getBytes(java.nio.charset.Charset.forName("MS949"));
+
+        AddParticipantsResult r = sessions.importCsv(s.id(), csv, true);
+
+        assertThat(r.added()).isEqualTo(1);
+        assertThat(r.rejected()).singleElement().satisfies(x -> {
+            assertThat(x.line()).isEqualTo(3);
+            assertThat(x.reason()).contains("이미 등록");
+        });
+        assertThat(participants.findBySessionIdOrderByIdAsc(s.id())).hasSize(1); // 저장 안 함
+        assertThat(sessionsRepo().findById(s.id()).orElseThrow().getParticipantsCsvKey()).isNull();
+    }
+
+    @Test
+    @DisplayName("입장 토큰: DB 에는 SHA-256 해시만 있고, 다시 보내면 새 토큰이 나와 이전 링크는 막힌다")
+    void tokenHashAndReissue() {
+        SessionSummary s = createSession(117L, true);
+        String first = invite(s.id(), "token@test.dev");
+        ExamParticipant p = participant(s.id(), "token@test.dev");
+        assertThat(p.getInviteTokenHash()).hasSize(64).isEqualTo(InviteTokens.hash(first)).isNotEqualTo(first);
+
+        clock.advance(Duration.ofMinutes(1));
+        sessions.resendInvite(s.id(), p.getId());
+        String second = lastToken(p.getId());
+
+        assertThat(second).isNotEqualTo(first);
+        assertThat(entry.info(second).email()).isEqualTo("token@test.dev");
+        assertThatThrownBy(() -> entry.info(first)).isInstanceOf(NoSuchElementException.class);
+        assertThat(participant(s.id(), "token@test.dev").getInvitedAt()).isEqualTo(T0.plus(Duration.ofMinutes(1)));
+    }
+
+    @Test
+    @DisplayName("하루 전 알림: 시작 24시간 안에 들어오면 한 번만 보내고, 24시간 안에 초대된 사람은 건너뛴다")
+    void reminderOncePerParticipant() throws InterruptedException {
+        SessionRequest req = new SessionRequest(118L, "알림 회차", T0.plus(Duration.ofDays(3)), T0.plus(Duration.ofDays(3)).plusSeconds(3600),
+                false, List.of(TASK));
+        SessionSummary s = sessions.create(req);
+        invite(s.id(), "early@test.dev");
+        awaitInviteStatus(s.id(), "early@test.dev", ExamParticipant.InviteStatus.SENT);
+
+        clock.set(s.startsAt().minus(Duration.ofHours(25)));
+        assertThat(reminders.claimDue()).isEmpty(); // 아직 24시간 전이 아님
+
+        clock.set(s.startsAt().minus(Duration.ofHours(23)));
+        invite(s.id(), "late@test.dev"); // 24시간 안에 초대됨
+        awaitInviteStatus(s.id(), "late@test.dev", ExamParticipant.InviteStatus.SENT);
+        List<Long> due = reminders.claimDue();
+
+        assertThat(due).containsExactly(participant(s.id(), "early@test.dev").getId());
+        assertThat(participant(s.id(), "early@test.dev").getRemindedAt()).isEqualTo(clock.instant());
+        assertThat(reminders.claimDue()).isEmpty(); // 두 번 보내지 않음
     }
 
     @Test
@@ -221,8 +326,36 @@ class ExamFlowIntegrationTest {
         EntryInfo again = entry.start(token);
 
         assertThat(started.attempts()).containsOnlyKeys(TASK);
+        assertThat(started.tasks()).singleElement().satisfies(t -> assertThat(t.submitted()).isFalse());
         assertThat(again.attempts()).isEqualTo(started.attempts());
         verify(attempts, times(1)).start(TASK); // 두 번 눌러도 응시는 하나
+    }
+
+    @Test
+    @DisplayName("과제별 제출: 한 과제만 제출하면 그 과제만 넘기고, 모든 과제를 내면 대상자도 제출 완료")
+    void submitPerTask() {
+        SessionSummary s = sessions.create(new SessionRequest(119L, "두 과제", clock.instant().plus(Duration.ofMinutes(10)),
+                clock.instant().plus(Duration.ofMinutes(70)), false, List.of(TASK, TASK2)));
+        String token = invite(s.id(), "multi@test.dev");
+        clock.set(s.startsAt());
+        EntryInfo started = entry.start(token);
+        String a1 = started.attempts().get(TASK);
+        String a2 = started.attempts().get(TASK2);
+
+        when(attempts.isSubmitted(a1)).thenReturn(true);
+        EntryInfo afterFirst = entry.submitTask(token, TASK);
+
+        verify(attempts).submitOne(a1);
+        verify(attempts, times(0)).submitOne(a2);
+        assertThat(afterFirst.submittedAt()).isNull();
+        assertThat(afterFirst.tasks()).extracting(t -> t.taskId() + ":" + t.submitted()).containsExactly(TASK + ":true", TASK2 + ":false");
+
+        when(attempts.isSubmitted(a2)).thenReturn(true);
+        EntryInfo afterAll = entry.submitTask(token, TASK2);
+
+        assertThat(afterAll.submittedAt()).isEqualTo(s.startsAt());
+        assertThat(participant(s.id(), "multi@test.dev").getSubmitKind()).isEqualTo(ExamParticipant.SubmitKind.MANUAL);
+        assertThatThrownBy(() -> entry.submitTask(token, "not-in-session")).isInstanceOf(NoSuchElementException.class);
     }
 
     @Test
@@ -276,7 +409,7 @@ class ExamFlowIntegrationTest {
     // ── 감독 이벤트·사진 ──
 
     @Test
-    @DisplayName("카메라 이벤트와 사진 1장을 저장하고, 보관 기간이 지나면 사진만 지운다")
+    @DisplayName("카메라 이벤트와 사진 1장을 저장하고, 회차 종료 30일이 지나면 사진만 지운다")
     void proctorEventAndPurge() {
         SessionSummary s = createSession(110L, true);
         String token = startWithConsent(s, "cam@test.dev");
@@ -289,7 +422,9 @@ class ExamFlowIntegrationTest {
         assertThat(view.snapshot()).isEqualTo("ok");
         assertThat(proctor.snapshot(s.id(), view.id())).isEqualTo(JPEG);
 
-        clock.advance(Duration.ofHours(169));
+        clock.set(s.endsAt().plus(Duration.ofDays(29)));
+        assertThat(proctor.purgeExpiredSnapshots()).isZero(); // 아직 30일 전
+        clock.set(s.endsAt().plus(Duration.ofDays(30)).plusSeconds(1));
         assertThat(proctor.purgeExpiredSnapshots()).isEqualTo(1);
         assertThatThrownBy(() -> proctor.snapshot(s.id(), view.id())).hasMessageContaining("삭제된 사진");
 
@@ -311,6 +446,28 @@ class ExamFlowIntegrationTest {
                 .hasMessageContaining("브라우저 이벤트");
         assertThatThrownBy(() -> proctor.record(token, camEvent(s.startsAt().minus(Duration.ofHours(1)), null)))
                 .hasMessageContaining("시험 시간 밖");
+    }
+
+    @Test
+    @DisplayName("담당자 판정: OK/SUSPECT 를 남기고 메모·판정자·시각을 기록, 지우면 미확인으로 돌아간다")
+    void reviewEvent() {
+        SessionSummary s = createSession(120L, true);
+        String token = startWithConsent(s, "review@test.dev");
+        var ev = proctor.record(token, camEvent(s.startsAt(), null));
+
+        var suspect = proctor.review(s.id(), ev.id(), ProctorEvent.Review.SUSPECT, " 휴대폰 보임 ", 7L);
+        assertThat(suspect.review()).isEqualTo(ProctorEvent.Review.SUSPECT);
+        assertThat(suspect.reviewNote()).isEqualTo("휴대폰 보임");
+        assertThat(suspect.reviewedBy()).isEqualTo(7L);
+        assertThat(suspect.reviewedAt()).isEqualTo(clock.instant());
+
+        var cleared = proctor.review(s.id(), ev.id(), null, "무시됨", 7L);
+        assertThat(cleared.review()).isNull();
+        assertThat(cleared.reviewedBy()).isNull();
+        assertThatThrownBy(() -> proctor.review(s.id(), ev.id(), ProctorEvent.Review.OK, null, null))
+                .hasMessageContaining("판정한 사람");
+        assertThatThrownBy(() -> proctor.review(s.id() + 999, ev.id(), ProctorEvent.Review.OK, null, 7L))
+                .isInstanceOf(NoSuchElementException.class);
     }
 
     @Test
@@ -364,9 +521,22 @@ class ExamFlowIntegrationTest {
                 clock.instant().plus(Duration.ofMinutes(70)), proctoring, List.of(TASK));
     }
 
+    /** 토큰 원문은 DB 에 없으므로 메일러로 가는 이벤트에서 꺼낸다 */
     private String invite(Long sessionId, String email) {
         sessions.addParticipants(sessionId, List.of(new ParticipantInput("응시자", email)));
-        return participant(sessionId, email).getInviteToken();
+        return lastToken(participant(sessionId, email).getId());
+    }
+
+    private String lastToken(Long participantId) {
+        return appEvents.stream(InvitesCreated.class).flatMap(e -> e.invites().stream())
+                .filter(i -> i.participantId().equals(participantId))
+                .reduce((a, b) -> b).orElseThrow().token();
+    }
+
+    @Autowired com.pair.exam.repository.ExamSessionRepository sessionRepository;
+
+    private com.pair.exam.repository.ExamSessionRepository sessionsRepo() {
+        return sessionRepository;
     }
 
     private String startWithConsent(SessionSummary s, String email) {
@@ -415,17 +585,5 @@ class ExamFlowIntegrationTest {
             Thread.sleep(50);
         }
         assertThat(participant(sessionId, email).getInviteStatus()).isEqualTo(expected);
-    }
-
-    private static byte[] xlsx(String[][] rows) throws Exception {
-        try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            XSSFSheet sheet = wb.createSheet();
-            for (int r = 0; r < rows.length; r++) {
-                var row = sheet.createRow(r);
-                for (int c = 0; c < rows[r].length; c++) row.createCell(c).setCellValue(rows[r][c]);
-            }
-            wb.write(out);
-            return out.toByteArray();
-        }
     }
 }

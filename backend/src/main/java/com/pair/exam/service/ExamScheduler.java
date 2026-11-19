@@ -1,5 +1,7 @@
 package com.pair.exam.service;
 
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -7,7 +9,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 주기 작업: 종료된 회차 자동 제출, 보관 기간 지난 감독 사진 삭제.
+ * 주기 작업: 종료된 회차 자동 제출, 시작 하루 전 알림 메일, 보관 기간 지난 감독 사진 삭제.
  * 서버가 여러 대가 되면 ShedLock 같은 분산 잠금이 필요하다 (지금은 한 대 기준).
  * 테스트에서는 pair.exam.scheduler-enabled=false 로 끄고 서비스를 직접 부른다.
  */
@@ -16,13 +18,19 @@ import org.springframework.stereotype.Component;
 public class ExamScheduler {
     private static final Logger log = LoggerFactory.getLogger(ExamScheduler.class);
     private static final long ONE_HOUR_MS = 3_600_000;
+    private static final long FIVE_MINUTES_MS = 300_000;
 
     private final AutoSubmitService autoSubmit;
     private final ProctorService proctor;
+    private final ReminderService reminders;
+    private final InviteMailer mailer;
 
-    public ExamScheduler(AutoSubmitService autoSubmit, ProctorService proctor) {
+    public ExamScheduler(AutoSubmitService autoSubmit, ProctorService proctor, ReminderService reminders,
+            InviteMailer mailer) {
         this.autoSubmit = autoSubmit;
         this.proctor = proctor;
+        this.reminders = reminders;
+        this.mailer = mailer;
     }
 
     @Scheduled(fixedDelayString = "${pair.exam.auto-submit-interval-ms:2000}")
@@ -33,6 +41,18 @@ public class ExamScheduler {
             } catch (RuntimeException e) {
                 log.error("회차 {} 자동 제출 실패. 다음 주기에 다시 시도합니다.", id, e);
             }
+        }
+    }
+
+    @Scheduled(fixedDelay = FIVE_MINUTES_MS, initialDelay = 30_000)
+    public void sendReminders() {
+        try {
+            List<Long> due = reminders.claimDue();
+            if (due.isEmpty()) return;
+            mailer.sendReminders(due);
+            log.info("시작 하루 전 알림 메일 {}건", due.size());
+        } catch (RuntimeException e) {
+            log.error("알림 메일 처리 실패", e);
         }
     }
 
