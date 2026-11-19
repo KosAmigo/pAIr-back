@@ -14,7 +14,7 @@ import com.pair.config.AiKeys;
 
 /**
  * 문서 조각과 검색 문장의 임베딩 (OpenAI text-embedding-3-small, 1536차원).
- * 모델 선택 근거: docs/기술검증_보고서.md 12번.
+ * 모델 선택 근거: pAIr-docs 기획/기술검증_보고서.md 12번.
  */
 @Component
 public class EmbeddingClient {

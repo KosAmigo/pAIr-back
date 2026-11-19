@@ -1,0 +1,4 @@
+// 저장소 최상위가 Gradle 루트다. IntelliJ 는 이 저장소 폴더를 열면 Gradle 프로젝트로 인식한다.
+// 백엔드 코드는 backend/ 하위 프로젝트에 있다. 실행: ./gradlew :backend:bootRun
+rootProject.name = 'pAIr-back'
+include 'backend'

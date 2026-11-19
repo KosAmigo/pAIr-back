@@ -3,9 +3,9 @@ package com.pair.scoring;
 import java.util.List;
 
 /**
- * 감점식 채점 기준표. 출처: docs/evaluation/채점_기준표.md
+ * 감점식 채점 기준표. 출처: pAIr-docs 평가/채점_기준표.md
  * 6개 항목(총 100점). 각 항목은 배점에서 시작해 체크 항목에 걸릴 때마다 감점한다.
- * 2026-11-12: 재현성을 빼고 문제 분해력, 위임 판단력을 넣었다 (docs/evaluation/새_평가기준_초안.md).
+ * 2026-11-12: 재현성을 빼고 문제 분해력, 위임 판단력을 넣었다 (pAIr-docs 평가/새_평가기준_초안.md).
  */
 public final class Rubric {
 
