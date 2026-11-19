@@ -4,11 +4,13 @@ server:
 spring:
   application:
     name: pair-backend
+  config:
+    import: optional:file:./application-secret.yml
   # 실전 시험 회차 DB. 저장소 루트에서 docker compose up -d 로 PostgreSQL 과 Mailpit 을 띄운다
   datasource:
-    url: ${PAIR_DB_URL:jdbc:postgresql://localhost:5432/pair}
-    username: ${PAIR_DB_USER:pair}
-    password: ${PAIR_DB_PASSWORD:pair}
+    url: ${PAIR_DB_URL:jdbc:postgresql://pair-db.c9806yki8nbh.ap-northeast-2.rds.amazonaws.com:5432/pair}
+    username: ${PAIR_DB_USER:postgres}
+    password: ${PAIR_DB_PASSWORD:}
   jpa:
     open-in-view: false
     hibernate:
