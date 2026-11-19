@@ -1,5 +1,6 @@
 package com.pair.config;
 
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "pair")
@@ -54,7 +55,18 @@ public record PairProperties(
         }
     }
 
-    public record Run(int timeoutSeconds) {}
+    /** dockerBin/dockerImage 는 pair.run.mode=docker 일 때만 쓴다. */
+    public record Run(int timeoutSeconds, String dockerBin, String dockerImage) {
+        @ConstructorBinding
+        public Run {
+            if (dockerBin == null || dockerBin.isBlank()) dockerBin = "docker";
+            if (dockerImage == null || dockerImage.isBlank()) dockerImage = "pair-sandbox";
+        }
+
+        public Run(int timeoutSeconds) {
+            this(timeoutSeconds, null, null);
+        }
+    }
 
     /** 채점 툴. dir: 프롬프트 버전과 샘플 응시 폴더(git 공유). parallel: 동시에 채점할 개수. */
     public record Grader(String dir, int parallel) {}
