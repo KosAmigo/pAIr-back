@@ -48,6 +48,20 @@ public class ApiExceptionHandler {
         return body(HttpStatus.BAD_REQUEST, "요청 형식이 올바르지 않습니다.");
     }
 
+    /** 경로는 있는데 메서드가 다름 (예: 취소로 바뀐 옛 DELETE). Allow 헤더로 쓸 수 있는 메서드를 알려 준다 */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    ResponseEntity<Map<String, String>> methodNotAllowed(org.springframework.web.HttpRequestMethodNotSupportedException e) {
+        var res = ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED);
+        if (e.getSupportedHttpMethods() != null) res.allow(e.getSupportedHttpMethods().toArray(org.springframework.http.HttpMethod[]::new));
+        return res.body(Map.of("message", "지원하지 않는 요청 방식입니다: " + e.getMethod()));
+    }
+
+    /** 요청 본문 형식이 다름 (예: JSON 자리에 form, 파일 업로드 자리에 JSON) */
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    ResponseEntity<Map<String, String>> unsupportedMediaType(Exception e) {
+        return body(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "요청 본문 형식이 올바르지 않습니다.");
+    }
+
     @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
     ResponseEntity<Map<String, String>> tooLarge(Exception e) {
         return body(HttpStatus.PAYLOAD_TOO_LARGE, "파일이 너무 큽니다 (최대 2MB).");
