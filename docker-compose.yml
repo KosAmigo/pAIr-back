@@ -1,6 +1,7 @@
 # 개발용 인프라: 실전 시험 회차 DB(PostgreSQL)와 초대 메일 확인용 SMTP(Mailpit)
 #   docker compose up -d
 #   메일함: http://localhost:8025
+name: pair  # 폴더 이름이 바뀌어도 같은 DB 볼륨(pair_pair-pg)을 쓴다
 services:
   postgres:
     image: postgres:17.6

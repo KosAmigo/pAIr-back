@@ -26,9 +26,9 @@ stop_box $B
 fi
 
 # 실제 과제(order-deadlock) 테스트를 10개 컨테이너에서 동시에 실행
-TASK="$ROOT/backend/src/main/resources/tasks/order-deadlock"
+TASK="$ROOT/src/main/resources/tasks/order-deadlock"
 W=$(mktemp -d); cp -r "$TASK/files/." "$W/"; cp -r "$TASK/hidden/shop" "$W/test/"
-cp "$ROOT/backend/src/test/resources/solutions/order-deadlock/OrderService.java" "$W/src/shop/"
+cp "$ROOT/src/test/resources/solutions/order-deadlock/OrderService.java" "$W/src/shop/"
 N=${N:-10}; for i in $(seq 1 $N); do stop_box pair-poc-c$i; done
 t0=$(ms)
 for i in $(seq 1 $N); do (

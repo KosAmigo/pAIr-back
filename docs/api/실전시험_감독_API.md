@@ -2,7 +2,7 @@
 
 > 작성: 팀원 4 (실전 시험 흐름) · 2026-11-19
 > 프론트는 이 명세대로만 부른다. 호출 코드는 `frontend/src/proctor/api/proctorApi.ts` 한 파일에 모여 있어서, 주소가 바뀌면 그 파일만 고치면 된다.
-> 참고 구현: 이 저장소 `backend/src/main/java/com/pair/exam/` (Spring Boot, JPA, PostgreSQL). 그대로 옮겨 써도 된다.
+> 참고 구현: 이 저장소 `src/main/java/com/pair/exam/` (Spring Boot, JPA, PostgreSQL). 그대로 옮겨 써도 된다.
 
 ## 0. 공통
 
@@ -190,5 +190,5 @@ PC  ◀── paired {pairCode, phoneUrl} ──  서버   (PC 는 phoneUrl 을 
 
 ## 5. 테이블
 
-`backend/src/main/resources/db/migration/V1__exam_sessions.sql` 참고:
+`src/main/resources/db/migration/V1__exam_sessions.sql` 참고:
 `exam_sessions`, `exam_session_tasks`, `exam_participants`, `participant_attempts`, `proctor_consents`, `proctor_events`
