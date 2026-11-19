@@ -18,19 +18,19 @@ import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
-import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
 
 import com.pair.config.PairProperties;
 
 /**
  * 응시자 코드를 javac 로 컴파일하고 별도 JVM 에서 JUnit 콘솔 런처로 테스트를 돌린다.
  * 파일럿(혼자 검증) 전용: 격리 없이 이 컴퓨터에서 바로 실행한다.
+ * 설정 {@code pair.run.mode=local}(기본)일 때 쓴다. 격리 컨테이너로 실행하려면 {@code docker} ({@link SandboxRunner}).
  */
 @Component
+@ConditionalOnProperty(prefix = "pair.run", name = "mode", havingValue = "local", matchIfMissing = true)
 public class LocalJvmRunner implements CodeRunner {
 
     private final int timeoutSeconds;
@@ -99,12 +99,12 @@ public class LocalJvmRunner implements CodeRunner {
                 proc.destroyForcibly();
                 reader.join(2000);
                 lines.add("[TIMEOUT] " + timeoutSeconds + "초 안에 끝나지 않아 실행을 중단했습니다. 교착 상태일 수 있습니다.");
-                List<TestCase> tests = parseReports(reports);
+                List<TestCase> tests = JunitReports.parseDir(reports);
                 long passed = tests.stream().filter(TestCase::passed).count();
                 return new RunResult(true, lines, (int) passed, Math.max(1, tests.size() - (int) passed), tests, diags, elapsed(started));
             }
             reader.join(2000);
-            List<TestCase> tests = parseReports(reports);
+            List<TestCase> tests = JunitReports.parseDir(reports);
             int passed = (int) tests.stream().filter(TestCase::passed).count();
             int failed = tests.size() - passed;
             return new RunResult(true, lines, passed, failed, tests, diags, elapsed(started));
@@ -180,35 +180,6 @@ public class LocalJvmRunner implements CodeRunner {
             lines.add("[" + severity.toUpperCase() + "] " + file + ":" + d.getLineNumber() + ":" + d.getColumnNumber() + " " + msg);
             out.add(new CompileDiagnostic(file, d.getLineNumber(), d.getColumnNumber(), severity, msg));
         });
-    }
-
-    private List<TestCase> parseReports(Path reports) {
-        List<TestCase> out = new ArrayList<>();
-        if (!Files.isDirectory(reports)) return out;
-        try (Stream<Path> s = Files.list(reports)) {
-            for (Path xml : s.filter(p -> p.getFileName().toString().startsWith("TEST-") && p.toString().endsWith(".xml")).toList()) {
-                var doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml.toFile());
-                NodeList cases = doc.getElementsByTagName("testcase");
-                for (int i = 0; i < cases.getLength(); i++) {
-                    Element tc = (Element) cases.item(i);
-                    String name = tc.getAttribute("classname") + "." + tc.getAttribute("name").replace("()", "");
-                    Element fail = first(tc, "failure");
-                    if (fail == null) fail = first(tc, "error");
-                    boolean skipped = first(tc, "skipped") != null;
-                    if (skipped) continue;
-                    String msg = fail == null ? null : fail.getAttribute("message");
-                    out.add(new TestCase(name, fail == null, msg));
-                }
-            }
-        } catch (Exception e) {
-            // 리포트를 못 읽으면 빈 결과로 둔다
-        }
-        return out;
-    }
-
-    private static Element first(Element parent, String tag) {
-        NodeList nl = parent.getElementsByTagName(tag);
-        return nl.getLength() == 0 ? null : (Element) nl.item(0);
     }
 
     static String junitConsoleJar() {

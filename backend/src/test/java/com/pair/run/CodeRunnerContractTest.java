@@ -10,19 +10,26 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import com.pair.config.PairProperties;
 import com.pair.task.TaskRepository;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
 
-/** 개발 과제 검증: 원본 코드는 숨은 필수 테스트에서 실패하고, 정답 코드는 모두 통과해야 한다. */
-class CodeRunnerTaskTest {
+/** 개발 과제 검증: 원본 코드는 숨은 필수 테스트에서 실패하고, 정답 코드는 모두 통과해야 한다. 컴파일 오류는 위치와 함께 알려야 한다. */
+abstract class CodeRunnerContractTest {
 
     private final TaskRepository tasks = new TaskRepository(JsonMapper.builder().findAndAddModules().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build());
-    private final CodeRunner runner = new LocalJvmRunner(new PairProperties(null, null, null, null,
-            new PairProperties.Run(60), null, null));
+    private CodeRunner runner;
+
+    /** 검사할 구현. 모든 CodeRunner 가 같은 계약을 지켜야 한다. */
+    abstract CodeRunner createRunner();
+
+    @BeforeEach
+    void setUp() {
+        runner = createRunner();
+    }
 
     private Map<String, String> srcPlusHidden(Map<String, String> src) {
         Map<String, String> all = new HashMap<>();
@@ -62,5 +69,14 @@ class CodeRunnerTaskTest {
         assertTrue(r.compiled());
         assertEquals(5, r.passed());
         assertEquals(0, r.failed());
+    }
+
+    @Test
+    void compileError_reportsFileAndLine() {
+        CodeRunner.BuildResult r = runner.build(Map.of("src/shop/Broken.java",
+                "package shop;\npublic class Broken {\n    int x = \"문자열\";\n}\n"));
+        assertFalse(r.compiled());
+        assertTrue(r.diagnostics().stream().anyMatch(d -> d.file().endsWith("Broken.java") && d.line() == 3 && d.severity().equals("error")),
+                r.diagnostics().toString());
     }
 }

@@ -116,7 +116,12 @@ pair:
 
   # 응시자 코드 테스트 실행
   run:
+    mode: local            # local = 이 서버의 JVM 에서 바로 실행(개발용), docker = 격리 컨테이너(sh docker/sandbox/build.sh 로 이미지 필요)
     timeout-seconds: 30
+    docker-bin: docker
+    docker-image: pair-sandbox
+    max-concurrent: 4      # docker 모드에서 동시에 돌 컨테이너 수. 서버 코어 수 이하로 (넘으면 느려져 정상 코드도 시간 초과로 실패)
+    queue-wait-seconds: 60 # 자리가 날 때까지 기다리는 최대 시간. 넘으면 실행을 거절한다
 
   # 채점 툴 (메인 화면 오른쪽 위 아이콘). 프롬프트 버전과 샘플 응시는 grader/ 폴더로 git 공유.
   grader:

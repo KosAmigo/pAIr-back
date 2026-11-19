@@ -1,5 +1,6 @@
 package com.pair.config;
 
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "pair")
@@ -54,7 +55,20 @@ public record PairProperties(
         }
     }
 
-    public record Run(int timeoutSeconds) {}
+    /** docker 로 시작하는 값은 pair.run.mode=docker 일 때만 쓴다. maxConcurrent 는 동시에 돌 컨테이너 수 상한, 넘으면 queueWaitSeconds 까지 줄을 선다. */
+    public record Run(int timeoutSeconds, String dockerBin, String dockerImage, int maxConcurrent, int queueWaitSeconds) {
+        @ConstructorBinding
+        public Run {
+            if (dockerBin == null || dockerBin.isBlank()) dockerBin = "docker";
+            if (dockerImage == null || dockerImage.isBlank()) dockerImage = "pair-sandbox";
+            if (maxConcurrent <= 0) maxConcurrent = 4;
+            if (queueWaitSeconds <= 0) queueWaitSeconds = 60;
+        }
+
+        public Run(int timeoutSeconds) {
+            this(timeoutSeconds, null, null, 0, 0);
+        }
+    }
 
     /** 채점 툴. dir: 프롬프트 버전과 샘플 응시 폴더(git 공유). parallel: 동시에 채점할 개수. */
     public record Grader(String dir, int parallel) {}
