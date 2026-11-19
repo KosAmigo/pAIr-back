@@ -25,6 +25,7 @@ import com.pair.attempt.db.AttemptReport;
 import com.pair.attempt.db.AttemptReportRepository;
 import com.pair.attempt.db.ChatTurnRecord;
 import com.pair.attempt.db.ChatTurnRecordRepository;
+import com.pair.scoring.ScoringReportReader;
 import com.pair.task.TaskCatalog;
 
 /**
@@ -44,13 +45,14 @@ public class DbAttemptStore implements AttemptStore {
     private final AttemptReportRepository reports;
     private final TaskCatalog catalog;
     private final ObjectMapper json;
+    private final ScoringReportReader scoringReports;
 
     /** DB task_id → 과제 내용 code. 과제 code 는 바뀌지 않아 한 번 읽으면 둔다 */
     private final Map<Long, String> taskCodes = new ConcurrentHashMap<>();
 
     public DbAttemptStore(AttemptRecordRepository records, AttemptFileRepository files, ChatTurnRecordRepository turns,
                           AttemptEventRecordRepository events, AttemptReportRepository reports, TaskCatalog catalog,
-                          ObjectMapper json) {
+                          ObjectMapper json, ScoringReportReader scoringReports) {
         this.records = records;
         this.files = files;
         this.turns = turns;
@@ -58,6 +60,7 @@ public class DbAttemptStore implements AttemptStore {
         this.reports = reports;
         this.catalog = catalog;
         this.json = json;
+        this.scoringReports = scoringReports;
     }
 
     // ── 응시 상태 ─────────────────────
@@ -189,7 +192,9 @@ public class DbAttemptStore implements AttemptStore {
     @Override
     @Transactional(readOnly = true)
     public JsonNode readReport(String id) {
-        return reports.findById(key(id)).map(r -> readTree(r.getReport())).orElse(null);
+        Long attemptId = key(id);
+        JsonNode stored = reports.findById(attemptId).map(r -> readTree(r.getReport())).orElse(null);
+        return scoringReports.overlay(attemptId, stored);
     }
 
     // ── 내부 ───────────────────────────

@@ -14,6 +14,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.BatchSize;
+
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -45,6 +47,7 @@ public class JudgeVerdictRecord {
     @Column(columnDefinition = "text")
     private String reason;
 
+    @BatchSize(size = 100)
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "verdict_evidences", joinColumns = @JoinColumn(name = "verdict_id"))
     @Column(name = "ref", nullable = false, length = 50)
