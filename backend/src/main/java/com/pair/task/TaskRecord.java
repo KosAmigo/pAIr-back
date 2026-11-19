@@ -9,6 +9,10 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.Getter;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /**
  * 과제 행 (ERD tasks). 목록·공개 상태·용도(SELF/LIVE)는 DB 가 맡고, 과제 내용(설명·파일·숨은 테스트)은 아직
  * classpath:tasks/{원본 code} 에 있어 TaskRepository 가 읽는다. 실전(LIVE) 과제는 자가진단 원본의 복사본이라
@@ -16,6 +20,8 @@ import jakarta.persistence.Table;
  */
 @Entity
 @Table(name = "tasks")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class TaskRecord {
 
     public enum Usage { SELF, LIVE }
@@ -60,8 +66,6 @@ public class TaskRecord {
     @Column(name = "published_at")
     private Instant publishedAt;
 
-    protected TaskRecord() {}
-
     /** 테스트·시드용 */
     public TaskRecord(Long id, String code, String title, String track, int timeLimitMin, Usage usage, Status status,
             Long parentTaskId, Long createdBy, Instant at) {
@@ -85,15 +89,4 @@ public class TaskRecord {
         if (next != Status.HIDDEN && publishedAt == null) publishedAt = at;
     }
 
-    public Long getId() { return id; }
-    public String getCode() { return code; }
-    public String getTitle() { return title; }
-    public String getTrack() { return track; }
-    public int getTimeLimitMin() { return timeLimitMin; }
-    public Usage getUsage() { return usage; }
-    public Status getStatus() { return status; }
-    public Long getParentTaskId() { return parentTaskId; }
-    public Long getCreatedBy() { return createdBy; }
-    public Instant getUpdatedAt() { return updatedAt; }
-    public Instant getPublishedAt() { return publishedAt; }
 }

@@ -8,9 +8,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 체크 항목 (ERD rubric_checks). track: ALL/DEV/BIZ, method: AUTO/JUDGE */
 @Entity
 @Table(name = "rubric_checks", uniqueConstraints = @UniqueConstraint(columnNames = {"code", "track"}))
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RubricCheckRecord {
 
     @Id
@@ -36,8 +42,6 @@ public class RubricCheckRecord {
     @Column(nullable = false, length = 300)
     private String label;
 
-    protected RubricCheckRecord() {}
-
     public RubricCheckRecord(String itemKey, String code, String track, String method, int points, String label) {
         this.itemKey = itemKey;
         this.code = code;
@@ -54,11 +58,4 @@ public class RubricCheckRecord {
         this.label = label;
     }
 
-    public Long getId() { return id; }
-    public String getItemKey() { return itemKey; }
-    public String getCode() { return code; }
-    public String getTrack() { return track; }
-    public String getMethod() { return method; }
-    public int getPoints() { return points; }
-    public String getLabel() { return label; }
 }

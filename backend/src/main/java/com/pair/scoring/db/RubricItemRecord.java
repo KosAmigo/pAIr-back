@@ -5,9 +5,15 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 역량 항목 (ERD rubric_items) */
 @Entity
 @Table(name = "rubric_items")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RubricItemRecord {
 
     @Id
@@ -23,8 +29,6 @@ public class RubricItemRecord {
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;
 
-    protected RubricItemRecord() {}
-
     public RubricItemRecord(String key, String name, int maxScore, int sortOrder) {
         this.key = key;
         this.name = name;
@@ -38,8 +42,4 @@ public class RubricItemRecord {
         this.sortOrder = sortOrder;
     }
 
-    public String getKey() { return key; }
-    public String getName() { return name; }
-    public int getMaxScore() { return maxScore; }
-    public int getSortOrder() { return sortOrder; }
 }

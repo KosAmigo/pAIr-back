@@ -14,9 +14,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 채점 모델 호출별 판정 (ERD judge_verdicts + verdict_evidences) */
 @Entity
 @Table(name = "judge_verdicts")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class JudgeVerdictRecord {
 
     @Id
@@ -44,8 +50,6 @@ public class JudgeVerdictRecord {
     @Column(name = "ref", nullable = false, length = 50)
     private Set<String> evidences = new LinkedHashSet<>();
 
-    protected JudgeVerdictRecord() {}
-
     public JudgeVerdictRecord(Long resultId, Long judgeCallId, boolean violated, int count, String reason, Set<String> evidences) {
         this.resultId = resultId;
         this.judgeCallId = judgeCallId;
@@ -55,11 +59,4 @@ public class JudgeVerdictRecord {
         this.evidences = new LinkedHashSet<>(evidences);
     }
 
-    public Long getId() { return id; }
-    public Long getResultId() { return resultId; }
-    public Long getJudgeCallId() { return judgeCallId; }
-    public boolean isViolated() { return violated; }
-    public int getCount() { return count; }
-    public String getReason() { return reason; }
-    public Set<String> getEvidences() { return evidences; }
 }

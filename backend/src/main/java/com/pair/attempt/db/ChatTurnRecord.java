@@ -13,9 +13,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
+import lombok.Getter;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /** AI 대화 한 턴 (ERD chat_turns). role 은 USER / AI */
 @Entity
 @Table(name = "chat_turns", uniqueConstraints = @UniqueConstraint(columnNames = {"attempt_id", "turn_no"}))
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ChatTurnRecord {
 
     @Id
@@ -58,8 +64,6 @@ public class ChatTurnRecord {
     @Column(name = "latency_ms")
     private Integer latencyMs;
 
-    protected ChatTurnRecord() {}
-
     public ChatTurnRecord(Long attemptId, int turnNo, String role, String content, String model, Integer inputTokens,
                           Integer outputTokens, Instant createdAt, String provider, String request, Integer latencyMs) {
         this.attemptId = attemptId;
@@ -75,15 +79,4 @@ public class ChatTurnRecord {
         this.latencyMs = latencyMs;
     }
 
-    public Long getAttemptId() { return attemptId; }
-    public int getTurnNo() { return turnNo; }
-    public String getRole() { return role; }
-    public String getContent() { return content; }
-    public String getModel() { return model; }
-    public Integer getInputTokens() { return inputTokens; }
-    public Integer getOutputTokens() { return outputTokens; }
-    public Instant getCreatedAt() { return createdAt; }
-    public String getProvider() { return provider; }
-    public String getRequest() { return request; }
-    public Integer getLatencyMs() { return latencyMs; }
 }

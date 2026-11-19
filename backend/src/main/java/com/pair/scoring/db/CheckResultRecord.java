@@ -8,9 +8,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 체크 결과 (ERD check_results). status: DEDUCTED/PASSED/SPLIT/NO_EVIDENCE/SKIPPED */
 @Entity
 @Table(name = "check_results", uniqueConstraints = @UniqueConstraint(columnNames = {"scoring_id", "check_id"}))
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CheckResultRecord {
 
     @Id
@@ -33,8 +39,6 @@ public class CheckResultRecord {
     @Column(columnDefinition = "text")
     private String reason;
 
-    protected CheckResultRecord() {}
-
     public CheckResultRecord(Long scoringId, Long checkId, int deducted, String status, String reason) {
         this.scoringId = scoringId;
         this.checkId = checkId;
@@ -43,10 +47,4 @@ public class CheckResultRecord {
         this.reason = reason;
     }
 
-    public Long getId() { return id; }
-    public Long getScoringId() { return scoringId; }
-    public Long getCheckId() { return checkId; }
-    public int getDeducted() { return deducted; }
-    public String getStatus() { return status; }
-    public String getReason() { return reason; }
 }

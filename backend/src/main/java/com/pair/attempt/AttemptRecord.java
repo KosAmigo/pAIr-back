@@ -14,12 +14,18 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.Getter;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /**
  * 응시 1건의 목록 정보 (ERD attempts): 누가(자가진단 회원 / 실전 대상자), 어떤 과제를, 어떤 상태로, 언제 시작·제출했는지.
  * 작업 파일(attempt_files)·대화(chat_turns)·작업 기록(attempt_events)·리포트(attempt_reports)는 DbAttemptStore 가 다룬다.
  */
 @Entity
 @Table(name = "attempts")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AttemptRecord {
 
     public enum Mode { SELF, LIVE }
@@ -80,8 +86,6 @@ public class AttemptRecord {
     @Column(name = "followup_answers")
     private String followupAnswers;
 
-    protected AttemptRecord() {}
-
     private AttemptRecord(Mode mode, Long userId, Long participantId, Long taskId, String assistantModel, Instant startedAt) {
         this.mode = mode;
         this.userId = userId;
@@ -125,19 +129,4 @@ public class AttemptRecord {
         return submittedAt != null;
     }
 
-    public Long getId() { return id; }
-    public Long getUserId() { return userId; }
-    public Long getParticipantId() { return participantId; }
-    public Long getTaskId() { return taskId; }
-    public Mode getMode() { return mode; }
-    public Attempt.Status getStatus() { return status; }
-    public String getAssistantModel() { return assistantModel; }
-    public Instant getStartedAt() { return startedAt; }
-    public Instant getSubmittedAt() { return submittedAt; }
-    public Instant getFollowupsDoneAt() { return followupsDoneAt; }
-    public String getProvider() { return provider; }
-    public Instant getFirstValidAt() { return firstValidAt; }
-    public String getError() { return error; }
-    public String getFollowupQuestions() { return followupQuestions; }
-    public String getFollowupAnswers() { return followupAnswers; }
 }

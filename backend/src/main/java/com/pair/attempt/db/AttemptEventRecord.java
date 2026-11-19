@@ -12,9 +12,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.Getter;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /** 작업 기록 (ERD attempt_events). type 은 START, SAVE, BUILD, RUN, CHAT, CHAT_EMPTY, AI_EDIT, SUBMIT, FOLLOWUPS, FIRST_VALID */
 @Entity
 @Table(name = "attempt_events")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AttemptEventRecord {
 
     @Id
@@ -35,8 +41,6 @@ public class AttemptEventRecord {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    protected AttemptEventRecord() {}
-
     public AttemptEventRecord(Long attemptId, String type, String payload, Instant createdAt) {
         this.attemptId = attemptId;
         this.type = type;
@@ -44,9 +48,4 @@ public class AttemptEventRecord {
         this.createdAt = createdAt;
     }
 
-    public Long getId() { return id; }
-    public Long getAttemptId() { return attemptId; }
-    public String getType() { return type; }
-    public String getPayload() { return payload; }
-    public Instant getCreatedAt() { return createdAt; }
 }

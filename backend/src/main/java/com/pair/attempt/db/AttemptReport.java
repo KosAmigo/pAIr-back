@@ -10,9 +10,15 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.Getter;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /** 채점 리포트 (V5 attempt_reports). 응시당 최신 1건 */
 @Entity
 @Table(name = "attempt_reports")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AttemptReport {
 
     @Id
@@ -26,8 +32,6 @@ public class AttemptReport {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    protected AttemptReport() {}
-
     public AttemptReport(Long attemptId, String report, Instant at) {
         this.attemptId = attemptId;
         this.report = report;
@@ -39,7 +43,4 @@ public class AttemptReport {
         this.updatedAt = at;
     }
 
-    public Long getAttemptId() { return attemptId; }
-    public String getReport() { return report; }
-    public Instant getUpdatedAt() { return updatedAt; }
 }

@@ -9,9 +9,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 실제 응시 채점 (ERD scorings). status: RUNNING / DONE / ERROR */
 @Entity
 @Table(name = "scorings")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ScoringRecord {
 
     @Id
@@ -37,8 +43,6 @@ public class ScoringRecord {
     @Column(name = "finished_at")
     private Instant finishedAt;
 
-    protected ScoringRecord() {}
-
     public ScoringRecord(Long attemptId, Long versionId, Instant startedAt) {
         this.attemptId = attemptId;
         this.versionId = versionId;
@@ -57,11 +61,4 @@ public class ScoringRecord {
         this.finishedAt = at;
     }
 
-    public Long getId() { return id; }
-    public Long getAttemptId() { return attemptId; }
-    public Long getVersionId() { return versionId; }
-    public String getStatus() { return status; }
-    public String getError() { return error; }
-    public Instant getStartedAt() { return startedAt; }
-    public Instant getFinishedAt() { return finishedAt; }
 }

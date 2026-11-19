@@ -9,9 +9,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 채점 프롬프트 버전 (ERD prompt_versions). name 에는 파일 버전 id 를 넣어 찾는다. */
 @Entity
 @Table(name = "prompt_versions")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class PromptVersionRecord {
 
     @Id
@@ -37,8 +43,6 @@ public class PromptVersionRecord {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    protected PromptVersionRecord() {}
-
     public PromptVersionRecord(String name, String note, Long parentVersionId, String judgeSystem, boolean active, Instant createdAt) {
         this.name = name;
         this.note = note;
@@ -50,11 +54,4 @@ public class PromptVersionRecord {
 
     public void setActive(boolean active) { this.active = active; }
 
-    public Long getId() { return id; }
-    public String getName() { return name; }
-    public String getNote() { return note; }
-    public Long getParentVersionId() { return parentVersionId; }
-    public String getJudgeSystem() { return judgeSystem; }
-    public boolean isActive() { return active; }
-    public Instant getCreatedAt() { return createdAt; }
 }

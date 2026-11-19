@@ -9,10 +9,16 @@ import jakarta.persistence.Id;
 import jakarta.persistence.IdClass;
 import jakarta.persistence.Table;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 판정 기준 문장 (ERD prompt_check_hints) */
 @Entity
 @Table(name = "prompt_check_hints")
 @IdClass(PromptCheckHint.Key.class)
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class PromptCheckHint {
 
     public static class Key implements Serializable {
@@ -48,15 +54,10 @@ public class PromptCheckHint {
     @Column(nullable = false, columnDefinition = "text")
     private String hint;
 
-    protected PromptCheckHint() {}
-
     public PromptCheckHint(Long versionId, Long checkId, String hint) {
         this.versionId = versionId;
         this.checkId = checkId;
         this.hint = hint;
     }
 
-    public Long getVersionId() { return versionId; }
-    public Long getCheckId() { return checkId; }
-    public String getHint() { return hint; }
 }

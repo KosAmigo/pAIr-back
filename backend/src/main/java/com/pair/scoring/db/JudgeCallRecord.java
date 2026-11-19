@@ -7,9 +7,15 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
 /** 채점 모델 호출 한 번 (ERD judge_calls) */
 @Entity
 @Table(name = "judge_calls")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class JudgeCallRecord {
 
     @Id
@@ -32,8 +38,6 @@ public class JudgeCallRecord {
     @Column(name = "cached_tokens", nullable = false)
     private int cachedTokens;
 
-    protected JudgeCallRecord() {}
-
     public JudgeCallRecord(Long scoringId, String model, int inputTokens, int outputTokens, int cachedTokens) {
         this.scoringId = scoringId;
         this.model = model;
@@ -42,10 +46,4 @@ public class JudgeCallRecord {
         this.cachedTokens = cachedTokens;
     }
 
-    public Long getId() { return id; }
-    public Long getScoringId() { return scoringId; }
-    public String getModel() { return model; }
-    public int getInputTokens() { return inputTokens; }
-    public int getOutputTokens() { return outputTokens; }
-    public int getCachedTokens() { return cachedTokens; }
 }

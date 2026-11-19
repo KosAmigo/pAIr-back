@@ -10,9 +10,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 
+import lombok.Getter;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
 /** 응시 작업 파일 (ERD attempt_files). 경로마다 최신 내용 한 행 */
 @Entity
 @Table(name = "attempt_files", uniqueConstraints = @UniqueConstraint(columnNames = {"attempt_id", "path"}))
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AttemptFile {
 
     @Id
@@ -32,8 +38,6 @@ public class AttemptFile {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    protected AttemptFile() {}
-
     public AttemptFile(Long attemptId, String path, String content, Instant at) {
         this.attemptId = attemptId;
         this.path = path;
@@ -46,8 +50,4 @@ public class AttemptFile {
         this.updatedAt = at;
     }
 
-    public Long getAttemptId() { return attemptId; }
-    public String getPath() { return path; }
-    public String getContent() { return content; }
-    public Instant getUpdatedAt() { return updatedAt; }
 }
