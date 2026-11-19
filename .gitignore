@@ -70,3 +70,7 @@ grader/runs/
 # Python 실행 캐시
 __pycache__/
 *.pyc
+poc/rag/extract/gradle/wrapper/gradle-wrapper.properties
+poc/rag/extract/gradle/wrapper/gradle-wrapper.jar
+poc/rag/extract/gradlew
+poc/rag/extract/gradlew.bat
