@@ -1,0 +1,161 @@
+package com.pair.attempt;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.UUID;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import com.pair.task.TaskFileRecordRepository;
+import com.pair.task.TaskQuestionRecordRepository;
+import com.pair.task.TaskRecordRepository;
+import com.pair.task.TestTasks;
+import com.pair.web.auth.AuthDtos;
+import com.pair.web.auth.AuthService;
+import com.pair.web.auth.AuthTestSupport;
+
+/** 두 풀이의 감점 근거 비교: 어느 체크가 감점에서 통과로 바뀌었는지 항목·체크별로 맞춘다 */
+@SpringBootTest(properties = "pair.auth.mode=bearer")
+@AutoConfigureMockMvc
+@ActiveProfiles("examtest")
+class ReplayCompareTest {
+
+    @Autowired MockMvc mvc;
+    @Autowired AuthService auth;
+    @MockitoBean JavaMailSender mail;
+    @Autowired AttemptService attempts;
+    @Autowired AttemptStore store;
+    @Autowired ReplayCompareService compare;
+    @Autowired TaskRecordRepository taskRecords;
+    @Autowired TaskFileRecordRepository taskFiles;
+    @Autowired TaskQuestionRecordRepository taskQuestions;
+
+    AuthDtos.AuthResponse owner;
+    String a;
+    String b;
+
+    @BeforeEach
+    void setUp() {
+        TestTasks.seed(taskRecords, taskFiles, taskQuestions);
+        owner = signup();
+        a = attempts.startSelf(TestTasks.SELF_DEV, owner.user().id()).id();
+        b = attempts.startSelf(TestTasks.SELF_DEV, owner.user().id()).id();
+        // A: C1 감점(-3), C2 통과 / B: C1 통과, C2 통과, C3 는 B 에만 있다
+        finish(a, report(12, check("C1", "AI 제안을 검증 없이 적용", "DEDUCTED", 3, "테스트 없이 적용", List.of("#T03")), check("C2", "원인 설명", "PASSED", 0, null, List.of())));
+        finish(b, report(18, check("C1", "AI 제안을 검증 없이 적용", "PASSED", 0, null, List.of("테스트 실행")), check("C2", "원인 설명", "PASSED", 0, null, List.of()),
+                check("C3", "추가 체크", "SKIPPED", 0, null, List.of())));
+    }
+
+    private AuthDtos.AuthResponse signup() {
+        return AuthTestSupport.signup(auth, mail, "Test", UUID.randomUUID() + "@example.com");
+    }
+
+    private static Map<String, Object> check(String code, String label, String status, int deducted, String reason, List<String> evidence) {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("code", code);
+        m.put("label", label);
+        m.put("method", "JUDGE");
+        m.put("points", 3);
+        m.put("deducted", deducted);
+        m.put("status", status);
+        m.put("evidence", evidence);
+        m.put("reason", reason);
+        return m;
+    }
+
+    @SafeVarargs
+    private static Map<String, Object> report(int score, Map<String, Object>... checks) {
+        return Map.of("version", 2, "total", score, "max", 20,
+                "items", List.of(Map.of("key", "control", "name", "AI 통제력", "max", 20, "score", score, "checks", List.of(checks))));
+    }
+
+    private void finish(String id, Map<String, Object> report) {
+        Instant t = Instant.now();
+        store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+        store.writeReport(id, report);
+    }
+
+    @Test
+    void 점수가_달라진_이유를_체크별로_맞춰_준다() {
+        var r = compare.compare(owner.user().id(), a, b);
+
+        assertThat(r.items()).hasSize(1);
+        var item = r.items().get(0);
+        assertThat(item.name()).isEqualTo("AI 통제력");
+        assertThat(item.a()).isEqualTo(12);
+        assertThat(item.b()).isEqualTo(18);
+
+        var c1 = item.checks().get(0);
+        assertThat(c1.code()).isEqualTo("C1");
+        assertThat(c1.changed()).isTrue();
+        assertThat(c1.a().status()).isEqualTo("DEDUCTED");
+        assertThat(c1.a().deducted()).isEqualTo(3);
+        assertThat(c1.a().reason()).isEqualTo("테스트 없이 적용");
+        assertThat(c1.a().evidence()).containsExactly("#T03");
+        assertThat(c1.b().status()).isEqualTo("PASSED");
+
+        // 같은 결과면 changed 가 아니다
+        assertThat(item.checks().get(1).changed()).isFalse();
+        // B 에만 있는 체크는 a 가 null
+        var c3 = item.checks().get(2);
+        assertThat(c3.code()).isEqualTo("C3");
+        assertThat(c3.a()).isNull();
+        assertThat(c3.b().status()).isEqualTo("SKIPPED");
+    }
+
+    @Test
+    void 채점이_끝나지_않았거나_이전_형식이면_비교할_수_없다() {
+        String solving = attempts.startSelf(TestTasks.SELF_DEV, owner.user().id()).id();
+        assertThatThrownBy(() -> compare.compare(owner.user().id(), a, solving)).isInstanceOf(IllegalStateException.class);
+
+        store.writeReport(b, Map.of("version", 1, "total", 70));
+        assertThatThrownBy(() -> compare.compare(owner.user().id(), a, b)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 남의_응시나_없는_응시는_404로_본다() {
+        var other = signup();
+        String othersAttempt = attempts.startSelf(TestTasks.SELF_DEV, other.user().id()).id();
+        assertThatThrownBy(() -> compare.compare(owner.user().id(), a, othersAttempt)).isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> compare.compare(owner.user().id(), a, "999999")).isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> compare.compare(owner.user().id(), a, "abc")).isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void API_는_주인만_쓸_수_있고_남의_응시를_with_로_넣어도_막힌다() throws Exception {
+        String token = "Bearer " + owner.token();
+        mvc.perform(get("/api/attempts/{id}/compare", a).param("with", b).header("Authorization", token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].checks[0].a.status").value("DEDUCTED"))
+                .andExpect(jsonPath("$.items[0].checks[0].b.status").value("PASSED"))
+                .andExpect(jsonPath("$.items[0].checks[0].changed").value(true));
+
+        mvc.perform(get("/api/attempts/{id}/compare", a).param("with", b)).andExpect(status().isUnauthorized());
+
+        var other = signup();
+        String othersAttempt = attempts.startSelf(TestTasks.SELF_DEV, other.user().id()).id();
+        mvc.perform(get("/api/attempts/{id}/compare", a).param("with", othersAttempt).header("Authorization", token)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/attempts/{id}/compare", othersAttempt).param("with", a).header("Authorization", token)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/attempts/{id}/compare", a).param("with", solvingOf()).header("Authorization", token)).andExpect(status().isBadRequest());
+    }
+
+    private String solvingOf() {
+        return attempts.startSelf(TestTasks.SELF_DEV, owner.user().id()).id();
+    }
+}

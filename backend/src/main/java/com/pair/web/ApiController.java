@@ -44,11 +44,12 @@ public class ApiController {
     private final com.pair.attempt.RollbackService rollbacks;
     private final com.pair.attempt.ReplayTreeService replayTree;
     private final com.pair.question.QuestionService questions;
+    private final com.pair.attempt.ReplayCompareService replayCompare;
 
     public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.config.PairProperties props,
             AttemptRecordRepository records, TaskCatalog catalog, com.pair.attempt.CheckpointService checkpoints,
             com.pair.attempt.RollbackService rollbacks, com.pair.attempt.ReplayTreeService replayTree,
-            com.pair.question.QuestionService questions) {
+            com.pair.question.QuestionService questions, com.pair.attempt.ReplayCompareService replayCompare) {
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
@@ -59,6 +60,7 @@ public class ApiController {
         this.rollbacks = rollbacks;
         this.replayTree = replayTree;
         this.questions = questions;
+        this.replayCompare = replayCompare;
     }
 
     public record CheckpointLabelRequest(String label) {}
@@ -252,6 +254,12 @@ public class ApiController {
     @GetMapping("/attempts/{id}/tree")
     public List<com.pair.attempt.ReplayTreeService.Node> tree(CurrentUser user, @PathVariable String id) {
         return replayTree.tree(user.userId(), id);
+    }
+
+    /** 복기 비교: 두 풀이의 감점 근거를 항목·체크별로 나란히 준다(채점이 끝난 내 풀이만) */
+    @GetMapping("/attempts/{id}/compare")
+    public com.pair.attempt.ReplayCompareService.Result compare(CurrentUser user, @PathVariable String id, @RequestParam("with") String with) {
+        return replayCompare.compare(user.userId(), id, with);
     }
 
     /** 롤백: 체크포인트에서 갈라진 새 응시를 만든다 */
