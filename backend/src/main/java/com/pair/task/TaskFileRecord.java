@@ -63,4 +63,8 @@ public class TaskFileRecord {
         this.visibility = visibility;
         this.readOnly = readOnly;
     }
+
+    public void setStorageKey(String storageKey) {
+        this.storageKey = storageKey;
+    }
 }
