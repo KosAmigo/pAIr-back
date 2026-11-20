@@ -112,4 +112,22 @@ class TaskFileStorageConfigTest {
         assertThat(get.getValue().key()).startsWith("task-files/");
         assertThat(del.getValue().key()).startsWith("task-files/");
     }
+
+    @Test
+    @DisplayName("S3 접속 키: 둘 다 있으면 정적 키, 둘 다 없으면 기본 체인, 하나만 있으면 오류(키 값은 메시지에 없음)")
+    void s3Credentials() {
+        var st = com.pair.exam.service.S3Clients.credentials("AKIATESTKEY123", "SECRETVALUE456");
+        assertThat(st).isInstanceOf(software.amazon.awssdk.auth.credentials.StaticCredentialsProvider.class);
+        assertThat(st.resolveCredentials().accessKeyId()).isEqualTo("AKIATESTKEY123");
+        assertThat(com.pair.exam.service.S3Clients.credentials("", " "))
+                .isInstanceOf(software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider.class);
+        assertThat(com.pair.exam.service.S3Clients.credentials(null, null))
+                .isInstanceOf(software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider.class);
+
+        assertThatThrownBy(() -> com.pair.exam.service.S3Clients.credentials("AKIATESTKEY123", ""))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("둘 다")
+                .hasMessageNotContaining("AKIATESTKEY123");
+        assertThatThrownBy(() -> com.pair.exam.service.S3Clients.credentials(null, "SECRETVALUE456"))
+                .isInstanceOf(IllegalStateException.class).hasMessageNotContaining("SECRETVALUE456");
+    }
 }
