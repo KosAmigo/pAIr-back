@@ -1,6 +1,7 @@
 package com.pair.scoring;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -74,6 +75,7 @@ class ScoringRecordsTest {
     @BeforeEach
     void setUp() {
         TestTasks.seed(taskRecords);
+        TestPromptVersions.ensure(versions, version);
         attemptId = registry.save(AttemptRecord.self(1L, 1L, "gpt-test", now)).getId();
     }
 
@@ -89,23 +91,14 @@ class ScoringRecordsTest {
     }
 
     @Test
-    void 버전과_힌트는_한_번만_들어가고_활성이_된다() {
+    void 버전_id는_name으로_행을_찾기만_한다() {
         long a = catalog.versionId(version);
-        long b = catalog.versionId(version);
-        assertThat(a).isEqualTo(b);
-        assertThat(versions.findAll().stream().filter(v -> v.getName().equals(version.id()))).hasSize(1);
-        long judgeCount = Rubric.CHECKS.stream().filter(c -> c.method() == Rubric.Method.JUDGE).count();
-        assertThat(hints.findByVersionId(a)).hasSize((int) judgeCount);
-
-        // 다른 버전을 쓰면 활성이 옮겨 가고, 바탕 버전이 이어진다
-        PromptVersion child = new PromptVersion("20261119-1500_v7-test", "v7", null, null, version.id(), "규칙2", Map.of());
-        long c = catalog.versionId(child);
-        PromptVersionRecord parent = versions.findById(a).orElseThrow();
-        PromptVersionRecord childRec = versions.findById(c).orElseThrow();
-        assertThat(parent.isActive()).isFalse();
-        assertThat(childRec.isActive()).isTrue();
-        assertThat(childRec.getParentVersionId()).isEqualTo(a);
-        assertThat(versions.findByActiveTrue()).hasSize(1);
+        assertThat(catalog.versionId(version)).isEqualTo(a);
+        assertThat(versions.findById(a).orElseThrow().getName()).isEqualTo(version.id());
+        long before = versions.count();
+        assertThatThrownBy(() -> catalog.versionId(new PromptVersion("없는-버전", "x", null, now, null, "규칙", Map.of())))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(versions.count()).isEqualTo(before); // 없는 버전을 새로 넣지 않는다
     }
 
     @Test
@@ -171,21 +164,5 @@ class ScoringRecordsTest {
         assertThat(s.getStatus()).isEqualTo("ERROR");
         assertThat(s.getError()).isEqualTo("채점 모델이 모두 실패");
         assertThat(s.getFinishedAt()).isNotNull();
-    }
-
-    @Test
-    void 이미_활성인_버전은_다시_불러도_아무것도_쓰지_않는다() {
-        long a = catalog.versionId(version);
-        PromptVersion other = new PromptVersion("20261120-0900_idem-test", "o", null, now, null, "규칙", Map.of());
-        long b = catalog.versionId(other); // b 가 활성이 되고 a 는 꺼진다
-        assertThat(versions.findById(a).orElseThrow().isActive()).isFalse();
-
-        // 일부러 a 도 켜 둔다. b 를 다시 불렀을 때 쓰기가 일어난다면 a 가 다시 꺼질 것이다.
-        PromptVersionRecord ra = versions.findById(a).orElseThrow();
-        ra.setActive(true);
-        versions.save(ra);
-
-        assertThat(catalog.versionId(other)).isEqualTo(b);
-        assertThat(versions.findById(a).orElseThrow().isActive()).isTrue();
     }
 }

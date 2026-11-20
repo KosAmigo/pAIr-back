@@ -1,85 +1,122 @@
 package com.pair.task;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.TreeMap;
 
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-/** classpath:tasks/{id}/ 아래의 과제 정의와 파일을 읽는다. */
+/**
+ * DB(tasks, task_files, task_questions)에서 과제 내용을 읽는다.
+ * 조회할 때마다 DB 를 읽으므로 나중에 새로 들어온 과제(AI 생성 등)도 재시작 없이 보인다.
+ * 실전(LIVE) 복사본은 내용 행이 없어 여기서 찾지 못한다. TaskCatalog 가 원본 code 로 바꿔 부른다.
+ */
 @Component
 public class TaskRepository {
 
+    /** 직군별 안내 문구. 과제 내용이 아니라 평가 방식 안내라 코드에 둔다 */
+    private static final List<String> NOTES_DEV = List.of(
+            "AI 답변을 그대로 믿지 말고 직접 검증하는 과정도 평가에 포함됩니다.",
+            "AI는 대화창에 붙여 넣은 내용만 볼 수 있습니다. 필요한 코드와 로그는 직접 전달하세요.",
+            "외부 검색은 허용되지 않습니다.");
+    private static final List<String> NOTES_BIZ = List.of(
+            "AI 답변을 그대로 믿지 말고 직접 검증하는 과정도 평가에 포함됩니다.",
+            "AI는 대화창에 붙여 넣은 내용만 볼 수 있습니다. 필요한 자료는 직접 전달하세요.",
+            "외부 검색은 허용되지 않습니다.");
+
+    private final TaskRecordRepository records;
+    private final TaskFileRecordRepository files;
+    private final TaskQuestionRecordRepository questions;
     private final ObjectMapper json;
-    private final PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-    private final Map<String, TaskDef> tasks = new LinkedHashMap<>();
 
-    public TaskRepository(ObjectMapper json) {
+    public TaskRepository(TaskRecordRepository records, TaskFileRecordRepository files,
+            TaskQuestionRecordRepository questions, ObjectMapper json) {
+        this.records = records;
+        this.files = files;
+        this.questions = questions;
         this.json = json;
-        for (String id : new String[] {"order-deadlock", "pricing-plan"}) {
-            Resource r = resolver.getResource("classpath:tasks/" + id + "/task.json");
-            try (InputStream in = r.getInputStream()) {
-                tasks.put(id, json.readValue(in, TaskDef.class));
-            } catch (IOException e) {
-                throw new UncheckedIOException("과제 정의를 읽지 못했습니다: " + id, e);
-            }
-        }
     }
 
-    /** 모든 과제 (읽은 순서). 관리자 과제 콘솔 목록용 */
-    public java.util.List<TaskDef> all() {
-        return java.util.List.copyOf(tasks.values());
+    /** 내용이 DB 에 있는 모든 과제 (원본만, 번호 순). 관리자 과제 콘솔 목록용 */
+    @Transactional(readOnly = true)
+    public List<TaskDef> all() {
+        return records.findAllByOrderByIdAsc().stream().filter(TaskRepository::hasContent).map(this::toDef).toList();
     }
 
-    /** 이 code 의 과제 내용 파일이 있는지 (실전 복사본은 없다) */
+    /** 이 code 의 과제 내용이 DB 에 있는지 (실전 복사본은 없다) */
+    @Transactional(readOnly = true)
     public boolean has(String id) {
-        return tasks.containsKey(id);
+        return records.findByCode(id).filter(TaskRepository::hasContent).isPresent();
     }
 
+    @Transactional(readOnly = true)
     public TaskDef get(String id) {
-        TaskDef t = tasks.get(id);
-        if (t == null) throw new NoSuchElementException("없는 과제입니다: " + id);
-        return t;
+        return toDef(find(id));
     }
 
     /** 응시자에게 보이는 파일들 (상대 경로 → 내용). */
+    @Transactional(readOnly = true)
     public Map<String, String> visibleFiles(String id) {
-        return readTree(id, "files");
+        return readFiles(find(id), TaskFileRecord.VISIBLE);
     }
 
     /** 숨은 테스트, 체크리스트 (상대 경로 → 내용). API로 내보내지 않는다. */
+    @Transactional(readOnly = true)
     public Map<String, String> hiddenFiles(String id) {
-        return readTree(id, "hidden");
+        return readFiles(find(id), TaskFileRecord.HIDDEN);
     }
 
-    private Map<String, String> readTree(String id, String folder) {
-        get(id);
+    private TaskRecord find(String id) {
+        return records.findByCode(id).filter(TaskRepository::hasContent)
+                .orElseThrow(() -> new NoSuchElementException("없는 과제입니다: " + id));
+    }
+
+    /** 복사본이 아니고 settings 까지 채워진 행만 내용이 있는 과제로 본다 */
+    private static boolean hasContent(TaskRecord t) {
+        return t.getParentTaskId() == null && t.getSettings() != null;
+    }
+
+    private TaskDef toDef(TaskRecord t) {
+        Settings s = readSettings(t);
+        List<String> followUps = questions
+                .findByTaskIdAndStageAndActiveTrueOrderBySeqAsc(t.getId(), TaskQuestionRecord.FOLLOWUP).stream()
+                .map(TaskQuestionRecord::getContent).toList();
+        boolean dev = "DEV".equalsIgnoreCase(t.getTrack());
+        return new TaskDef(t.getCode(), t.getTrack().toLowerCase(), t.getTitle(), t.getTimeLimitMin(),
+                lines(t.getDescription()), lines(t.getRequirements()), dev ? NOTES_DEV : NOTES_BIZ, followUps,
+                s.openFile, s.d4Minutes == null ? List.of() : s.d4Minutes,
+                s.requiredHeadings == null ? List.of() : s.requiredHeadings, s.editableFile);
+    }
+
+    private static List<String> lines(String text) {
+        if (text == null || text.isBlank()) return List.of();
+        return Arrays.stream(text.split("\\R")).filter(l -> !l.isBlank()).toList();
+    }
+
+    /** 텍스트 파일(content 가 있는 것)만 읽는다. storage_key 만 있는 바이너리(PDF)는 아직 지원하지 않아 건너뛴다. */
+    private Map<String, String> readFiles(TaskRecord t, String visibility) {
         Map<String, String> out = new TreeMap<>();
-        String base = "tasks/" + id + "/" + folder + "/";
-        try {
-            for (Resource r : resolver.getResources("classpath*:" + base + "**/*")) {
-                if (!r.isReadable()) continue;
-                String url = r.getURL().toString().replace('\\', '/');
-                int at = url.indexOf(base);
-                if (at < 0) continue;
-                String rel = java.net.URLDecoder.decode(url.substring(at + base.length()), StandardCharsets.UTF_8);
-                if (rel.isEmpty() || rel.endsWith("/")) continue;
-                try (InputStream in = r.getInputStream()) {
-                    out.put(rel, new String(in.readAllBytes(), StandardCharsets.UTF_8));
-                }
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        for (TaskFileRecord f : files.findByTaskIdAndVisibilityOrderByPathAsc(t.getId(), visibility)) {
+            if (f.getContent() != null) out.put(f.getPath(), f.getContent());
         }
         return out;
     }
+
+    private Settings readSettings(TaskRecord t) {
+        try {
+            return json.readValue(t.getSettings(), Settings.class);
+        } catch (IOException e) {
+            throw new IllegalStateException("과제 settings 를 읽지 못했습니다: " + t.getCode(), e);
+        }
+    }
+
+    /** tasks.settings JSON 모양 */
+    private record Settings(String openFile, String editableFile, List<String> requiredHeadings,
+            List<Integer> d4Minutes) {}
 }

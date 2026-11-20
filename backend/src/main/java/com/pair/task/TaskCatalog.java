@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 과제 code(화면·API 에서 쓰는 이름) ↔ tasks.task_id(DB 외래 키) 변환과, 과제 행 → 과제 내용(TaskDef) 연결.
- * 실전 복사본(order-deadlock-live)은 내용 파일이 따로 없어 원본(parent) code 로 내용을 찾는다.
+ * 실전 복사본(order-deadlock-live)은 내용 행이 따로 없어 원본(parent) code 로 내용을 찾는다.
  */
 @Service
 public class TaskCatalog {

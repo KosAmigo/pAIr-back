@@ -9,4 +9,8 @@ public interface PromptVersionRecordRepository extends JpaRepository<PromptVersi
     Optional<PromptVersionRecord> findFirstByNameOrderByIdAsc(String name);
 
     List<PromptVersionRecord> findByActiveTrue();
+
+    boolean existsByName(String name);
+
+    List<PromptVersionRecord> findAllByOrderByCreatedAtAscIdAsc();
 }

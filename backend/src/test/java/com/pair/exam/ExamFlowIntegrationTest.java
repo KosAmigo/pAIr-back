@@ -116,12 +116,14 @@ class ExamFlowIntegrationTest {
     @MockitoBean JavaMailSender mail;
 
     @Autowired com.pair.task.TaskRecordRepository taskRecords;
+    @Autowired com.pair.task.TaskFileRecordRepository taskFiles;
+    @Autowired com.pair.task.TaskQuestionRecordRepository taskQuestions;
 
     @BeforeEach
     void setUp() {
         clock.set(T0);
         // 테스트 DB 는 Flyway 를 안 돌리므로 V3 시드와 같은 과제 행을 넣는다
-        com.pair.task.TestTasks.seed(taskRecords);
+        com.pair.task.TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         when(attempts.submitAll(anyCollection())).thenAnswer(inv -> ((java.util.Collection<?>) inv.getArgument(0)).size());
         when(attempts.submitOne(anyString())).thenReturn(true);
     }

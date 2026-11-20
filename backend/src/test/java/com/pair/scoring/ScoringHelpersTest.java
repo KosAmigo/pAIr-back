@@ -10,9 +10,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-import com.pair.task.TaskRepository;
 
-import com.fasterxml.jackson.databind.json.JsonMapper;
 
 class ScoringHelpersTest {
 
@@ -61,16 +59,5 @@ class ScoringHelpersTest {
     void clock_formatsElapsed() {
         Instant start = Instant.parse("2026-11-11T00:00:00Z");
         assertEquals("01:02:03", ScoringService.clock(start, start.plusSeconds(3723)));
-    }
-
-    @Test
-    void taskLoader_doesNotExposeHiddenFiles() {
-        TaskRepository tasks = new TaskRepository(JsonMapper.builder().findAndAddModules().disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build());
-        Map<String, String> visible = tasks.visibleFiles("order-deadlock");
-        assertTrue(visible.containsKey("src/shop/OrderService.java"));
-        assertTrue(visible.keySet().stream().noneMatch(k -> k.contains("Hidden")));
-        assertTrue(tasks.hiddenFiles("order-deadlock").containsKey("shop/HiddenOrderTest.java"));
-        assertTrue(tasks.visibleFiles("pricing-plan").containsKey("자료/요금제별_매출.csv"));
-        assertEquals(List.of("## 결론", "## 근거", "## 리스크"), tasks.get("pricing-plan").requiredHeadings());
     }
 }

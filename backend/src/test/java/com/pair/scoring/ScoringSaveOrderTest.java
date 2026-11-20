@@ -50,6 +50,7 @@ class ScoringSaveOrderTest {
     @Autowired AttemptStore store;
     @Autowired AttemptRegistry registry;
     @Autowired TaskRecordRepository taskRecords;
+    @Autowired com.pair.scoring.db.PromptVersionRecordRepository promptVersions;
     @Autowired ScoringRecordRepository scorings;
     @Autowired CheckResultRecordRepository results;
 
@@ -60,6 +61,7 @@ class ScoringSaveOrderTest {
     @BeforeEach
     void setUp() {
         TestTasks.seed(taskRecords);
+        TestPromptVersions.ensure(promptVersions, version);
         AttemptRecord r = registry.save(AttemptRecord.self(1L, 1L, "gpt-test", now));
         id = String.valueOf(r.getId());
         store.create(new Attempt(id, TestTasks.SELF_DEV, "openai", "gpt-test", now, null, null, null,

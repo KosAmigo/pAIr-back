@@ -1,61 +1,55 @@
 package com.pair.grader;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.stream.Stream;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import com.pair.config.PairProperties;
 import com.pair.scoring.Rubric;
+import com.pair.scoring.Rubric.Check;
+import com.pair.scoring.ScoringCatalog;
 import com.pair.scoring.ScoringPrompts;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import com.pair.scoring.db.PromptCheckHint;
+import com.pair.scoring.db.PromptCheckHintRepository;
+import com.pair.scoring.db.PromptVersionRecord;
+import com.pair.scoring.db.PromptVersionRecordRepository;
 
 /**
- * 채점 프롬프트 버전 저장소.
- * - 버전: grader/versions/{id}.json (git 으로 공유. 한 번 저장한 버전은 고치지 않고 새 버전으로 저장)
- * - 실제 채점에 쓸 버전: grader/active.txt (git 으로 공유하는 팀 공용 설정)
+ * 채점 프롬프트 버전 저장소. 원본은 DB(prompt_versions, prompt_check_hints)다.
+ * - 버전 한 개 = prompt_versions 한 행. 한 번 저장한 버전은 고치지 않고 새 버전으로 저장한다.
+ * - 실제 채점에 쓸 버전 = is_active 인 행 하나(활성 변경은 한 트랜잭션에서 기존 활성 끄기 → 새로 켜기).
+ * - 옛 grader/versions 파일은 LegacyPromptFileImporter 가 시작할 때 DB 로 한 번 옮긴다.
  */
 @Component
 public class PromptStore {
 
-    private static final Logger log = LoggerFactory.getLogger(PromptStore.class);
     /** 2026-11-12: 6개 역량(재현성 제외, 문제 분해력·위임 판단력 추가) 기준의 기본 버전. v1_기본은 예전 5개 항목 기준. */
     public static final String DEFAULT_ID = "v2_기본";
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmm").withZone(ZoneId.of("Asia/Seoul"));
+    private static final int TITLE_MAX = 100;
 
-    private final Path dir;
-    private final Path activeFile;
-    private final ObjectMapper json;
-    private final ObjectMapper pretty;
+    private final PromptVersionRecordRepository versions;
+    private final PromptCheckHintRepository hints;
+    private final ScoringCatalog catalog;
+    private final TransactionTemplate tx;
 
-    public PromptStore(PairProperties props, ObjectMapper json) {
-        this.dir = Path.of(props.grader().dir(), "versions").toAbsolutePath();
-        this.activeFile = Path.of(props.grader().dir(), "active.txt").toAbsolutePath();
-        this.json = json;
-        this.pretty = json.copy().enable(SerializationFeature.INDENT_OUTPUT);
-        try {
-            Files.createDirectories(dir);
-            if (!Files.exists(file(DEFAULT_ID))) write(builtin());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+    public PromptStore(PromptVersionRecordRepository versions, PromptCheckHintRepository hints,
+                       ScoringCatalog catalog, PlatformTransactionManager txManager) {
+        this.versions = versions;
+        this.hints = hints;
+        this.catalog = catalog;
+        this.tx = new TransactionTemplate(txManager);
     }
 
     /** 코드 기본값으로 만든 버전 (v2_기본). */
@@ -66,31 +60,47 @@ public class PromptStore {
                 Instant.parse("2026-11-12T09:00:00Z"), null, ScoringPrompts.JUDGE_SYSTEM, checks);
     }
 
-    public List<PromptVersion> list() {
-        List<PromptVersion> out = new ArrayList<>();
-        try (Stream<Path> s = Files.list(dir)) {
-            for (Path p : s.filter(f -> f.toString().endsWith(".json")).toList()) {
-                try {
-                    out.add(json.readValue(p.toFile(), PromptVersion.class));
-                } catch (IOException | RuntimeException e) {
-                    log.warn("프롬프트 버전 파일을 읽지 못했습니다: {} ({})", p.getFileName(), e.getMessage());
-                }
+    /**
+     * 시작할 때: DB 에 버전이 하나도 없으면 내장 기본 버전을 넣고, 활성 버전이 없으면 기본 버전(없으면 가장 오래된 버전)을 활성으로 한다.
+     * 옛 파일 가져오기(LegacyPromptFileImporter)가 먼저 돈 뒤에 실행된다.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void onReady() {
+        ensureDefaults();
+    }
+
+    synchronized void ensureDefaults() {
+        Map<String, Long> ids = checkIds();
+        tx.executeWithoutResult(s -> {
+            if (versions.count() == 0) insertRow(builtin(), ids);
+            if (versions.findByActiveTrue().isEmpty()) {
+                PromptVersionRecord target = versions.findFirstByNameOrderByIdAsc(DEFAULT_ID)
+                        .orElseGet(() -> versions.findAllByOrderByCreatedAtAscIdAsc().stream().findFirst().orElse(null));
+                if (target != null) target.setActive(true);
             }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        });
+    }
+
+    public List<PromptVersion> list() {
+        List<PromptVersionRecord> recs = versions.findAllByOrderByCreatedAtAscIdAsc();
+        Map<Long, String> names = new HashMap<>();
+        for (PromptVersionRecord r : recs) names.put(r.getId(), r.getName());
+        Map<Long, String> keyById = keyById();
+        Map<Long, Map<Long, String>> hintsByVersion = new HashMap<>();
+        for (PromptCheckHint h : hints.findAll()) {
+            hintsByVersion.computeIfAbsent(h.getVersionId(), k -> new HashMap<>()).put(h.getCheckId(), h.getHint());
         }
-        out.sort(Comparator.comparing(PromptVersion::createdAt, Comparator.nullsFirst(Comparator.naturalOrder())));
+        List<PromptVersion> out = new ArrayList<>();
+        for (PromptVersionRecord r : recs) {
+            out.add(toVersion(r, names.get(r.getParentVersionId()), hintsByVersion.getOrDefault(r.getId(), Map.of()), keyById));
+        }
         return out;
     }
 
     public PromptVersion get(String id) {
-        Path p = file(id);
-        if (!Files.exists(p)) throw new NoSuchElementException("없는 프롬프트 버전입니다: " + id);
-        try {
-            return json.readValue(p.toFile(), PromptVersion.class);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        PromptVersionRecord r = versions.findFirstByNameOrderByIdAsc(id == null ? "" : id)
+                .orElseThrow(() -> new NoSuchElementException("없는 프롬프트 버전입니다: " + id));
+        return toVersion(r);
     }
 
     /** 새 버전 저장. id 는 "날짜-시각_이름". 같은 이름이 이미 있으면 뒤에 -2, -3 을 붙인다. */
@@ -101,7 +111,7 @@ public class PromptStore {
         Instant now = Instant.now();
         String base = STAMP.format(now) + "_" + name;
         String id = base;
-        for (int i = 2; Files.exists(file(id)); i++) id = base + "-" + i;
+        for (int i = 2; versions.existsByName(id); i++) id = base + "-" + i;
         Map<String, PromptVersion.CheckPrompt> checks = new LinkedHashMap<>();
         for (Rubric.Check c : Rubric.CHECKS) {
             String k = Rubric.key(c);
@@ -110,57 +120,113 @@ public class PromptStore {
             String hint = c.method() == Rubric.Method.JUDGE ? (p == null || p.hint() == null || p.hint().isBlank() ? c.judgeHint() : p.hint().trim()) : null;
             checks.put(k, new PromptVersion.CheckPrompt(hint, points));
         }
-        PromptVersion v = new PromptVersion(id, draft.name().trim(), draft.note() == null ? "" : draft.note().trim(),
-                now, draft.parent(), draft.judgeSystem().trim(), checks);
-        write(v);
-        return v;
+        String title = draft.name().trim();
+        PromptVersion v = new PromptVersion(id, title.length() > TITLE_MAX ? title.substring(0, TITLE_MAX) : title,
+                draft.note() == null ? "" : draft.note().trim(), now, draft.parent(), draft.judgeSystem().trim(), checks);
+        insert(v);
+        return get(id);
     }
 
+    /** 활성 버전의 id(name). 활성 행이 없으면 기본 버전 id. */
     public String activeId() {
-        try {
-            if (Files.exists(activeFile)) {
-                String id = Files.readString(activeFile, StandardCharsets.UTF_8).trim();
-                if (!id.isEmpty() && Files.exists(file(id))) return id;
-            }
-        } catch (IOException | IllegalArgumentException e) {
-            log.warn("실제 채점 버전 설정을 읽지 못해 기본 버전을 씁니다: {}", e.getMessage());
-        }
-        return DEFAULT_ID;
+        List<PromptVersionRecord> active = versions.findByActiveTrue();
+        return active.isEmpty() ? DEFAULT_ID : active.get(0).getName();
     }
 
     /** 실제 응시 채점에 쓸 버전. */
     public PromptVersion active() {
+        List<PromptVersionRecord> active = versions.findByActiveTrue();
+        if (!active.isEmpty()) return toVersion(active.get(0));
         try {
-            return get(activeId());
-        } catch (RuntimeException e) {
+            return get(DEFAULT_ID);
+        } catch (NoSuchElementException e) {
             return builtin();
         }
     }
 
-    public void setActive(String id) {
-        get(id); // 있는지 확인
-        try {
-            Files.createDirectories(activeFile.getParent());
-            Files.writeString(activeFile, id, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    /** 활성 버전 변경: 한 트랜잭션에서 기존 활성을 끄고(먼저 반영) 새로 켠다. 활성은 항상 하나. */
+    public synchronized void setActive(String id) {
+        tx.executeWithoutResult(s -> {
+            PromptVersionRecord rec = versions.findFirstByNameOrderByIdAsc(id == null ? "" : id)
+                    .orElseThrow(() -> new NoSuchElementException("없는 프롬프트 버전입니다: " + id));
+            for (PromptVersionRecord other : versions.findByActiveTrue()) {
+                if (!other.getId().equals(rec.getId())) other.setActive(false);
+            }
+            versions.flush(); // 부분 유니크 인덱스(활성 하나)에 걸리지 않게 끄기를 먼저 반영
+            rec.setActive(true);
+        });
+    }
+
+    /** 이미 있는 버전 id 인지. */
+    boolean exists(String id) {
+        return versions.existsByName(id);
+    }
+
+    boolean hasActive() {
+        return !versions.findByActiveTrue().isEmpty();
+    }
+
+    /** 옛 파일 가져오기용: id, 생성 시각을 그대로 두고 DB 에 넣는다. */
+    synchronized void insert(PromptVersion v) {
+        Map<String, Long> ids = checkIds();
+        tx.executeWithoutResult(s -> insertRow(v, ids));
+    }
+
+    // ───────── 내부 ─────────
+
+    /** 트랜잭션 안에서 버전 행과 판정 기준 행을 넣는다. 활성은 건드리지 않는다. */
+    private void insertRow(PromptVersion v, Map<String, Long> checkIds) {
+        Long parentId = v.parent() == null ? null
+                : versions.findFirstByNameOrderByIdAsc(v.parent()).map(PromptVersionRecord::getId).orElse(null);
+        String title = v.name() == null || v.name().isBlank() ? null
+                : v.name().length() > TITLE_MAX ? v.name().substring(0, TITLE_MAX) : v.name();
+        PromptVersionRecord rec = versions.save(new PromptVersionRecord(v.id(), title, v.note(), parentId,
+                v.judgeSystem() == null ? "" : v.judgeSystem(), false, v.createdAt() == null ? Instant.now() : v.createdAt()));
+        for (Check c : v.apply(Rubric.CHECKS)) {
+            if (c.method() != Rubric.Method.JUDGE || c.judgeHint() == null || c.judgeHint().isBlank()) continue;
+            hints.save(new PromptCheckHint(rec.getId(), checkIds.get(Rubric.key(c)), c.judgeHint()));
         }
     }
 
-    private Path file(String id) {
-        if (id == null || !id.matches("[0-9A-Za-z가-힣_\\-]+")) throw new IllegalArgumentException("잘못된 버전 ID: " + id);
-        return dir.resolve(id + ".json");
+    private PromptVersion toVersion(PromptVersionRecord r) {
+        String parent = r.getParentVersionId() == null ? null
+                : versions.findById(r.getParentVersionId()).map(PromptVersionRecord::getName).orElse(null);
+        Map<Long, String> hintByCheck = new HashMap<>();
+        for (PromptCheckHint h : hints.findByVersionId(r.getId())) hintByCheck.put(h.getCheckId(), h.getHint());
+        return toVersion(r, parent, hintByCheck, keyById());
     }
 
-    private void write(PromptVersion v) {
-        try {
-            Files.writeString(file(v.id()), pretty.writeValueAsString(v), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    /** DB 행 → 객체. 체크는 기준표(Rubric) 전체를 키 순서대로 채우고, 판정 기준은 행에서, 배점은 기준표에서 가져온다. */
+    private static PromptVersion toVersion(PromptVersionRecord r, String parentName, Map<Long, String> hintByCheck,
+                                           Map<Long, String> keyById) {
+        Map<String, String> hintByKey = new HashMap<>();
+        hintByCheck.forEach((checkId, hint) -> {
+            String key = keyById.get(checkId);
+            if (key != null) hintByKey.put(key, hint);
+        });
+        Map<String, PromptVersion.CheckPrompt> checks = new LinkedHashMap<>();
+        for (Check c : Rubric.CHECKS) {
+            String k = Rubric.key(c);
+            checks.put(k, new PromptVersion.CheckPrompt(c.method() == Rubric.Method.JUDGE ? hintByKey.get(k) : null, c.points()));
         }
+        String title = r.getTitle() == null || r.getTitle().isBlank() ? r.getName() : r.getTitle();
+        return new PromptVersion(r.getName(), title, r.getNote(), r.getCreatedAt(), parentName, r.getJudgeSystem(), checks);
     }
 
-    /** 파일 이름에 쓸 수 있게 한글, 영문, 숫자, -, _ 만 남기고 공백은 - 로. */
+    /** Rubric.key → check_id (기준표가 DB 에 맞춰져 있지 않으면 먼저 맞춘다). 트랜잭션 밖에서 부른다. */
+    private Map<String, Long> checkIds() {
+        Map<String, Long> ids = new HashMap<>();
+        for (Check c : Rubric.CHECKS) ids.put(Rubric.key(c), catalog.checkId(Rubric.key(c)));
+        return ids;
+    }
+
+    private Map<Long, String> keyById() {
+        Map<Long, String> out = new HashMap<>();
+        checkIds().forEach((k, id) -> out.put(id, k));
+        return out;
+    }
+
+    /** 버전 id 에 쓸 수 있게 한글, 영문, 숫자, -, _ 만 남기고 공백은 - 로. */
     static String clean(String s) {
         if (s == null) return "";
         String t = s.trim().replaceAll("\\s+", "-").replaceAll("[^0-9A-Za-z가-힣_\\-]", "");
