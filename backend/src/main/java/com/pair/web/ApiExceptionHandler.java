@@ -94,6 +94,12 @@ public class ApiExceptionHandler {
         return body(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
     }
 
+    @ExceptionHandler(com.pair.web.auth.MailDeliveryException.class)
+    ResponseEntity<Map<String, String>> mailDelivery(com.pair.web.auth.MailDeliveryException e) {
+        log.warn("이메일 발송 실패: {}", e.getCause() == null ? "unknown" : e.getCause().getClass().getSimpleName());
+        return body(HttpStatus.SERVICE_UNAVAILABLE, "이메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    }
+
     @ExceptionHandler(Exception.class)
     ResponseEntity<Map<String, String>> other(Exception e) {
         log.error("처리하지 못한 오류", e);
