@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.pair.exam.service.AutoSubmitService;
 import com.pair.exam.service.ExamSessionService;
 import com.pair.exam.service.ExamWorkbooks;
 import com.pair.exam.service.ProctorService;
@@ -53,13 +54,15 @@ public class ExamConsoleController {
     private final ExamSessionService sessions;
     private final SessionResultService results;
     private final ProctorService proctor;
+    private final AutoSubmitService autoSubmit;
     private final ConsoleAccess access;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
-            ConsoleAccess access) {
+            AutoSubmitService autoSubmit, ConsoleAccess access) {
         this.sessions = sessions;
         this.results = results;
         this.proctor = proctor;
+        this.autoSubmit = autoSubmit;
         this.access = access;
     }
 
@@ -175,6 +178,13 @@ public class ExamConsoleController {
     public ResponseEntity<byte[]> snapshot(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId) {
         access.requireSession(user, sessionId);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(proctor.snapshot(sessionId, eventId));
+    }
+
+    /** 종료된 회차에서 채점으로 넘어가지 못한 응시를 다시 넘긴다 (자동 제출이 포기한 건 복구) */
+    @PostMapping("/{sessionId}/rescue")
+    public AutoSubmitService.RescueResult rescue(CurrentUser user, @PathVariable Long sessionId) {
+        manage(user, sessionId);
+        return autoSubmit.rescue(sessionId);
     }
 
     @GetMapping("/{sessionId}/results")

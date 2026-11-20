@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.pair.attempt.Attempt;
 import com.pair.exam.domain.ExamParticipant;
 import com.pair.exam.domain.ExamSession;
 import com.pair.exam.repository.ExamParticipantRepository;
@@ -36,6 +38,10 @@ public class AutoSubmitService {
     public static final Duration MAX_BACKOFF = Duration.ofSeconds(30);
 
     private record Retry(int failedRounds, Instant nextAt) {
+    }
+
+    /** 복구 결과: pending = 채점 단계에 못 간 응시 수, failed = 그중 이번에도 넘기지 못한 수 */
+    public record RescueResult(int pending, int failed) {
     }
 
     /** 마무리에 실패해 다시 시도를 기다리는 회차 */
@@ -110,6 +116,32 @@ public class AutoSubmitService {
         long lagMs = Duration.between(s.getEndsAt(), now).toMillis();
         log.info("회차 {} 종료: 자동 제출 {}명, 종료 시각 대비 {}ms 뒤 처리", sessionId, submitted, lagMs);
         return submitted;
+    }
+
+    /**
+     * 종료된 회차에서 채점 단계에 가지 못한 응시(풀이 중이거나 후속 질문 단계)를 다시 채점으로 넘긴다.
+     * 자동 제출이 포기하고 닫은 응시를 담당자가 콘솔에서 되살릴 때 쓴다. 이미 채점 단계인 응시는 건드리지 않아 여러 번 불러도 안전하다.
+     * 모두 넘겼는데 아직 닫히지 않은 회차면 이때 닫는다.
+     */
+    @Transactional
+    public RescueResult rescue(Long sessionId) {
+        Instant now = clock.instant();
+        ExamSession s = sessions.findById(sessionId).orElseThrow(() -> new NoSuchElementException("회차를 찾을 수 없습니다."));
+        if (s.getCanceledAt() != null || s.phase(now) != ExamSession.Phase.ENDED) {
+            throw new IllegalStateException("종료된 회차에서만 멈춘 응시를 다시 넘길 수 있습니다.");
+        }
+        List<ExamParticipant> ps = participants.lockBySessionId(sessionId);
+        List<String> pending = new ArrayList<>();
+        progress.of(ps).values().stream()
+                .filter(ParticipantProgress.Progress::started)
+                .flatMap(pr -> pr.records().stream())
+                .filter(r -> r.getStatus() == Attempt.Status.SOLVING || r.getStatus() == Attempt.Status.FOLLOWUP)
+                .forEach(r -> pending.add(String.valueOf(r.getId())));
+        int failed = attempts.finishAll(pending);
+        retries.remove(sessionId);
+        if (failed == 0 && s.getClosedAt() == null) s.close(now);
+        log.info("회차 {} 복구: 멈춘 응시 {}건 중 {}건을 넘기지 못했습니다", sessionId, pending.size(), failed);
+        return new RescueResult(pending.size(), failed);
     }
 
     /** 실패 횟수에 따른 대기 시간: 2초, 4초, 8초, ... 최대 30초 */

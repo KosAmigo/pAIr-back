@@ -572,6 +572,38 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("복구: 포기하고 닫힌 회차의 멈춘 응시를 다시 채점으로 넘긴다")
+    void rescueStuckAttempts() {
+        SessionSummary s = createSession(124L, false);
+        String token = invite(s.id(), "rescue@test.dev");
+        clock.set(s.startsAt());
+        entry.start(token);
+        when(attempts.finishAll(anyCollection())).thenReturn(1);
+        clock.set(s.endsAt().plusMillis(100));
+        for (int i = 0; i < AutoSubmitService.MAX_FAILED_ROUNDS; i++) {
+            autoSubmit.close(s.id());
+            clock.set(clock.instant().plus(AutoSubmitService.MAX_BACKOFF).plusSeconds(1));
+        }
+        when(attempts.finishAll(anyCollection())).thenReturn(0); // 이제는 성공한다
+
+        AutoSubmitService.RescueResult r = autoSubmit.rescue(s.id());
+
+        assertThat(r.pending()).isEqualTo(1);
+        assertThat(r.failed()).isZero();
+        verify(attempts, times(AutoSubmitService.MAX_FAILED_ROUNDS + 1)).finishAll(anyCollection());
+    }
+
+    @Test
+    @DisplayName("복구: 아직 끝나지 않은 회차나 취소한 회차에는 쓸 수 없다")
+    void rescueOnlyEndedSessions() {
+        SessionSummary s = createSession(125L, false);
+        invite(s.id(), "early@test.dev");
+
+        assertThatThrownBy(() -> autoSubmit.rescue(s.id())).hasMessageContaining("종료");
+        assertThatThrownBy(() -> autoSubmit.rescue(999_999L)).isInstanceOf(java.util.NoSuchElementException.class);
+    }
+
+    @Test
     @DisplayName("종료 뒤에는 시작도 직접 제출도 막힌다")
     void blockedAfterEnd() {
         SessionSummary s = createSession(109L, false);
