@@ -57,6 +57,18 @@ public class TaskRecord {
     @Column(nullable = false, length = 20)
     private Status status;
 
+    /** 과제 목록 카드의 한 줄 소개 */
+    @Column(nullable = false, length = 200)
+    private String summary = "";
+
+    /** 과제 형태 (예: 장애 분석, 기능 구현) */
+    @Column(nullable = false, length = 30)
+    private String category = "";
+
+    /** 초급 | 중급 | 고급 */
+    @Column(nullable = false, length = 10)
+    private String difficulty = "";
+
     @Column(columnDefinition = "text")
     private String description;
 
@@ -93,6 +105,13 @@ public class TaskRecord {
         this.createdBy = createdBy;
         this.updatedAt = at;
         this.publishedAt = status == Status.HIDDEN ? null : at;
+    }
+
+    /** 목록 카드 정보 (AI 생성 과제 저장용) */
+    public void setCard(String summary, String category, String difficulty) {
+        this.summary = summary;
+        this.category = category;
+        this.difficulty = difficulty;
     }
 
     /** 테스트·시드용: 과제 내용 채우기 */

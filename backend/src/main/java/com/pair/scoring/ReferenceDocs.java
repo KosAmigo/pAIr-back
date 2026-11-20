@@ -38,6 +38,16 @@ public class ReferenceDocs {
 
     record Chunk(String path, String label, String text) {}
 
+    /**
+     * 이번 채점에 rag 를 쓸지 정한다. mode: full | rag | auto(자료 전체 글자 수가 fullMaxChars 를 넘으면 rag).
+     * 자료가 없으면 항상 full(빈 글).
+     */
+    public static boolean useRag(Map<String, String> materials, String mode, int fullMaxChars) {
+        if (materials.isEmpty() || "full".equals(mode)) return false;
+        if ("rag".equals(mode)) return true;
+        return materials.values().stream().mapToLong(String::length).sum() > fullMaxChars;
+    }
+
     public Section build(Map<String, String> materials, String submission, boolean rag) {
         if (!rag || materials.isEmpty()) {
             StringBuilder sb = new StringBuilder();

@@ -52,6 +52,9 @@ class CheckpointRollbackPostgresTest {
         r.add("spring.datasource.username", () -> System.getenv().getOrDefault("PAIR_PG_TEST_USER", "postgres"));
         r.add("spring.datasource.password", () -> System.getenv("PAIR_PG_TEST_PASSWORD"));
         r.add("pair.exam.scheduler-enabled", () -> "false");
+        // 테스트에서는 실제 AI 키를 쓰지 않는다 (application-secret.yml 을 읽어 와도 비움)
+        r.add("spring.ai.openai.api-key", () -> "");
+        r.add("spring.ai.anthropic.api-key", () -> "");
     }
 
     @Autowired AttemptStore store;

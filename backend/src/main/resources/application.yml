@@ -28,7 +28,8 @@ spring:
     # 빈 DB 에서는 V1 부터 차례로 적용한다
     baseline-on-migrate: true
     baseline-version: 1
-    # 공유 RDS 에는 이 저장소에 없는 V6(email verifications)가 적용돼 있다. 없는 마이그레이션은 검증에서 무시한다
+    # 파일 번호는 공유 RDS 의 flyway_schema_history 와 맞춘다(V6 email verifications, V9 task content, V10 prompt versions, V11 connection grace).
+    # 번호가 이미 RDS 에 들어간 파일은 이름을 바꾸지 않는다. 팀원 로컬 DB 에만 있는 옛 번호는 검증에서 무시한다
     ignore-migration-patterns: "*:missing"
   mail:
     host: ${PAIR_MAIL_HOST:localhost}
@@ -136,8 +137,12 @@ pair:
       effort: medium
       max-tokens: 16000
       calls: 2
-    # 비개발 채점의 제공 자료: full(통째로) 또는 rag(제출물 문장으로 검색한 조각만, CSV 표는 통째로)
-    reference-docs: ${PAIR_REFERENCE_DOCS:full}
+    # 비개발 채점의 제공 자료(토큰 절약):
+    #   auto(기본) = 자료 전체 글자 수가 reference-docs-full-max-chars 이하면 full, 넘으면 rag
+    #   full = 통째로. 응시와 상관없이 같은 글이라 프롬프트 캐시 앞부분에 넣어 3번 호출·연달아 들어오는 채점이 캐시를 같이 쓴다
+    #   rag  = 제출물 문장으로 검색한 조각만(CSV 표는 통째로). 제출물마다 조각이 달라 캐시가 안 맞아 뒷부분에 넣는다
+    reference-docs: ${PAIR_REFERENCE_DOCS:auto}
+    reference-docs-full-max-chars: ${PAIR_REFERENCE_DOCS_FULL_MAX_CHARS:12000}
 
   # (예비) Claude 를 어시스턴트로 쓸 때의 모델. 이번 파일럿에서는 쓰지 않는다.
   claude-assistant-model: claude-haiku-5-5
