@@ -28,7 +28,8 @@ spring:
     # 빈 DB 에서는 V1 부터 차례로 적용한다
     baseline-on-migrate: true
     baseline-version: 1
-    # 공유 RDS 에는 이 저장소에 없는 V6(email verifications)가 적용돼 있다. 없는 마이그레이션은 검증에서 무시한다
+    # 파일 번호는 공유 RDS 의 flyway_schema_history 와 맞춘다(V6 email verifications, V9 task content, V10 prompt versions, V11 connection grace).
+    # 번호가 이미 RDS 에 들어간 파일은 이름을 바꾸지 않는다. 팀원 로컬 DB 에만 있는 옛 번호는 검증에서 무시한다
     ignore-migration-patterns: "*:missing"
   mail:
     host: ${PAIR_MAIL_HOST:localhost}
