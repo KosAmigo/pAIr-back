@@ -58,6 +58,12 @@ public class ExamEntryController {
         return entry.enter(token);
     }
 
+    /** 시험 화면의 연결 신호 (10초마다). 응답이 expired=true 면 링크가 만료된 것 */
+    @PostMapping("/api/entry/{token}/heartbeat")
+    public ExamEntryService.Heartbeat heartbeat(@PathVariable String token) {
+        return entry.heartbeat(token);
+    }
+
     @PostMapping("/api/entry/{token}/start")
     public EntryInfo start(@PathVariable String token) {
         return entry.start(token);

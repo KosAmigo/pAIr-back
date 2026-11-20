@@ -49,6 +49,7 @@ import com.pair.exam.repository.ExamParticipantRepository;
 import com.pair.exam.service.AttemptSubmitter;
 import com.pair.exam.service.AutoSubmitService;
 import com.pair.exam.service.ExamEntryService;
+import com.pair.exam.service.LinkExpiredException;
 import com.pair.exam.service.ExamSessionService;
 import com.pair.exam.service.InviteTokens;
 import com.pair.exam.service.InvitesCreated;
@@ -104,6 +105,8 @@ class ExamFlowIntegrationTest {
     @Autowired ExamEntryService entry;
     @Autowired AutoSubmitService autoSubmit;
     @Autowired ProctorService proctor;
+    @Autowired com.pair.exam.repository.ProctorEventRepository eventRepo;
+    @Autowired com.pair.exam.service.ConnectionGrace grace;
     @Autowired SessionResultService results;
     @Autowired ExamParticipantRepository participants;
     @Autowired AttemptStore attemptStore;
@@ -376,6 +379,85 @@ class ExamFlowIntegrationTest {
         assertThat(started.tasks()).singleElement().satisfies(t -> assertThat(t.submitted()).isFalse());
         assertThat(again.attempts()).isEqualTo(started.attempts());
         verify(attempts, times(1)).prepare(any(), eq(com.pair.task.TestTasks.SELF_DEV)); // 두 번 눌러도 응시는 하나 (내용은 원본 과제)
+    }
+
+    @Test
+    @DisplayName("연결 유예: 90초 넘게 끊겼다 돌아오면 끊김 기록, 5분 안이면 재입장도 된다")
+    void reconnectWithinGrace() {
+        String token = startedParticipant(118L, "grace@test.dev");
+        Long id = participant(sessionIdOf(token), "grace@test.dev").getId();
+
+        clock.advance(java.time.Duration.ofSeconds(10));
+        assertThat(entry.heartbeat(token).expired()).isFalse();
+        assertThat(lostEvents(id)).isEmpty(); // 평소 신호는 기록하지 않는다
+
+        clock.advance(java.time.Duration.ofMinutes(3)); // 창을 닫았다가 3분 뒤 같은 링크로
+        entry.enter(token);
+        assertThat(entry.start(token).attempts()).containsOnlyKeys(TASK);
+
+        assertThat(lostEvents(id)).singleElement().satisfies(e -> {
+            assertThat(e.getType()).isEqualTo(ProctorEvent.Type.CONNECTION_LOST);
+            assertThat(e.getDurationMs()).isEqualTo(180_000);
+        });
+    }
+
+    @Test
+    @DisplayName("연결 유예: 5분을 넘겨 돌아오면 링크가 만료되고 만료 기록이 남는다")
+    void linkExpiresAfterGrace() {
+        String token = startedParticipant(119L, "late@test.dev");
+        Long id = participant(sessionIdOf(token), "late@test.dev").getId();
+
+        clock.advance(java.time.Duration.ofMinutes(6));
+        assertThat(entry.info(token).linkExpired()).isTrue();
+        assertThatThrownBy(() -> entry.enter(token)).isInstanceOf(LinkExpiredException.class).hasMessageContaining("만료");
+
+        assertThat(lostEvents(id)).singleElement().satisfies(e -> assertThat(e.getType()).isEqualTo(ProctorEvent.Type.LINK_EXPIRED));
+        // 만료된 뒤에는 신호도 받지 않고, 몇 번을 불러도 기록은 한 번만 남는다
+        assertThat(entry.heartbeat(token).expired()).isTrue();
+        assertThatThrownBy(() -> entry.start(token)).isInstanceOf(LinkExpiredException.class);
+        assertThat(lostEvents(id)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("연결 유예: 돌아오지 않아도 주기 점검이 만료 기록을 한 번만 남긴다")
+    void sweepExpiresAbsentParticipants() {
+        String token = startedParticipant(120L, "gone@test.dev");
+        Long id = participant(sessionIdOf(token), "gone@test.dev").getId();
+
+        clock.advance(java.time.Duration.ofMinutes(4));
+        grace.expireAbsent();
+        assertThat(lostEvents(id)).isEmpty(); // 아직 유예 안
+
+        clock.advance(java.time.Duration.ofMinutes(2));
+        grace.expireAbsent();
+        grace.expireAbsent(); // 다시 점검해도 기록은 한 번만
+        assertThat(lostEvents(id)).singleElement().satisfies(e -> assertThat(e.getType()).isEqualTo(ProctorEvent.Type.LINK_EXPIRED));
+    }
+
+    @Test
+    @DisplayName("연결 신호와 연결 끊김 기록은 응시자 화면이 보내는 이벤트로는 받지 않는다")
+    void serverOnlyEventTypes() {
+        String token = startedParticipant(121L, "forge@test.dev");
+        assertThatThrownBy(() -> proctor.record(token, new ProctorEventRequest(ProctorEvent.Type.LINK_EXPIRED, ProctorEvent.Source.BROWSER,
+                clock.instant(), 0, null, null, null))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private String startedParticipant(Long company, String email) {
+        SessionSummary s = createSession(company, true);
+        String token = invite(s.id(), email);
+        clock.set(s.startsAt());
+        entry.consent(token, consent());
+        entry.start(token);
+        return token;
+    }
+
+    private Long sessionIdOf(String token) {
+        return participants.findByInviteTokenHash(com.pair.exam.service.InviteTokens.hash(token)).orElseThrow().getSession().getId();
+    }
+
+    private java.util.List<ProctorEvent> lostEvents(Long participantId) {
+        return eventRepo.findByParticipantIdOrderByStartedAtAsc(participantId).stream()
+                .filter(e -> e.getType() == ProctorEvent.Type.CONNECTION_LOST || e.getType() == ProctorEvent.Type.LINK_EXPIRED).toList();
     }
 
     @Test

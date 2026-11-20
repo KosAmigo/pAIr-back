@@ -40,6 +40,14 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
     @EntityGraph(attributePaths = "session")
     List<ExamParticipant> findBySessionIdOrderByIdAsc(Long sessionId);
 
+    /** 연결 유예 점검: 진행 중인 회차에서 마지막 신호가 cutoff 보다 오래됐고 아직 링크가 만료되지 않은 대상자 */
+    @Query("""
+            select p from ExamParticipant p join fetch p.session s
+            where p.lastSeenAt is not null and p.lastSeenAt < :cutoff and p.linkExpiredAt is null
+              and s.canceledAt is null and s.startsAt <= :now and s.endsAt > :now
+            """)
+    List<ExamParticipant> findAbsentSince(@Param("cutoff") Instant cutoff, @Param("now") Instant now);
+
     @Query("select p.id from ExamParticipant p where p.session.id = :sessionId order by p.id")
     List<Long> findIdsBySessionId(@Param("sessionId") Long sessionId);
 

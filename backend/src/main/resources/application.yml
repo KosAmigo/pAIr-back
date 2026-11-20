@@ -28,6 +28,8 @@ spring:
     # 빈 DB 에서는 V1 부터 차례로 적용한다
     baseline-on-migrate: true
     baseline-version: 1
+    # 공유 RDS 에는 이 저장소에 없는 V6(email verifications)가 적용돼 있다. 없는 마이그레이션은 검증에서 무시한다
+    ignore-migration-patterns: "*:missing"
   mail:
     host: ${PAIR_MAIL_HOST:localhost}
     port: ${PAIR_MAIL_PORT:1025}
