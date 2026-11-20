@@ -5,6 +5,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,10 +22,24 @@ import com.pair.exam.repository.ExamSessionRepository;
  * 종료 시각이 지난 회차를 닫는다: 시작했지만 아직 제출하지 않은 과제를 전원 자동 제출.
  * 시작하지 않은 대상자는 미응시로 남긴다.
  * 회차마다 트랜잭션을 따로 잡아서, 한 회차가 실패해도 다른 회차는 닫힌다.
+ * 응시를 채점으로 넘기지 못한 건이 있으면 회차를 닫지 않고 간격을 늘려 가며(2초, 4초, ... 최대 30초) 다시 시도한다.
+ * MAX_FAILED_ROUNDS 번 실패하면 같은 응시를 계속 두드리지 않도록 포기하고 닫으며, 오류 로그로 남긴다.
+ * 재시도 상태는 서버 메모리에만 둔다 (서버를 다시 켜면 처음부터 다시 센다).
  */
 @Service
 public class AutoSubmitService {
     private static final Logger log = LoggerFactory.getLogger(AutoSubmitService.class);
+
+    /** 응시를 채점으로 넘기지 못한 채 회차를 다시 시도하는 최대 횟수 (이 횟수째 실패하면 포기하고 닫는다) */
+    public static final int MAX_FAILED_ROUNDS = 5;
+    static final Duration BASE_BACKOFF = Duration.ofSeconds(2);
+    public static final Duration MAX_BACKOFF = Duration.ofSeconds(30);
+
+    private record Retry(int failedRounds, Instant nextAt) {
+    }
+
+    /** 마무리에 실패해 다시 시도를 기다리는 회차 */
+    private final Map<Long, Retry> retries = new ConcurrentHashMap<>();
 
     private final ExamSessionRepository sessions;
     private final ExamParticipantRepository participants;
@@ -44,7 +60,14 @@ public class AutoSubmitService {
 
     @Transactional(readOnly = true)
     public List<Long> dueSessionIds() {
-        return sessions.findByEndsAtLessThanEqualAndClosedAtIsNullAndCanceledAtIsNull(clock.instant()).stream().map(ExamSession::getId).toList();
+        Instant now = clock.instant();
+        return sessions.findByEndsAtLessThanEqualAndClosedAtIsNullAndCanceledAtIsNull(now).stream()
+                .map(ExamSession::getId)
+                .filter(id -> {
+                    Retry r = retries.get(id);
+                    return r == null || !now.isBefore(r.nextAt());
+                })
+                .toList();
     }
 
     /** @return 자동 제출한 응시자 수 */
@@ -70,10 +93,28 @@ public class AutoSubmitService {
             pr.records().forEach(r -> toFinish.add(String.valueOf(r.getId())));
         }
         int failed = attempts.finishAll(toFinish);
-        if (failed > 0) log.error("회차 {} 종료: 응시 {}건을 채점으로 넘기지 못했습니다", sessionId, failed);
+        if (failed > 0) {
+            int rounds = retries.containsKey(sessionId) ? retries.get(sessionId).failedRounds() + 1 : 1;
+            if (rounds < MAX_FAILED_ROUNDS) {
+                Duration wait = backoff(rounds);
+                retries.put(sessionId, new Retry(rounds, now.plus(wait)));
+                log.warn("회차 {} 종료: 응시 {}건을 채점으로 넘기지 못했습니다. {}초 뒤 다시 시도합니다 ({}/{})",
+                        sessionId, failed, wait.toSeconds(), rounds, MAX_FAILED_ROUNDS);
+                return submitted; // 닫지 않는다
+            }
+            log.error("회차 {} 종료: 응시 {}건을 {}번 시도하고도 채점으로 넘기지 못해 포기하고 닫습니다. 직접 확인이 필요합니다",
+                    sessionId, failed, MAX_FAILED_ROUNDS);
+        }
+        retries.remove(sessionId);
         s.close(now);
         long lagMs = Duration.between(s.getEndsAt(), now).toMillis();
         log.info("회차 {} 종료: 자동 제출 {}명, 종료 시각 대비 {}ms 뒤 처리", sessionId, submitted, lagMs);
         return submitted;
+    }
+
+    /** 실패 횟수에 따른 대기 시간: 2초, 4초, 8초, ... 최대 30초 */
+    private static Duration backoff(int failedRounds) {
+        long seconds = BASE_BACKOFF.toSeconds() << Math.min(failedRounds - 1, 10);
+        return Duration.ofSeconds(Math.min(seconds, MAX_BACKOFF.toSeconds()));
     }
 }
