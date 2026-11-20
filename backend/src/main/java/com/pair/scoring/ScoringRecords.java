@@ -43,8 +43,10 @@ public class ScoringRecords {
         this.verdicts = verdicts;
     }
 
-    /** 채점을 시작했다고 남기고 scoring_id 를 돌려준다. */
-    @Transactional
+    /**
+     * 채점을 시작했다고 남기고 scoring_id 를 돌려준다.
+     * 트랜잭션을 걸지 않는다. 버전 등록(별도 트랜잭션)을 먼저 끝내고 scorings 행만 짧게 넣어, 채점 1건이 DB 연결을 둘 잡지 않게 한다.
+     */
     public long start(long attemptId, PromptVersion v) {
         long versionId = catalog.versionId(v);
         return scorings.save(new ScoringRecord(attemptId, versionId, Instant.now())).getId();

@@ -172,4 +172,20 @@ class ScoringRecordsTest {
         assertThat(s.getError()).isEqualTo("채점 모델이 모두 실패");
         assertThat(s.getFinishedAt()).isNotNull();
     }
+
+    @Test
+    void 이미_활성인_버전은_다시_불러도_아무것도_쓰지_않는다() {
+        long a = catalog.versionId(version);
+        PromptVersion other = new PromptVersion("20261120-0900_idem-test", "o", null, now, null, "규칙", Map.of());
+        long b = catalog.versionId(other); // b 가 활성이 되고 a 는 꺼진다
+        assertThat(versions.findById(a).orElseThrow().isActive()).isFalse();
+
+        // 일부러 a 도 켜 둔다. b 를 다시 불렀을 때 쓰기가 일어난다면 a 가 다시 꺼질 것이다.
+        PromptVersionRecord ra = versions.findById(a).orElseThrow();
+        ra.setActive(true);
+        versions.save(ra);
+
+        assertThat(catalog.versionId(other)).isEqualTo(b);
+        assertThat(versions.findById(a).orElseThrow().isActive()).isTrue();
+    }
 }

@@ -148,26 +148,36 @@ public class ScoringService {
 
     public record ItemResult(String key, String name, int max, int score, List<CheckResult> checks) {}
 
-    /** 실제 응시 채점: 지정한 버전으로 채점하고 report.json 에 저장한다. */
+    /** 실제 응시 채점: 지정한 버전으로 채점하고 DB(채점 표, 리포트 JSON)에 저장한다. */
     public void score(String attemptId) {
         Options opt = defaultOptions();
         long scoringId = records.start(Long.parseLong(attemptId), opt.version());
+        Map<String, Object> report;
         try {
-            scoreAndSave(attemptId, opt, scoringId);
+            report = evaluate(store, attemptId, opt);
         } catch (RuntimeException | Error e) {
             records.fail(scoringId, e.getMessage() == null ? e.toString() : e.getMessage());
             throw e;
         }
+        saveResult(scoringId, attemptId, report);
     }
 
+    /**
+     * 채점 결과를 저장한다. 순서: 리포트 JSON → 채점 표(DONE 확정) → 응시 상태 DONE.
+     * 채점 표의 DONE 이 마지막에 정해지므로 "DONE 인데 리포트 없음"이 생기지 않는다. 중간에 실패하면 ERROR 로 남긴다.
+     */
     @SuppressWarnings("unchecked")
-    private void scoreAndSave(String attemptId, Options opt, long scoringId) {
-        Map<String, Object> report = evaluate(store, attemptId, opt);
+    void saveResult(long scoringId, String attemptId, Map<String, Object> report) {
         Attempt a = store.load(attemptId);
         List<ItemResult> items = (List<ItemResult>) report.get("items");
-        records.finish(scoringId, tasks.get(a.taskId()).isDev(), items, (List<JudgeCall>) report.get("judgeCalls"));
-        store.writeReport(a.id(), report);
-        store.save(store.load(a.id()).withStatus(Attempt.Status.DONE));
+        try {
+            store.writeReport(a.id(), report);
+            records.finish(scoringId, tasks.get(a.taskId()).isDev(), items, (List<JudgeCall>) report.get("judgeCalls"));
+            store.save(store.load(a.id()).withStatus(Attempt.Status.DONE));
+        } catch (RuntimeException | Error e) {
+            records.fail(scoringId, e.getMessage() == null ? e.toString() : e.getMessage());
+            throw e;
+        }
         logSummary(a, tasks.get(a.taskId()), (int) report.get("total"), items);
     }
 
