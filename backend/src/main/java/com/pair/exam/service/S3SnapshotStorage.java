@@ -3,6 +3,7 @@ package com.pair.exam.service;
 import java.util.Optional;
 
 import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,7 @@ public class S3SnapshotStorage implements SnapshotStorage, DisposableBean {
     private final String bucket;
     private final String prefix;
 
+    @Autowired // 테스트용 생성자가 하나 더 있어 Spring 이 쓸 생성자를 정해 준다
     public S3SnapshotStorage(
             @Value("${pair.exam.s3.bucket}") String bucket,
             @Value("${pair.exam.s3.region:ap-northeast-2}") String region,
