@@ -11,12 +11,15 @@ import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.ai.AiUnavailableException;
 import com.pair.ai.AssistantClient;
 import com.pair.attempt.ChatTurn.AssistantRequest;
 import com.pair.attempt.ChatTurn.Message;
 import com.pair.config.PairProperties;
+import com.pair.credit.CreditService;
+import com.pair.attempt.db.ChatTurnRecordRepository;
 import com.pair.run.CodeRunner;
 import com.pair.scoring.ScoringService;
 import com.pair.task.TaskCatalog;
@@ -38,10 +41,14 @@ public class AttemptService {
     private final TaskCatalog catalog;
     private final AttemptRegistry registry;
     private final CheckpointService checkpoints;
+    private final CreditService credits;
+    private final ChatTurnRecordRepository chatRecords;
+    private final TransactionTemplate transactions;
 
     public AttemptService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
-                          TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints) {
+                          TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints, CreditService credits,
+                          ChatTurnRecordRepository chatRecords, TransactionTemplate transactions) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -51,6 +58,9 @@ public class AttemptService {
         this.catalog = catalog;
         this.registry = registry;
         this.checkpoints = checkpoints;
+        this.credits = credits;
+        this.chatRecords = chatRecords;
+        this.transactions = transactions;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -59,8 +69,10 @@ public class AttemptService {
         TaskRecord t = catalog.require(taskCode);
         if (t.getUsage() != TaskRecord.Usage.SELF) throw new IllegalArgumentException("자가진단 과제가 아닙니다: " + taskCode);
         if (t.getStatus() != TaskRecord.Status.OPEN) throw new IllegalStateException("지금은 응시할 수 없는 과제입니다.");
+        credits.checkAttempt(userId);
         Instant now = Instant.now();
         AttemptRecord r = registry.save(AttemptRecord.self(userId, t.getId(), props.assistant().model(), now));
+        credits.chargeAttempt(userId, r.getId());
         return createFiles(r, catalog.definitionCode(t));
     }
 
@@ -137,7 +149,24 @@ public class AttemptService {
     /** onDelta 가 있으면 답변을 스트리밍으로 받으며 글자가 오는 대로 넘긴다. 다 받은 뒤에 대화 기록에 저장한다. */
     public List<ChatTurn> chat(String id, String message, java.util.function.Consumer<String> onDelta) {
         synchronized (lock(id)) {
-            return chatLocked(id, message, onDelta);
+            try {
+                return transactions.execute(status -> chatLocked(id, message, onDelta));
+            } catch (EmptyReplyException e) {
+                store.appendEvent(id, "chatEmpty", Map.of("finishReason", e.finishReason, "outputTokens", e.outputTokens));
+                throw e;
+            }
+        }
+    }
+
+    private static class EmptyReplyException extends AiUnavailableException {
+        private final String finishReason;
+        private final long outputTokens;
+
+        EmptyReplyException(AssistantClient.Reply reply) {
+            super("AI가 답변을 끝내지 못했습니다(" + reply.finishReason()
+                    + "). 질문을 조금 나누거나 범위를 좁혀 다시 보내 주세요. 이 실패는 채점에 반영되지 않습니다.");
+            this.finishReason = reply.finishReason();
+            this.outputTokens = reply.outputTokens();
         }
     }
 
@@ -147,6 +176,8 @@ public class AttemptService {
         if (limit > 0 && message.length() > limit) {
             throw new IllegalArgumentException("질문은 " + limit + "자 이하로 입력하세요. (현재 " + message.length() + "자)");
         }
+        AttemptRecord record = registry.find(id).orElseThrow(() -> new java.util.NoSuchElementException("없는 응시입니다: " + id));
+        if (record.getUserId() != null) credits.checkChat(record.getUserId());
         List<ChatTurn> history = store.turns(id);
         if (history.size() / 2 >= props.assistant().maxTurns()) {
             throw new IllegalStateException("응시당 AI 질문 한도(" + props.assistant().maxTurns() + "회)에 도달했습니다.");
@@ -164,9 +195,7 @@ public class AttemptService {
         AssistantClient.Reply reply = onDelta == null ? assistant.send(req) : assistant.stream(req, onDelta);
         if (reply.text().isBlank()) {
             // 추론 모델이 한도 안에서 답을 끝내지 못하면 빈 답이 온다. 저장하지 않고 다시 보내게 한다.
-            store.appendEvent(id, "chatEmpty", Map.of("finishReason", reply.finishReason(), "outputTokens", reply.outputTokens()));
-            throw new AiUnavailableException("AI가 답변을 끝내지 못했습니다(" + reply.finishReason()
-                    + "). 질문을 조금 나누거나 범위를 좁혀 다시 보내 주세요. 이 실패는 채점에 반영되지 않습니다.");
+            throw new EmptyReplyException(reply);
         }
         int n = history.size();
         ChatTurn user = new ChatTurn(n + 1, "user", askedAt, message, null, null, null, null, null, null);
@@ -174,6 +203,11 @@ public class AttemptService {
                 reply.inputTokens(), reply.outputTokens(), reply.latencyMs());
         checkpoints.appendQuestion(id, user, filesAtAsk);
         store.appendTurn(id, ai);
+        if (record.getUserId() != null) {
+            Long turnId = chatRecords.findByAttemptIdAndTurnNo(record.getId(), ai.turn())
+                    .orElseThrow(() -> new IllegalStateException("AI 대화 기록을 찾을 수 없습니다.")).getId();
+            credits.chargeChat(record.getUserId(), turnId);
+        }
         store.appendEvent(id, "chat", Map.of("turn", ai.turn(), "inputTokens", reply.inputTokens(), "outputTokens", reply.outputTokens()));
         return List.of(user, ai);
     }

@@ -25,9 +25,13 @@ import com.pair.run.CodeRunner;
 import com.pair.task.TaskCatalog;
 import com.pair.task.TaskDef;
 import com.pair.web.auth.CurrentUser;
+import com.pair.web.auth.CurrentUserResolver;
+import com.pair.web.auth.ForbiddenException;
+import com.pair.web.auth.UnauthorizedException;
 import com.pair.task.TaskRepository;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/api")
@@ -42,10 +46,12 @@ public class ApiController {
     private final com.pair.attempt.CheckpointService checkpoints;
     private final com.pair.attempt.RollbackService rollbacks;
     private final com.pair.attempt.ReplayTreeService replayTree;
+    private final CurrentUserResolver currentUser;
 
     public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.config.PairProperties props,
             AttemptRecordRepository records, TaskCatalog catalog, com.pair.attempt.CheckpointService checkpoints,
-            com.pair.attempt.RollbackService rollbacks, com.pair.attempt.ReplayTreeService replayTree) {
+            com.pair.attempt.RollbackService rollbacks, com.pair.attempt.ReplayTreeService replayTree,
+            CurrentUserResolver currentUser) {
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
@@ -55,6 +61,7 @@ public class ApiController {
         this.checkpoints = checkpoints;
         this.rollbacks = rollbacks;
         this.replayTree = replayTree;
+        this.currentUser = currentUser;
     }
 
     public record StartRequest(String taskId) {}
@@ -171,8 +178,9 @@ public class ApiController {
     }
 
     @PostMapping("/attempts/{id}/chat")
-    public List<TurnView> chat(@PathVariable String id, @RequestBody ChatRequest req) {
+    public List<TurnView> chat(@PathVariable String id, @RequestBody ChatRequest req, HttpServletRequest request) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
+        requireChatOwner(id, request);
         Attempt a = store.load(id);
         List<ChatTurn> added = attempts.chat(id, req.message());
         var edits = attempts.edits(id);
@@ -186,8 +194,10 @@ public class ApiController {
      * 다 받아 기록에 저장한 뒤 "done" 이벤트로 새 턴 2개(질문, 답변)를 보낸다. 실패하면 "error" 이벤트.
      */
     @PostMapping(value = "/attempts/{id}/chat/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
-    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter chatStream(@PathVariable String id, @RequestBody ChatRequest req) {
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter chatStream(@PathVariable String id, @RequestBody ChatRequest req,
+            HttpServletRequest request) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
+        requireChatOwner(id, request);
         Attempt a = store.load(id);
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(6 * 60 * 1000L);
         streams.submit(() -> {
@@ -214,6 +224,21 @@ public class ApiController {
             }
         });
         return emitter;
+    }
+
+    private void requireChatOwner(String id, HttpServletRequest request) {
+        long attemptId;
+        try {
+            attemptId = Long.parseLong(id);
+        } catch (NumberFormatException e) {
+            throw new java.util.NoSuchElementException("없는 응시입니다: " + id);
+        }
+        AttemptRecord record = records.findById(attemptId)
+                .orElseThrow(() -> new java.util.NoSuchElementException("없는 응시입니다: " + id));
+        if (record.getUserId() != null) {
+            CurrentUser user = currentUser.resolve(request).orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
+            if (!record.getUserId().equals(user.userId())) throw new ForbiddenException("다른 회원의 응시입니다.");
+        }
     }
 
     /** AI 수정 제안 적용(apply) 또는 거절(reject). */

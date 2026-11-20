@@ -23,6 +23,10 @@ import com.pair.attempt.db.CheckpointRecordRepository;
 import com.pair.task.TaskRepository;
 import com.pair.web.auth.AuthAccount;
 import com.pair.web.auth.AuthAccountRepository;
+import com.pair.web.auth.AuthDtos;
+import com.pair.web.auth.AuthService;
+import com.pair.credit.CreditService;
+import com.pair.credit.CreditLedgerRepository;
 
 /**
  * 체크포인트·롤백·복기 트리를 운영과 같은 Flyway 스키마(PostgreSQL)에서 확인한다. H2 테스트(CheckpointRollbackTest)가
@@ -56,11 +60,15 @@ class CheckpointRollbackPostgresTest {
     @Autowired ReplayTreeService replayTree;
     @Autowired CheckpointRecordRepository checkpointRecords;
     @Autowired AuthAccountRepository accounts;
+    @Autowired AuthService auth;
+    @Autowired CreditService credits;
+    @Autowired CreditLedgerRepository ledger;
 
     @Test
     void 체크포인트_롤백_복기_트리가_운영_스키마에서_돈다() {
         // V3 기본 데이터: 과제 1 = order-deadlock (자가진단)
-        Long userId = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "응시자", "x")).getId();
+        Long userId = auth.signup(new AuthDtos.SignupRequest("응시자", UUID.randomUUID() + "@pair.test", "password123"))
+                .user().id();
         Map<String, String> files = tasks.visibleFiles("order-deadlock");
         String path = files.keySet().iterator().next();
         String edited = files.get(path) + "\n// 고침";
@@ -83,6 +91,10 @@ class CheckpointRollbackPostgresTest {
         // 롤백: 새 응시가 갈라지고 파일·앞 대화가 복원된다
         Long cp3 = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(1).getId();
         String forkId = rollbacks.rollback(userId, cp3).attemptId();
+        assertThat(credits.balance(userId)).isEqualTo(190);
+        var charge = ledger.findFirstByUserIdOrderByIdDesc(userId).orElseThrow();
+        assertThat(charge.getReason()).isEqualTo("ROLLBACK");
+        assertThat(charge.getAttemptId()).isEqualTo(Long.valueOf(forkId));
         AttemptRecord fork = records.findById(Long.valueOf(forkId)).orElseThrow();
         assertThat(fork.getForkedFromCheckpointId()).isEqualTo(cp3);
         assertThat(store.readFiles(forkId).get(path)).isEqualTo(edited);
@@ -93,6 +105,7 @@ class CheckpointRollbackPostgresTest {
         checkpoints.appendQuestion(forkId, turn(3, "user"), checkpoints.restore(forkId, Integer.MAX_VALUE));
         Long forkCp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(forkId)).get(0).getId();
         String grandId = rollbacks.rollback(userId, forkCp).attemptId();
+        assertThat(credits.balance(userId)).isEqualTo(180);
         var nodes = replayTree.tree(userId, grandId);
         assertThat(nodes).extracting(ReplayTreeService.Node::attemptId).containsExactly(id, forkId, grandId);
         assertThat(nodes.get(2).parentAttemptId()).isEqualTo(forkId);

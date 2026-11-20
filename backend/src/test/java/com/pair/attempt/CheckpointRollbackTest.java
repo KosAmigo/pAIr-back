@@ -2,6 +2,10 @@ package com.pair.attempt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -9,6 +13,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,14 +25,21 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import com.pair.attempt.db.CheckpointFileRecordRepository;
 import com.pair.attempt.db.CheckpointRecordRepository;
+import com.pair.credit.CreditLedger;
+import com.pair.credit.CreditLedgerRepository;
+import com.pair.credit.CreditService;
+import com.pair.credit.InsufficientCreditException;
 import com.pair.task.TaskRecordRepository;
 import com.pair.task.TaskRepository;
 import com.pair.task.TestTasks;
 import com.pair.web.auth.AuthAccount;
 import com.pair.web.auth.AuthAccountRepository;
+import com.pair.web.auth.AuthDtos;
+import com.pair.web.auth.AuthService;
 
 /** 체크포인트 자동 생성(바뀐 파일만), 시점 복원, 롤백(분기), 복기 트리 (H2 메모리 DB) */
 @SpringBootTest
@@ -45,12 +59,15 @@ class CheckpointRollbackTest {
     @Autowired AttemptRecordRepository records;
     @Autowired TaskRecordRepository taskRecords;
     @Autowired TaskRepository tasks;
-    @Autowired CheckpointService checkpoints;
+    @MockitoSpyBean CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
     @Autowired CheckpointRecordRepository checkpointRecords;
     @Autowired CheckpointFileRecordRepository checkpointFiles;
     @Autowired AuthAccountRepository accounts;
     @Autowired ReplayTreeService replayTree;
+    @Autowired AuthService auth;
+    @Autowired CreditService credits;
+    @MockitoSpyBean CreditLedgerRepository ledger;
 
     Long userId;
     String id;
@@ -61,7 +78,8 @@ class CheckpointRollbackTest {
     @BeforeEach
     void setUp() {
         TestTasks.seed(taskRecords);
-        userId = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "응시자", "x")).getId();
+        userId = auth.signup(new AuthDtos.SignupRequest("응시자", UUID.randomUUID() + "@pair.test", "password123"))
+                .user().id();
         Map<String, String> files = tasks.visibleFiles(TestTasks.SELF_DEV);
         path = files.keySet().iterator().next();
         original = files.get(path);
@@ -110,6 +128,11 @@ class CheckpointRollbackTest {
         assertThat(store.turns(res.attemptId())).extracting(ChatTurn::turn).containsExactly(1, 2);
         // 원래 응시는 그대로
         assertThat(store.turns(id)).hasSize(4);
+        assertThat(credits.balance(userId)).isEqualTo(190);
+        CreditLedger entry = ledger.findFirstByUserIdOrderByIdDesc(userId).orElseThrow();
+        assertThat(entry.getReason()).isEqualTo("ROLLBACK");
+        assertThat(entry.getAmount()).isEqualTo(-10);
+        assertThat(entry.getAttemptId()).isEqualTo(fork.getId());
     }
 
     @Test
@@ -127,6 +150,7 @@ class CheckpointRollbackTest {
         ask(a, 3, checkpoints.restore(a, Integer.MAX_VALUE));                      // A 에서 새 질문 3
         Long aCp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(a)).get(0).getId();
         String b = rollbacks.rollback(userId, aCp).attemptId();                   // A → B (질문 3에서)
+        assertThat(credits.balance(userId)).isEqualTo(180);
 
         // 어느 노드에서 물어도 같은 트리
         for (String from : List.of(id, a, b)) {
@@ -144,6 +168,81 @@ class CheckpointRollbackTest {
     void 남의_복기_트리는_볼_수_없다() {
         Long other = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "다른 사람", "x")).getId();
         assertThatThrownBy(() -> replayTree.tree(other, id)).isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void 같은_체크포인트_반복_롤백은_각각_차감한다() {
+        Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
+        String first = rollbacks.rollback(userId, cp).attemptId();
+        String second = rollbacks.rollback(userId, cp).attemptId();
+        assertThat(first).isNotEqualTo(second);
+        assertThat(credits.balance(userId)).isEqualTo(180);
+        assertThat(ledger.findFirstByUserIdOrderByIdDesc(userId).orElseThrow().getAttemptId())
+                .isEqualTo(Long.valueOf(second));
+    }
+
+    @Test
+    void 잔액_부족이면_응시와_원장을_만들지_않는다() {
+        Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
+        for (int i = 0; i < 20; i++) rollbacks.rollback(userId, cp);
+        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF).size();
+        long ledgerCount = ledger.count();
+        assertThatThrownBy(() -> rollbacks.rollback(userId, cp)).isInstanceOf(InsufficientCreditException.class);
+        assertThat(credits.balance(userId)).isZero();
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(before);
+        assertThat(ledger.count()).isEqualTo(ledgerCount);
+    }
+
+    @Test
+    void 복원_실패시_응시와_차감이_모두_취소된다() {
+        Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
+        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF).size();
+        long ledgerCount = ledger.count();
+        doThrow(new IllegalStateException("restore failed")).when(checkpoints).restore(eq(id), anyInt());
+        assertThatThrownBy(() -> rollbacks.rollback(userId, cp))
+                .isInstanceOf(IllegalStateException.class).hasMessage("restore failed");
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(before);
+        assertThat(ledger.count()).isEqualTo(ledgerCount);
+        assertThat(credits.balance(userId)).isEqualTo(200);
+    }
+
+    @Test
+    void 원장_저장_실패시_만들어진_응시와_대화도_취소된다() {
+        Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(1).getId();
+        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF).size();
+        long ledgerCount = ledger.count();
+        doThrow(new IllegalStateException("ledger failed")).when(ledger).save(any(CreditLedger.class));
+        assertThatThrownBy(() -> rollbacks.rollback(userId, cp))
+                .isInstanceOf(IllegalStateException.class).hasMessage("ledger failed");
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(before);
+        assertThat(ledger.count()).isEqualTo(ledgerCount);
+        assertThat(credits.balance(userId)).isEqualTo(200);
+        assertThat(store.turns(id)).hasSize(4);
+    }
+
+    @Test
+    void 동시_롤백은_잔액을_초과할_수_없다() throws Exception {
+        Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
+        for (int i = 0; i < 19; i++) rollbacks.rollback(userId, cp);
+        var ready = new CountDownLatch(2);
+        var go = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var results = java.util.stream.IntStream.range(0, 2).mapToObj(i -> executor.submit(() -> {
+                ready.countDown();
+                if (!go.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("timed out");
+                try {
+                    rollbacks.rollback(userId, cp);
+                    return true;
+                } catch (InsufficientCreditException e) {
+                    return false;
+                }
+            })).toList();
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            go.countDown();
+            assertThat(results.get(0).get(30, TimeUnit.SECONDS) ^ results.get(1).get(30, TimeUnit.SECONDS)).isTrue();
+        }
+        assertThat(credits.balance(userId)).isZero();
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(21);
     }
 
     // ── 도우미 ───────────────────────────
