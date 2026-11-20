@@ -62,6 +62,9 @@ public class ProctorService {
         ExamParticipant p = findParticipant(token);
         ExamSession s = p.getSession();
         if (!s.isProctoring()) throw new IllegalStateException("감독을 쓰지 않는 회차입니다.");
+        if (req.type() == ProctorEvent.Type.CONNECTION_LOST || req.type() == ProctorEvent.Type.LINK_EXPIRED) {
+            throw new IllegalArgumentException("서버가 직접 남기는 이벤트입니다.");
+        }
         if (!attempts.existsByParticipantId(p.getId())) throw new IllegalStateException("시작하지 않은 시험입니다.");
         if (now.isAfter(s.getEndsAt().plus(LATE_GRACE))) throw new IllegalStateException("끝난 시험의 감독 이벤트는 받지 않습니다.");
         if (req.startedAt().isBefore(s.getStartsAt().minus(CLOCK_SKEW)) || req.startedAt().isAfter(now.plus(CLOCK_SKEW))) {

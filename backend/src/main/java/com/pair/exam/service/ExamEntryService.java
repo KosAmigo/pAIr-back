@@ -39,19 +39,21 @@ public class ExamEntryService {
     private final AttemptSubmitter attempts;
     private final AttemptRegistry registry;
     private final ParticipantProgress progress;
+    private final ConnectionGrace grace;
     private final TaskCatalog catalog;
     private final PairProperties props;
     private final ObjectMapper json;
     private final Clock clock;
 
     public ExamEntryService(ExamParticipantRepository participants, ProctorConsentRepository consents,
-            AttemptSubmitter attempts, AttemptRegistry registry, ParticipantProgress progress, TaskCatalog catalog,
+            AttemptSubmitter attempts, AttemptRegistry registry, ParticipantProgress progress, ConnectionGrace grace, TaskCatalog catalog,
             PairProperties props, ObjectMapper json, Clock clock) {
         this.participants = participants;
         this.consents = consents;
         this.attempts = attempts;
         this.registry = registry;
         this.progress = progress;
+        this.grace = grace;
         this.catalog = catalog;
         this.props = props;
         this.json = json;
@@ -80,18 +82,22 @@ public class ExamEntryService {
         return view(p, now);
     }
 
-    /** 대기실 입장. 시작 전에 들어와 기다릴 수 있다 */
-    @Transactional
+    /**
+     * 대기실 입장. 시작 전에는 들어와 기다릴 수 있다.
+     * 시험을 시작한 뒤 나갔다가 다시 들어오는 것은 마지막 연결 뒤 5분(유예) 안에만 된다. 넘으면 링크가 만료된다.
+     */
+    @Transactional(noRollbackFor = LinkExpiredException.class)
     public EntryInfo enter(String token) {
         Instant now = clock.instant();
-        ExamParticipant p = find(token);
+        ExamParticipant p = lock(token);
         requireNotEnded(p.getSession(), now);
+        if (progress.of(p).started()) grace.touch(p, now);
         p.markEntered(now);
         return view(p, now);
     }
 
-    /** 시험 시작. 과제마다 응시를 만든다. 두 번 눌러도 응시는 한 번만 만든다 (행 잠금) */
-    @Transactional
+    /** 시험 시작. 과제마다 응시를 만든다. 두 번 눌러도 응시는 한 번만 만든다 (행 잠금). 이미 시작했다면 유예 안의 재입장으로 본다 */
+    @Transactional(noRollbackFor = LinkExpiredException.class)
     public EntryInfo start(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
@@ -107,6 +113,8 @@ public class ExamEntryService {
         if (s.isProctoring() && !consents.existsById(p.getId())) {
             throw new IllegalStateException("감독 동의와 환경 점검을 먼저 마쳐 주세요.");
         }
+        if (pr.started()) grace.touch(p, now); // 다시 들어온 경우: 유예 안이면 이어 가고, 넘으면 만료
+        else p.markSeen(now);
         p.markEntered(now);
         // 과제마다 응시 행(DB)을 만들고 그 ID 로 작업 파일을 만든다. 이미 있는 과제는 건너뛴다 (대상자 행 잠금으로 한 번만)
         var have = pr.records().stream().map(AttemptRecord::getTaskId).collect(java.util.stream.Collectors.toSet());
@@ -118,6 +126,28 @@ public class ExamEntryService {
         }
         return view(p, now);
     }
+
+    /**
+     * 시험 화면이 10초마다 보내는 연결 신호. 유예(5분)를 넘겨 돌아오면 링크를 만료시키고 expired=true 로 알린다.
+     * 시작 전·제출 후·끝난 시험의 신호는 무시한다.
+     */
+    @Transactional
+    public Heartbeat heartbeat(String token) {
+        Instant now = clock.instant();
+        ExamParticipant p = lock(token);
+        ParticipantProgress.Progress pr = progress.of(p);
+        ExamSession.Phase phase = p.getSession().phase(now);
+        if (phase != ExamSession.Phase.LIVE || !pr.started() || pr.finished()) return new Heartbeat(ConnectionGrace.isExpired(p, pr.started(), pr.finished(), now));
+        try {
+            grace.touch(p, now);
+            return new Heartbeat(false);
+        } catch (LinkExpiredException e) {
+            return new Heartbeat(true); // 만료 기록은 touch 가 남겼고, 예외는 여기서 잡으므로 되돌리지 않는다
+        }
+    }
+
+    /** expired: 유예를 넘겨 링크가 만료됨 (화면은 안내를 띄운다) */
+    public record Heartbeat(boolean expired) {}
 
     /**
      * 과제 하나 직접 제출. 제출한 과제부터 채점을 시작한다(팀원 1 채점 큐).
@@ -186,7 +216,8 @@ public class ExamEntryService {
         List<TaskStatus> tasks = codes.stream()
                 .map(code -> new TaskStatus(code, pr.attempts().get(code), pr.submitted().getOrDefault(code, false)))
                 .toList();
+        boolean linkExpired = s.phase(now) == ExamSession.Phase.LIVE && ConnectionGrace.isExpired(p, pr.started(), pr.finished(), now);
         return new EntryInfo(s.getTitle(), null, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
-                consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks);
+                consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks, linkExpired);
     }
 }

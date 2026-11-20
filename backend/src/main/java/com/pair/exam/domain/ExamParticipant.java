@@ -65,6 +65,14 @@ public class ExamParticipant {
     @Column(name = "entered_at")
     private Instant enteredAt;
 
+    /** 시작 후 시험 화면이 마지막으로 연결을 알려 온 시각 (연결 유예 판단용) */
+    @Column(name = "last_seen_at")
+    private Instant lastSeenAt;
+
+    /** 유예(5분) 안에 돌아오지 않아 입장 링크가 만료된 시각. 비어 있으면 유효 */
+    @Column(name = "link_expired_at")
+    private Instant linkExpiredAt;
+
 
     protected ExamParticipant() {}
 
@@ -90,6 +98,14 @@ public class ExamParticipant {
         if (enteredAt == null) enteredAt = at;
     }
 
+    public void markSeen(Instant at) {
+        this.lastSeenAt = at;
+    }
+
+    public void expireLink(Instant at) {
+        if (linkExpiredAt == null) linkExpiredAt = at;
+    }
+
     /** invite_error 컬럼 길이에 맞춘다 */
     public static String trimInviteError(String error) {
         return error == null ? null : error.substring(0, Math.min(255, error.length()));
@@ -105,4 +121,6 @@ public class ExamParticipant {
     public Instant getInvitedAt() { return invitedAt; }
     public Instant getRemindedAt() { return remindedAt; }
     public Instant getEnteredAt() { return enteredAt; }
+    public Instant getLastSeenAt() { return lastSeenAt; }
+    public Instant getLinkExpiredAt() { return linkExpiredAt; }
 }
