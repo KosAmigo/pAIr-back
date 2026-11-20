@@ -149,27 +149,14 @@ public class AttemptService {
     /** onDelta 가 있으면 답변을 스트리밍으로 받으며 글자가 오는 대로 넘긴다. 다 받은 뒤에 대화 기록에 저장한다. */
     public List<ChatTurn> chat(String id, String message, java.util.function.Consumer<String> onDelta) {
         synchronized (lock(id)) {
-            try {
-                return transactions.execute(status -> chatLocked(id, message, onDelta));
-            } catch (EmptyReplyException e) {
-                store.appendEvent(id, "chatEmpty", Map.of("finishReason", e.finishReason, "outputTokens", e.outputTokens));
-                throw e;
-            }
+            return chatLocked(id, message, onDelta);
         }
     }
 
-    private static class EmptyReplyException extends AiUnavailableException {
-        private final String finishReason;
-        private final long outputTokens;
-
-        EmptyReplyException(AssistantClient.Reply reply) {
-            super("AI가 답변을 끝내지 못했습니다(" + reply.finishReason()
-                    + "). 질문을 조금 나누거나 범위를 좁혀 다시 보내 주세요. 이 실패는 채점에 반영되지 않습니다.");
-            this.finishReason = reply.finishReason();
-            this.outputTokens = reply.outputTokens();
-        }
-    }
-
+    /**
+     * 질문 하나의 처리는 세 단계다. AI 호출(수 초~수 분)은 트랜잭션 밖에 두어 DB 연결과 회원 행 잠금을 잡지 않는다.
+     * 1) 잔액 확인(읽기만)  2) AI 호출  3) 질문·답 저장 + 체크포인트 + 채팅 차감을 짧은 트랜잭션 하나로
+     */
     private List<ChatTurn> chatLocked(String id, String message, java.util.function.Consumer<String> onDelta) {
         Attempt a = requireStatus(id, Attempt.Status.SOLVING);
         int limit = props.assistant().maxInputChars();
@@ -195,20 +182,25 @@ public class AttemptService {
         AssistantClient.Reply reply = onDelta == null ? assistant.send(req) : assistant.stream(req, onDelta);
         if (reply.text().isBlank()) {
             // 추론 모델이 한도 안에서 답을 끝내지 못하면 빈 답이 온다. 저장하지 않고 다시 보내게 한다.
-            throw new EmptyReplyException(reply);
+            store.appendEvent(id, "chatEmpty", Map.of("finishReason", reply.finishReason(), "outputTokens", reply.outputTokens()));
+            throw new AiUnavailableException("AI가 답변을 끝내지 못했습니다(" + reply.finishReason()
+                    + "). 질문을 조금 나누거나 범위를 좁혀 다시 보내 주세요. 이 실패는 채점에 반영되지 않습니다.");
         }
         int n = history.size();
         ChatTurn user = new ChatTurn(n + 1, "user", askedAt, message, null, null, null, null, null, null);
         ChatTurn ai = new ChatTurn(n + 2, "ai", Instant.now(), reply.text(), a.provider(), reply.model(), req,
                 reply.inputTokens(), reply.outputTokens(), reply.latencyMs());
-        checkpoints.appendQuestion(id, user, filesAtAsk);
-        store.appendTurn(id, ai);
-        if (record.getUserId() != null) {
-            Long turnId = chatRecords.findByAttemptIdAndTurnNo(record.getId(), ai.turn())
-                    .orElseThrow(() -> new IllegalStateException("AI 대화 기록을 찾을 수 없습니다.")).getId();
-            credits.chargeChat(record.getUserId(), turnId);
-        }
-        store.appendEvent(id, "chat", Map.of("turn", ai.turn(), "inputTokens", reply.inputTokens(), "outputTokens", reply.outputTokens()));
+        // 하나라도 실패하면(예: AI 호출 중 잔액이 바닥남) 질문·답·체크포인트·차감이 모두 취소된다
+        transactions.executeWithoutResult(status -> {
+            checkpoints.appendQuestion(id, user, filesAtAsk);
+            store.appendTurn(id, ai);
+            if (record.getUserId() != null) {
+                Long turnId = chatRecords.findByAttemptIdAndTurnNo(record.getId(), ai.turn())
+                        .orElseThrow(() -> new IllegalStateException("AI 대화 기록을 찾을 수 없습니다.")).getId();
+                credits.chargeChat(record.getUserId(), turnId);
+            }
+            store.appendEvent(id, "chat", Map.of("turn", ai.turn(), "inputTokens", reply.inputTokens(), "outputTokens", reply.outputTokens()));
+        });
         return List.of(user, ai);
     }
 
