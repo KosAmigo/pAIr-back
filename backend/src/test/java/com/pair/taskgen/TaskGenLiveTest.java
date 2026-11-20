@@ -35,6 +35,9 @@ class TaskGenLiveTest {
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
         r.add("pair.data-dir", () -> dataDir.toString());
+        // examtest 프로필은 AI 키를 비워 둔다. 이 테스트만 application-secret.yml·환경 변수의 실제 키를 다시 넣는다
+        r.add("spring.ai.openai.api-key", () -> "${OPENAI_API_KEY:}");
+        r.add("spring.ai.anthropic.api-key", () -> "${ANTHROPIC_API_KEY:}");
     }
 
     @MockitoBean JavaMailSender mail;
