@@ -33,13 +33,15 @@ public class TaskRepository {
     private final TaskRecordRepository records;
     private final TaskFileRecordRepository files;
     private final TaskQuestionRecordRepository questions;
+    private final DocumentPageRecordRepository pages;
     private final ObjectMapper json;
 
     public TaskRepository(TaskRecordRepository records, TaskFileRecordRepository files,
-            TaskQuestionRecordRepository questions, ObjectMapper json) {
+            TaskQuestionRecordRepository questions, DocumentPageRecordRepository pages, ObjectMapper json) {
         this.records = records;
         this.files = files;
         this.questions = questions;
+        this.pages = pages;
         this.json = json;
     }
 
@@ -70,6 +72,30 @@ public class TaskRepository {
     @Transactional(readOnly = true)
     public Map<String, String> hiddenFiles(String id) {
         return readFiles(find(id), TaskFileRecord.HIDDEN);
+    }
+
+    /**
+     * 채점에 쓸 제공 자료: 과제 원본의 공개 파일 중 "자료/" 아래 파일 (경로 → 글, 경로 순).
+     * 텍스트 파일(CSV, md)은 content 그대로, PDF(content 없음)는 document_pages 를 쪽 순서로 "--- N쪽 ---" 줄과 함께 이어 붙인다.
+     * 응시 작업 파일이 아니라 과제 원본에서 읽으므로 응시자가 자료를 고쳐도 채점 근거는 그대로다.
+     * 실전 복사본은 원본 code 로 불러야 한다(TaskCatalog.definitionCode).
+     */
+    @Transactional(readOnly = true)
+    public Map<String, String> materials(String id) {
+        Map<String, String> out = new TreeMap<>();
+        for (TaskFileRecord f : files.findByTaskIdAndVisibilityOrderByPathAsc(find(id).getId(), TaskFileRecord.VISIBLE)) {
+            if (!f.getPath().startsWith("자료/")) continue;
+            if (f.getContent() != null) {
+                out.put(f.getPath(), f.getContent());
+            } else if (f.getStorageKey() != null) {
+                StringBuilder sb = new StringBuilder();
+                for (DocumentPageRecord p : pages.findByTaskFileIdOrderByPageNoAsc(f.getId())) {
+                    sb.append("--- ").append(p.getPageNo()).append("쪽 ---\n").append(p.getText().strip()).append("\n");
+                }
+                if (!sb.isEmpty()) out.put(f.getPath(), sb.toString());
+            }
+        }
+        return out;
     }
 
     private TaskRecord find(String id) {

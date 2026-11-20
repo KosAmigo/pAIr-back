@@ -129,8 +129,12 @@ pair:
       effort: medium
       max-tokens: 16000
       calls: 2
-    # 비개발 채점의 제공 자료: full(통째로) 또는 rag(제출물 문장으로 검색한 조각만, CSV 표는 통째로)
-    reference-docs: ${PAIR_REFERENCE_DOCS:full}
+    # 비개발 채점의 제공 자료(토큰 절약):
+    #   auto(기본) = 자료 전체 글자 수가 reference-docs-full-max-chars 이하면 full, 넘으면 rag
+    #   full = 통째로. 응시와 상관없이 같은 글이라 프롬프트 캐시 앞부분에 넣어 3번 호출·연달아 들어오는 채점이 캐시를 같이 쓴다
+    #   rag  = 제출물 문장으로 검색한 조각만(CSV 표는 통째로). 제출물마다 조각이 달라 캐시가 안 맞아 뒷부분에 넣는다
+    reference-docs: ${PAIR_REFERENCE_DOCS:auto}
+    reference-docs-full-max-chars: ${PAIR_REFERENCE_DOCS_FULL_MAX_CHARS:12000}
 
   # (예비) Claude 를 어시스턴트로 쓸 때의 모델. 이번 파일럿에서는 쓰지 않는다.
   claude-assistant-model: claude-haiku-5-5
