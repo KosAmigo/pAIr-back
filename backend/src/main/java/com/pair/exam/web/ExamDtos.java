@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.pair.exam.domain.EnvScanPhoto;
 import com.pair.exam.domain.ExamParticipant;
 import com.pair.exam.domain.ExamSession;
 import com.pair.exam.domain.ProctorEvent;
@@ -107,6 +108,27 @@ public final class ExamDtos {
             return new ProctorEventView(e.getId(), e.getParticipantId(), e.getType(), e.getSource(), e.getStartedAt(), e.getDurationMs(),
                     e.getConfidence(), e.getDetail(), snap, e.getSnapshotBytes(), e.getReview(), e.getReviewNote(),
                     e.getReviewedBy(), e.getReviewedAt());
+        }
+    }
+
+    // ── 응시자: 환경 점검 사진 (방 360도, 책상 위) ──
+
+    public record EnvScanRequest(
+            @NotNull EnvScanPhoto.Stage stage,
+            /** 방 스캔에서 이 사진을 찍은 방향(0~359도). 책상은 비움 */
+            @Min(0) @Max(359) Integer angle,
+            /** 사진에서 감지한 물체 이름 */
+            @Size(max = 12) List<@Size(max = 30) String> objects,
+            /** data:image/jpeg;base64,... 또는 base64 본문 */
+            @NotBlank String image) {}
+
+    public record EnvScanPhotoView(Long id, Long participantId, EnvScanPhoto.Stage stage, Integer angle, List<String> objects,
+            boolean phoneSuspect, int sizeBytes, Instant capturedAt, boolean deleted) {
+
+        public static EnvScanPhotoView from(EnvScanPhoto f) {
+            List<String> labels = f.getObjects() == null || f.getObjects().isBlank() ? List.of() : List.of(f.getObjects().split(","));
+            return new EnvScanPhotoView(f.getId(), f.getParticipantId(), f.getStage(), f.getAngleDeg() == null ? null : f.getAngleDeg().intValue(),
+                    labels, f.isPhoneSuspect(), f.getSizeBytes(), f.getCapturedAt(), f.getDeletedAt() != null);
         }
     }
 
