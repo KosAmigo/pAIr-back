@@ -190,6 +190,35 @@ class CheckpointRollbackTest {
     }
 
     @Test
+    void 복기_트리_노드에_채점이_끝난_응시의_점수가_붙는다() {
+        Long cp3 = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(1).getId();
+        String fork = rollbacks.rollback(userId, cp3).attemptId();
+
+        // 원래 응시만 채점이 끝났다
+        Attempt a = store.load(id);
+        Instant t = Instant.now();
+        store.save(a.withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+        store.writeReport(id, java.util.Map.of("version", 2, "total", 80, "max", 100,
+                "items", List.of(java.util.Map.of("key", "usage", "name", "AI 활용력", "max", 20, "score", 16))));
+
+        var nodes = replayTree.tree(userId, fork);
+        var root = nodes.get(0);
+        assertThat(root.attemptId()).isEqualTo(id);
+        assertThat(root.score().total()).isEqualTo(80);
+        assertThat(root.score().max()).isEqualTo(100);
+        assertThat(root.score().items()).hasSize(1);
+        assertThat(root.score().items().get(0).name()).isEqualTo("AI 활용력");
+        assertThat(root.score().items().get(0).score()).isEqualTo(16);
+        // 아직 풀이 중인 갈래는 점수가 없다
+        assertThat(nodes.get(1).attemptId()).isEqualTo(fork);
+        assertThat(nodes.get(1).score()).isNull();
+
+        // 이전 형식 리포트(다시 채점 필요)는 점수를 주지 않는다
+        store.writeReport(id, java.util.Map.of("version", 1, "total", 70));
+        assertThat(replayTree.tree(userId, fork).get(0).score()).isNull();
+    }
+
+    @Test
     void 남의_복기_트리는_볼_수_없다() {
         Long other = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "다른 사람", "x")).getId();
         assertThatThrownBy(() -> replayTree.tree(other, id)).isInstanceOf(NoSuchElementException.class);

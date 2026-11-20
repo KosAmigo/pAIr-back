@@ -72,9 +72,15 @@ public class ApiController {
 
     public record EditRequest(int turn, int index, String action) {}
 
+    /** 자가진단 과제 목록 (응시자용). track=dev|biz 로 직군을 거를 수 있다 */
+    @GetMapping("/tasks")
+    public List<TaskCatalog.Summary> taskList(@RequestParam(required = false) String track) {
+        return catalog.selfTasks(track);
+    }
+
     @GetMapping("/tasks/{taskId}")
     public TaskDef task(@PathVariable String taskId) {
-        return catalog.definition(taskId);
+        return catalog.publicSelfDefinition(taskId);
     }
 
     @PostMapping("/attempts")
