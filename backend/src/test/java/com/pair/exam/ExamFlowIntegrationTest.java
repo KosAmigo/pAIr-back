@@ -21,6 +21,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 
+import jakarta.mail.Address;
+import jakarta.mail.Message;
+import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,7 +34,6 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.mail.MailSendException;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -125,6 +127,8 @@ class ExamFlowIntegrationTest {
     @BeforeEach
     void setUp() {
         clock.set(T0);
+        // 메일은 HTML 본문을 담는 MimeMessage 로 보낸다. 세션 없이도 만들어진다
+        when(mail.createMimeMessage()).thenAnswer(inv -> new MimeMessage((jakarta.mail.Session) null));
         // 테스트 DB 는 Flyway 를 안 돌리므로 V3 시드와 같은 과제 행을 넣는다
         com.pair.task.TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         when(attempts.submitAll(anyCollection())).thenAnswer(inv -> ((java.util.Collection<?>) inv.getArgument(0)).size());
@@ -170,8 +174,8 @@ class ExamFlowIntegrationTest {
         assertThat(sessions.list(114L)).singleElement().extracting(SessionSummary::phase).isEqualTo(ExamSession.Phase.CANCELED);
         assertThat(appEvents.stream(SessionNotice.class))
                 .anySatisfy(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CANCELED));
-        verify(mail, timeout(3000).atLeastOnce()).send(org.mockito.ArgumentMatchers.<SimpleMailMessage>argThat(
-                m -> m.getSubject() != null && m.getSubject().contains("취소")));
+        verify(mail, timeout(3000).atLeastOnce()).send(org.mockito.ArgumentMatchers.<MimeMessage>argThat(
+                m -> subjectOf(m).contains("취소")));
 
         assertThatThrownBy(() -> entry.enter(token)).hasMessageContaining("취소");
         assertThatThrownBy(() -> sessions.cancel(s.id())).hasMessageContaining("취소한 회차");
@@ -351,7 +355,7 @@ class ExamFlowIntegrationTest {
         sessions.addParticipants(s.id(), List.of(new ParticipantInput("성공", "ok@test.dev"),
                 new ParticipantInput("실패", "fail@test.dev")));
 
-        verify(mail, timeout(3000).times(2)).send(any(SimpleMailMessage.class));
+        verify(mail, timeout(3000).times(2)).send(any(MimeMessage.class));
         awaitInviteStatus(s.id(), "ok@test.dev", ExamParticipant.InviteStatus.SENT);
         awaitInviteStatus(s.id(), "fail@test.dev", ExamParticipant.InviteStatus.FAILED);
     }
@@ -694,12 +698,29 @@ class ExamFlowIntegrationTest {
         attemptStore.writeReport(attemptId, report);
     }
 
+    private static String subjectOf(MimeMessage m) {
+        try {
+            return m.getSubject() == null ? "" : m.getSubject();
+        } catch (jakarta.mail.MessagingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static List<String> recipientsOf(MimeMessage m) {
+        try {
+            Address[] to = m.getRecipients(Message.RecipientType.TO);
+            return to == null ? List.of() : java.util.Arrays.stream(to).map(Address::toString).toList();
+        } catch (jakarta.mail.MessagingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private void doThrowForAddress(String address) {
         org.mockito.Mockito.doAnswer(inv -> {
-            SimpleMailMessage m = inv.getArgument(0);
-            if (m.getTo() != null && List.of(m.getTo()).contains(address)) throw new MailSendException("smtp down");
+            MimeMessage m = inv.getArgument(0);
+            if (recipientsOf(m).contains(address)) throw new MailSendException("smtp down");
             return null;
-        }).when(mail).send(any(SimpleMailMessage.class));
+        }).when(mail).send(any(MimeMessage.class));
     }
 
     /** 메일 결과 저장은 다른 스레드라 잠깐 기다린다 (최대 3초) */
