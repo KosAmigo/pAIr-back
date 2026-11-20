@@ -5,6 +5,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -14,9 +15,19 @@ import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pair.task.DocumentPageRecord;
+import com.pair.task.DocumentPageRecordRepository;
+import com.pair.task.QuestionChoiceRecord;
+import com.pair.task.QuestionChoiceRecordRepository;
+import com.pair.task.QuestionSourceRecord;
+import com.pair.task.QuestionSourceRecordRepository;
+import com.pair.task.ShortAnswerKeyRecord;
+import com.pair.task.ShortAnswerKeyRecordRepository;
 import com.pair.task.TaskFileRecord;
 import com.pair.task.TaskFileRecordRepository;
 import com.pair.task.TaskQuestionRecord;
@@ -55,9 +66,23 @@ public class GeneratedTaskWriter {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final Clock clock;
+    private final PdfMaker pdf;
+    private final TaskFileStorage storage;
+    private final QuestionChoiceRecordRepository choices;
+    private final ShortAnswerKeyRecordRepository answerKeys;
+    private final QuestionSourceRecordRepository sources;
+    private final DocumentPageRecordRepository pages;
 
     public GeneratedTaskWriter(TaskRecordRepository records, TaskFileRecordRepository files,
-            TaskQuestionRecordRepository questions, JdbcTemplate jdbc, ObjectMapper json, Clock clock) {
+            TaskQuestionRecordRepository questions, JdbcTemplate jdbc, ObjectMapper json, Clock clock, PdfMaker pdf,
+            TaskFileStorage storage, QuestionChoiceRecordRepository choices, ShortAnswerKeyRecordRepository answerKeys,
+            QuestionSourceRecordRepository sources, DocumentPageRecordRepository pages) {
+        this.pdf = pdf;
+        this.storage = storage;
+        this.choices = choices;
+        this.answerKeys = answerKeys;
+        this.sources = sources;
+        this.pages = pages;
         this.records = records;
         this.files = files;
         this.questions = questions;
@@ -93,6 +118,98 @@ public class GeneratedTaskWriter {
         return code;
     }
 
+    /** 비개발 배점: 객관식 5점, 단답형 3점 */
+    static final int POINTS_SINGLE = 5;
+    static final int POINTS_SHORT = 3;
+    static final List<String> BIZ_HEADINGS = List.of("## 결론", "## 근거", "## 리스크");
+
+    /**
+     * 비개발 과제를 저장한다 (한 트랜잭션). 파일 경로 규칙은 pricing-plan 시드(V6)와 같다.
+     * 자료 CSV 는 그대로 VISIBLE, 기획안.md 는 제목만 있는 틀 VISIBLE, checklist.md 와 _gen/report.json 은 HIDDEN.
+     * 문서는 PDF 로 만들어 저장소에 올리고(storage_key, content 비움) 쪽 글은 document_pages 에 넣는다.
+     * DB 저장이 실패하면(롤백) 이미 올린 PDF 도 지운다.
+     */
+    @Transactional
+    public String saveBiz(TaskGenForm form, BizDraft d, TaskGenerator.GenReport report, long adminId) {
+        List<String> uploaded = new ArrayList<>();
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status != STATUS_COMMITTED) uploaded.forEach(storage::delete);
+                }
+            });
+        }
+        String code = uniqueCode(d.code(), d.title(), "biz-task");
+        Instant now = clock.instant();
+        long id = nextTaskId();
+
+        TaskRecord t = new TaskRecord(id, code, cut(d.title(), 200), "BIZ", form.minutes(), form.usageValue(),
+                TaskRecord.Status.HIDDEN, null, adminId, now);
+        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), form.difficulty());
+        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings());
+        records.save(t);
+
+        Map<String, Long> fileIds = new LinkedHashMap<>();
+        for (var f : d.csvFiles()) {
+            TaskFileRecord r = files.save(new TaskFileRecord(id, f.path(), f.content(), "text/csv",
+                    f.content().getBytes(StandardCharsets.UTF_8).length, TaskFileRecord.VISIBLE, false));
+            fileIds.put(f.path(), r.getId());
+        }
+        int n = 0;
+        for (var doc : d.documents()) {
+            PdfMaker.Result made = pdf.make(BizChecks.titleOf(doc.path()), doc.pages());
+            String key = TaskFileStorage.keyOf(id, ++n);
+            uploaded.add(key);
+            storage.put(key, made.bytes());
+            TaskFileRecord r = new TaskFileRecord(id, doc.path(), null, "application/pdf", made.bytes().length,
+                    TaskFileRecord.VISIBLE, true);
+            r.setStorageKey(key);
+            r = files.save(r);
+            fileIds.put(doc.path(), r.getId());
+            // 생성한 글을 그대로 쪽별로 넣는다 (형식 검사가 PDF 쪽 수 = 글 쪽 수를 확인했다)
+            for (int i = 0; i < doc.pages().size(); i++) pages.save(new DocumentPageRecord(r.getId(), i + 1, doc.pages().get(i)));
+        }
+        files.save(file(id, "기획안.md", "# " + d.title() + "\n\n" + String.join("\n\n", BIZ_HEADINGS) + "\n", TaskFileRecord.VISIBLE, false));
+        files.save(file(id, "checklist.md", d.checklist(), TaskFileRecord.HIDDEN, true));
+        files.save(file(id, REPORT_PATH, toJson(report), TaskFileRecord.HIDDEN, true));
+
+        int seq = 1;
+        for (var q : d.questions()) {
+            TaskQuestionRecord qr = new TaskQuestionRecord(id, "TASK", q.type().name(), seq++, q.content());
+            qr.setPoints(q.type() == BizDraft.Type.SINGLE ? POINTS_SINGLE : POINTS_SHORT);
+            qr = questions.save(qr);
+            Long qid = qr.getId();
+            if (q.type() == BizDraft.Type.SINGLE) {
+                for (int i = 0; i < q.choices().size(); i++) {
+                    choices.save(new QuestionChoiceRecord(qid, i + 1, q.choices().get(i).content(), q.choices().get(i).correct()));
+                }
+            } else {
+                for (String a : new LinkedHashSet<>(q.accepted().stream().map(String::strip).toList())) {
+                    answerKeys.save(new ShortAnswerKeyRecord(qid, a));
+                }
+            }
+            Map<Long, String> pagesByFile = new LinkedHashMap<>();
+            for (var s : q.sources()) {
+                pagesByFile.merge(fileIds.get(s.path()), s.pages() == null ? "" : s.pages().strip(), (a, b) -> a.isEmpty() ? b : a + "," + b);
+            }
+            pagesByFile.forEach((fileId, pg) -> sources.save(new QuestionSourceRecord(qid, fileId, pg.isEmpty() ? null : cut(pg, 50))));
+        }
+        for (int i = 0; i < d.followUps().size(); i++) {
+            questions.save(new TaskQuestionRecord(id, TaskQuestionRecord.FOLLOWUP, "ESSAY", i + 1, d.followUps().get(i)));
+        }
+        return code;
+    }
+
+    private String bizSettings() {
+        Map<String, Object> s = new LinkedHashMap<>();
+        s.put("openFile", "기획안.md");
+        s.put("editableFile", "기획안.md");
+        s.put("requiredHeadings", BIZ_HEADINGS);
+        s.put("d4Minutes", D4_MINUTES);
+        return toJson(s);
+    }
+
     /** 과제 콘솔이 보여 줄 확인 결과(report.json 내용). 없으면 NoSuchElementException(404) */
     @Transactional(readOnly = true)
     public String report(String code) {
@@ -102,9 +219,13 @@ public class GeneratedTaskWriter {
     }
 
     private String uniqueCode(String wanted, String title) {
+        return uniqueCode(wanted, title, "dev-task");
+    }
+
+    private String uniqueCode(String wanted, String title, String fallback) {
         String base = slug(wanted);
         if (base.isEmpty()) base = slug(title);
-        if (base.isEmpty()) base = "dev-task";
+        if (base.isEmpty()) base = fallback;
         String code = base;
         for (int n = 2; records.findByCode(code).isPresent(); n++) code = base + "-" + n;
         return code;

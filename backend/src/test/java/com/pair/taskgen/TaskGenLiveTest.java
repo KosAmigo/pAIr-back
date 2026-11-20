@@ -39,6 +39,7 @@ class TaskGenLiveTest {
 
     @MockitoBean JavaMailSender mail;
     @Autowired DevTaskGenerator generator;
+    @Autowired BizTaskGenerator bizGenerator;
     @Autowired GeneratedTaskWriter writer;
     @Autowired TaskRecordRepository records;
     @Autowired ObjectMapper json;
@@ -56,6 +57,21 @@ class TaskGenLiveTest {
         o.checks().forEach(c -> System.out.println("[live]   " + (c.ok() ? "OK  " : "FAIL") + " " + c.name() + " - " + c.detail()));
 
         // 통과 여부와 상관없이 검수 전으로 저장되어야 한다
+        assertThat(records.findByCode(o.taskCode())).isPresent();
+    }
+
+    /** 비개발: 실제 OpenAI 생성 + 실제 Claude 풀이 + 실제 PDF (로컬 파일 저장소). 결과는 build/taskgen-live-biz.json */
+    @Test
+    void realBizGeneration() throws Exception {
+        TaskGenForm form = new TaskGenForm("BIZ", "서비스 기획", "중급", "저가 요금제 출시 여부", "설문의 전환 의향을 실제 전환율로 보정하지 않음", "SELF", 60).validated();
+        long t = System.nanoTime();
+        var o = bizGenerator.generate(form, 1L, step -> System.out.println("[live-biz] " + step));
+        long sec = Math.round((System.nanoTime() - t) / 1e9);
+
+        String report = writer.report(o.taskCode());
+        Files.writeString(Path.of("build", "taskgen-live-biz.json"), json.writerWithDefaultPrettyPrinter().writeValueAsString(json.readTree(report)));
+        System.out.println("[live-biz] 통과=" + o.passed() + " 시도=" + o.attempts() + " 걸린 시간=" + sec + "초 code=" + o.taskCode());
+        o.checks().forEach(c -> System.out.println("[live-biz]   " + (c.ok() ? "OK  " : "FAIL") + " " + c.name() + " - " + c.detail()));
         assertThat(records.findByCode(o.taskCode())).isPresent();
     }
 }

@@ -17,8 +17,7 @@ public record TaskGenForm(String track, String jobRole, String difficulty, Strin
     public TaskGenForm validated() {
         String t = clean(track).toUpperCase();
         if (t.isEmpty()) throw new IllegalArgumentException("직군 구분(track)을 입력하세요.");
-        if (t.equals("BIZ")) throw new IllegalArgumentException("비개발(BIZ) 과제 생성은 준비 중입니다.");
-        if (!t.equals("DEV")) throw new IllegalArgumentException("track 은 DEV 만 쓸 수 있습니다: " + track);
+        if (!t.equals("DEV") && !t.equals("BIZ")) throw new IllegalArgumentException("track 은 DEV 또는 BIZ 여야 합니다: " + track);
         String role = required(jobRole, "직군(jobRole)", 50);
         String diff = clean(difficulty);
         if (!DIFFICULTIES.contains(diff)) throw new IllegalArgumentException("난이도는 초급, 중급, 고급 중 하나여야 합니다.");

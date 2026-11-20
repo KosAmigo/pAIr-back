@@ -21,7 +21,8 @@ public abstract class TaskGenerator<D> {
 
     /** _gen/report.json 내용 (설계 7장) */
     public record GenReport(String model, int attempts, long seconds, long inputTokens, long outputTokens,
-            boolean passed, TaskGenForm form, List<CheckResult> checks, String retryError) {}
+            boolean passed, TaskGenForm form, List<CheckResult> checks, String retryError,
+            java.util.Map<String, Object> details) {}
 
     private final TaskGenAi ai;
     private final TaskGenProperties props;
@@ -40,6 +41,11 @@ public abstract class TaskGenerator<D> {
 
     /** 이 Draft 에 대한 검사 목록 (실행 결과를 검사끼리 나눠 쓰도록 Draft 마다 새로 만든다) */
     protected abstract List<GenCheck<D>> checks(D draft);
+
+    /** report.json 에 더 남길 내용 (예: 비개발 함정 정보) */
+    protected java.util.Map<String, Object> details(D draft) {
+        return java.util.Map.of();
+    }
 
     /** 한 트랜잭션으로 저장하고 과제 code 를 돌려준다 */
     protected abstract String save(TaskGenForm form, D draft, GenReport report, long adminId);
@@ -79,7 +85,7 @@ public abstract class TaskGenerator<D> {
         boolean passed = results.stream().allMatch(CheckResult::ok);
         onStep.accept(STEP_SAVING);
         long seconds = Math.round((System.nanoTime() - started) / 1e9);
-        String code = save(form, draft, new GenReport(model, attempts, seconds, in, out, passed, form, results, retryError), adminId);
+        String code = save(form, draft, new GenReport(model, attempts, seconds, in, out, passed, form, results, retryError, details(draft)), adminId);
         return new Outcome(code, passed, attempts, results);
     }
 

@@ -11,7 +11,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** 문항 (ERD task_questions). 지금은 후속 질문(FOLLOWUP, ESSAY)만 읽는다 */
+/** 문항 (ERD task_questions). TASK 문항(객관식·단답형)과 후속 질문(FOLLOWUP, ESSAY) */
 @Entity
 @Table(name = "task_questions")
 @Getter
@@ -42,6 +42,9 @@ public class TaskQuestionRecord {
     @Column(nullable = false, columnDefinition = "text")
     private String content;
 
+    /** 배점 (TASK 문항만. 객관식 5, 단답형 3) */
+    private Integer points;
+
     @Column(nullable = false)
     private boolean active = true;
 
@@ -52,5 +55,9 @@ public class TaskQuestionRecord {
         this.questionType = questionType;
         this.seq = seq;
         this.content = content;
+    }
+
+    public void setPoints(Integer points) {
+        this.points = points;
     }
 }

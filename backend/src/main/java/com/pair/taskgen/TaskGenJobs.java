@@ -49,12 +49,14 @@ public class TaskGenJobs {
     }
 
     private final DevTaskGenerator dev;
+    private final BizTaskGenerator biz;
     private final int maxConcurrent;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    public TaskGenJobs(DevTaskGenerator dev, TaskGenProperties props) {
+    public TaskGenJobs(DevTaskGenerator dev, BizTaskGenerator biz, TaskGenProperties props) {
         this.dev = dev;
+        this.biz = biz;
         this.maxConcurrent = props.maxConcurrent();
     }
 
@@ -81,7 +83,8 @@ public class TaskGenJobs {
 
     private void run(Job job, TaskGenForm form, long adminId) {
         try {
-            TaskGenerator.Outcome o = dev.generate(form, adminId, step -> job.step = step);
+            TaskGenerator<?> generator = "BIZ".equals(form.track()) ? biz : dev;
+            TaskGenerator.Outcome o = generator.generate(form, adminId, step -> job.step = step);
             job.taskCode = o.taskCode();
             job.passed = o.passed();
             job.checks = o.checks();

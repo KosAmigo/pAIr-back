@@ -292,11 +292,11 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("폼 검사: BIZ 는 400 '준비 중', 빈 값·범위 밖은 400")
+    @DisplayName("폼 검사: 모르는 track, 빈 값·범위 밖은 400")
     void formValidation() throws Exception {
         mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
-                .content(FORM.replace("DEV", "BIZ"))).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("준비 중")));
+                .content(FORM.replace("DEV", "XYZ"))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("DEV 또는 BIZ")));
         mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
                 .content(FORM.replace("쿠폰 할인 계산", " "))).andExpect(status().isBadRequest());
         mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
