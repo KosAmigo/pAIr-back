@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pair.task.TaskCatalog;
 import com.pair.task.TaskDef;
+import com.pair.task.TaskMaterialService;
 import com.pair.task.TaskRecord;
 import com.pair.taskconsole.TaskConsoleService.TaskSummary;
 import com.pair.web.auth.CurrentUser;
@@ -27,10 +28,12 @@ public class TaskConsoleController {
 
     private final TaskConsoleService console;
     private final TaskCatalog tasks;
+    private final TaskMaterialService materials;
 
-    public TaskConsoleController(TaskConsoleService console, TaskCatalog tasks) {
+    public TaskConsoleController(TaskConsoleService console, TaskCatalog tasks, TaskMaterialService materials) {
         this.console = console;
         this.tasks = tasks;
+        this.materials = materials;
     }
 
     /** 관리자: 모든 과제. 매니저: 공개한 실전(LIVE) 과제만 (회차 만들 때 고르는 목록) */
@@ -58,6 +61,28 @@ public class TaskConsoleController {
     public TaskSummary hide(CurrentUser user, @PathVariable String taskId) {
         requireAdmin(user);
         return console.changeStatus(taskId, TaskRecord.Status.HIDDEN);
+    }
+
+    /** 검수용 PDF 자료 목록 (공개 전 과제 포함, 숨은 파일 제외) */
+    @GetMapping("/{taskId}/materials")
+    public List<TaskMaterialService.Material> materials(CurrentUser user, @PathVariable String taskId) {
+        requireAdmin(user);
+        return materials.listForTask(taskId);
+    }
+
+    @GetMapping("/{taskId}/materials/file")
+    public org.springframework.http.ResponseEntity<byte[]> materialFile(CurrentUser user, @PathVariable String taskId,
+            @org.springframework.web.bind.annotation.RequestParam String path) {
+        requireAdmin(user);
+        return com.pair.web.MaterialResponses.pdf(materials.fileForTask(taskId, path));
+    }
+
+    @GetMapping("/{taskId}/materials/pages")
+    public List<TaskMaterialService.PageText> materialPages(CurrentUser user, @PathVariable String taskId,
+            @org.springframework.web.bind.annotation.RequestParam String path,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String pages) {
+        requireAdmin(user);
+        return materials.pagesForTask(taskId, path, pages);
     }
 
     private static void requireAdmin(CurrentUser user) {
