@@ -45,10 +45,12 @@ class ConsoleAuthIntegrationTest {
     @Autowired ObjectMapper json;
     @MockitoBean JavaMailSender mail;
     @Autowired com.pair.task.TaskRecordRepository taskRecords;
+    @Autowired com.pair.task.TaskFileRecordRepository taskFiles;
+    @Autowired com.pair.task.TaskQuestionRecordRepository taskQuestions;
 
     @org.junit.jupiter.api.BeforeEach
     void seedTasks() {
-        com.pair.task.TestTasks.seed(taskRecords);
+        com.pair.task.TestTasks.seed(taskRecords, taskFiles, taskQuestions);
     }
 
     private static MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder b, long user, String role, Long company) {

@@ -34,6 +34,8 @@ import com.pair.credit.CreditLedgerRepository;
 import com.pair.credit.CreditService;
 import com.pair.credit.InsufficientCreditException;
 import com.pair.task.TaskRecordRepository;
+import com.pair.task.TaskFileRecordRepository;
+import com.pair.task.TaskQuestionRecordRepository;
 import com.pair.task.TaskRepository;
 import com.pair.task.TestTasks;
 import com.pair.web.auth.AuthAccount;
@@ -58,6 +60,8 @@ class CheckpointRollbackTest {
     @Autowired AttemptRegistry registry;
     @Autowired AttemptRecordRepository records;
     @Autowired TaskRecordRepository taskRecords;
+    @Autowired TaskFileRecordRepository taskFiles;
+    @Autowired TaskQuestionRecordRepository taskQuestions;
     @Autowired TaskRepository tasks;
     @MockitoSpyBean CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
@@ -77,7 +81,7 @@ class CheckpointRollbackTest {
 
     @BeforeEach
     void setUp() {
-        TestTasks.seed(taskRecords);
+        TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         userId = auth.signup(new AuthDtos.SignupRequest("응시자", UUID.randomUUID() + "@pair.test", "password123"))
                 .user().id();
         Map<String, String> files = tasks.visibleFiles(TestTasks.SELF_DEV);
