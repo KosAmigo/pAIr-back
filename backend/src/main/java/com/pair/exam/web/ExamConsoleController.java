@@ -23,12 +23,14 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.pair.exam.service.AutoSubmitService;
+import com.pair.exam.service.EnvScanService;
 import com.pair.exam.service.ExamSessionService;
 import com.pair.exam.service.ExamWorkbooks;
 import com.pair.exam.service.ProctorService;
 import com.pair.exam.service.SessionResultService;
 import com.pair.exam.web.ExamDtos.AddParticipantsRequest;
 import com.pair.exam.web.ExamDtos.AddParticipantsResult;
+import com.pair.exam.web.ExamDtos.EnvScanPhotoView;
 import com.pair.exam.web.ExamDtos.ProctorEventView;
 import com.pair.exam.web.ExamDtos.ReviewRequest;
 import com.pair.exam.web.ExamDtos.SessionDetail;
@@ -55,14 +57,16 @@ public class ExamConsoleController {
     private final SessionResultService results;
     private final ProctorService proctor;
     private final AutoSubmitService autoSubmit;
+    private final EnvScanService envScan;
     private final ConsoleAccess access;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
-            AutoSubmitService autoSubmit, ConsoleAccess access) {
+            AutoSubmitService autoSubmit, EnvScanService envScan, ConsoleAccess access) {
         this.sessions = sessions;
         this.results = results;
         this.proctor = proctor;
         this.autoSubmit = autoSubmit;
+        this.envScan = envScan;
         this.access = access;
     }
 
@@ -185,6 +189,19 @@ public class ExamConsoleController {
     public AutoSubmitService.RescueResult rescue(CurrentUser user, @PathVariable Long sessionId) {
         manage(user, sessionId);
         return autoSubmit.rescue(sessionId);
+    }
+
+    /** 대상자의 환경 점검 사진 목록 (방 360도 방향별, 책상 위). 감독관도 볼 수 있다 */
+    @GetMapping("/{sessionId}/participants/{participantId}/env-scan")
+    public List<EnvScanPhotoView> envScanPhotos(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+        access.requireSession(user, sessionId);
+        return envScan.photosOf(sessionId, participantId);
+    }
+
+    @GetMapping(value = "/{sessionId}/env-scan/{photoId}/image", produces = MediaType.IMAGE_JPEG_VALUE)
+    public ResponseEntity<byte[]> envScanImage(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long photoId) {
+        access.requireSession(user, sessionId);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(envScan.image(sessionId, photoId));
     }
 
     @GetMapping("/{sessionId}/results")

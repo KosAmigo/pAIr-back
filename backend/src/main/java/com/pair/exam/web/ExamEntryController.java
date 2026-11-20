@@ -10,10 +10,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pair.exam.service.EnvScanService;
 import com.pair.exam.service.ExamEntryService;
 import com.pair.exam.service.ProctorService;
 import com.pair.exam.web.ExamDtos.ConsentRequest;
 import com.pair.exam.web.ExamDtos.EntryInfo;
+import com.pair.exam.web.ExamDtos.EnvScanPhotoView;
+import com.pair.exam.web.ExamDtos.EnvScanRequest;
 import com.pair.exam.web.ExamDtos.ProctorEventRequest;
 import com.pair.exam.web.ExamDtos.ProctorEventView;
 import com.pair.exam.web.ExamDtos.ServerTime;
@@ -29,11 +32,13 @@ public class ExamEntryController {
 
     private final ExamEntryService entry;
     private final ProctorService proctor;
+    private final EnvScanService envScan;
     private final Clock clock;
 
-    public ExamEntryController(ExamEntryService entry, ProctorService proctor, Clock clock) {
+    public ExamEntryController(ExamEntryService entry, ProctorService proctor, EnvScanService envScan, Clock clock) {
         this.entry = entry;
         this.proctor = proctor;
+        this.envScan = envScan;
         this.clock = clock;
     }
 
@@ -79,6 +84,13 @@ public class ExamEntryController {
     @PostMapping("/api/entry/{token}/submit")
     public EntryInfo submit(@PathVariable String token) {
         return entry.submit(token);
+    }
+
+    /** 환경 점검 사진(방 360도의 한 방향, 책상 위) 업로드. 시험 시작 전 입장 단계에서 올린다 */
+    @PostMapping("/api/entry/{token}/env-scan")
+    @ResponseStatus(HttpStatus.CREATED)
+    public EnvScanPhotoView envScan(@PathVariable String token, @Valid @RequestBody EnvScanRequest req) {
+        return envScan.upload(token, req);
     }
 
     @PostMapping("/api/entry/{token}/proctor-events")
