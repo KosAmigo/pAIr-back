@@ -29,6 +29,9 @@ import com.pair.task.TaskRecordRepository;
 import com.pair.task.TestTasks;
 import com.pair.web.auth.AuthDtos;
 import com.pair.web.auth.AuthService;
+import com.pair.web.auth.AuthTestSupport;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /** 응시 하나를 다루는 요청(/api/attempts/{id}/**)은 자가진단 응시의 주인만 보낼 수 있다 */
 @SpringBootTest(properties = "pair.auth.mode=bearer")
@@ -42,6 +45,7 @@ class AttemptOwnerTest {
     @Autowired AttemptRegistry registry;
     @Autowired AttemptStore store;
     @Autowired TaskRecordRepository tasks;
+    @MockitoBean JavaMailSender mail; // 가입은 이메일 인증 코드가 필요해 메일을 가짜로 받는다
 
     AuthDtos.AuthResponse owner;
     AuthDtos.AuthResponse other;
@@ -56,7 +60,7 @@ class AttemptOwnerTest {
     }
 
     private AuthDtos.AuthResponse signup() {
-        return auth.signup(new AuthDtos.SignupRequest("Test", UUID.randomUUID() + "@example.com", "password123"));
+        return AuthTestSupport.signup(auth, mail, "Test", UUID.randomUUID() + "@example.com");
     }
 
     /** 응시 하나를 다루는 모든 엔드포인트 (본문은 소유자 확인이 먼저라 형식만 맞으면 된다) */

@@ -291,22 +291,34 @@ public class ScoringService {
             checks.stream().filter(c -> NEEDS_AI.contains(c.item()) && c.method() == Method.JUDGE)
                     .forEach(c -> results.put(c.code(), skipped(checks, c.code(), "AI를 쓰지 않아 판정하지 않음 (U0, C0, K0, J0)")));
         }
-        String prefix = judgePrefix(task, judgeChecks);
-        String reference = null;
+        String prefixReference = null; // full: 자료를 앞부분(캐시)에
+        String reference = null;       // rag: 자료를 뒷부분에
         if (!dev) {
-            // 제공 자료: 통째로 또는 제출물 문장으로 검색한 조각만 (pair.judge.reference-docs)
-            Map<String, String> materials = new LinkedHashMap<>();
+            // 제공 자료는 응시 파일이 아니라 과제 원본에서 가져온다(응시자가 고친 자료가 근거가 되지 않게, PDF 도 포함).
+            // 제출물은 응시 파일 중 자료/·logs/ 가 아닌 것.
+            Map<String, String> materials = tasks.materials(task.id());
             StringBuilder submission = new StringBuilder();
             files.forEach((path, content) -> {
-                if (path.startsWith("자료/")) materials.put(path, content);
-                else if (!path.startsWith("logs/")) submission.append(content).append("\n");
+                if (!path.startsWith("자료/") && !path.startsWith("logs/")) submission.append(content).append("\n");
             });
-            boolean rag = props.judge() != null && props.judge().ragDocs();
+            PairProperties.Judge jp = props.judge();
+            String mode = jp == null ? "auto" : jp.referenceMode();
+            int maxChars = jp == null ? PairProperties.Judge.DEFAULT_FULL_MAX_CHARS : jp.fullMaxChars();
+            boolean rag = ReferenceDocs.useRag(materials, mode, maxChars);
             ReferenceDocs.Section ref = referenceDocs.build(materials, submission.toString(), rag);
-            reference = ref.text();
-            extras.put("referenceDocs", Map.of("mode", ref.mode(), "chars", ref.chars(), "chunksUsed", ref.chunksUsed(),
-                    "chunksTotal", ref.chunksTotal(), "embedTokens", ref.embedTokens()));
+            if (rag) reference = ref.text();
+            else prefixReference = ref.text();
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("mode", ref.mode());
+            info.put("setting", mode);
+            info.put("chars", ref.chars());
+            info.put("chunksUsed", ref.chunksUsed());
+            info.put("chunksTotal", ref.chunksTotal());
+            info.put("embedTokens", ref.embedTokens());
+            info.put("inCachedPrefix", !rag);
+            extras.put("referenceDocs", info);
         }
+        String prefix = judgePrefix(task, judgeChecks, prefixReference);
         String body = judgeBody(task, judgeChecks, transcript(turns, a.startedAt()), files, reference,
                 a.followUpQuestions() != null && !a.followUpQuestions().isEmpty() ? a.followUpQuestions() : task.followUps(),
                 a.followUpAnswers(), eventSummary(events, a.startedAt()));
@@ -423,7 +435,7 @@ public class ScoringService {
     // ── 프롬프트 ───────────────────────
 
     /** 응시와 관계없이 같은 앞부분(과제, 숨은 정답, 체크 항목). 프롬프트 캐시로 재사용된다. */
-    private String judgePrefix(TaskDef task, List<Check> checks) {
+    String judgePrefix(TaskDef task, List<Check> checks, String reference) {
         StringBuilder sb = new StringBuilder();
         sb.append("# 과제\n").append(task.title()).append(" (").append(task.isDev() ? "개발" : "비개발").append(")\n");
         task.description().forEach(d -> sb.append(d).append("\n"));
@@ -436,7 +448,11 @@ public class ScoringService {
         if (!task.isDev()) {
             sb.append("\n## 숨은 체크리스트 (응시자는 보지 못함)\n")
               .append(tasks.hiddenFiles(task.id()).getOrDefault("checklist.md", "")).append("\n");
+            String trap = tasks.trapNotes(task.id()); // AI 가 만든 과제만 있다(함정 설명, 근거 문장, 자료 위치)
+            if (trap != null) sb.append(trap);
         }
+        // 제공 자료를 통째로 넣는 경우: 같은 과제면 글이 똑같아(경로 순 고정) 프롬프트 캐시가 맞는다. 체크 목록보다 앞에 둔다.
+        if (reference != null) sb.append("\n# 제공 자료 (수치 대조용)\n").append(reference);
         sb.append("\n# 판정할 체크 항목\n");
         for (Check c : checks) {
             sb.append("- ").append(c.code()).append(": ").append(c.label()).append("\n  판정 기준: ").append(c.judgeHint()).append("\n");

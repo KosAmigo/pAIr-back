@@ -37,11 +37,23 @@ public record PairProperties(
 
     /**
      * 이중 채점: 판정 체크는 두 모델의 감점을 평균한다.
-     * referenceDocs: 비개발 채점에 제공 자료를 넣는 방식. full(통째로, 기본) 또는 rag(제출물 문장으로 검색한 조각만, 숫자 표는 통째로)
+     * referenceDocs: 비개발 채점에 제공 자료를 넣는 방식.
+     *   auto(기본): 자료 전체 글자 수가 referenceDocsFullMaxChars 이하면 full, 넘으면 rag
+     *   full: 자료를 통째로(프롬프트 캐시 앞부분에 넣음), rag: 제출물 문장으로 검색한 조각만(숫자 표는 통째로)
+     * referenceDocsFullMaxChars: auto 에서 full 로 갈 자료 글자 수 상한(기본 12000)
      */
-    public record Judge(Model claude, Model openai, String referenceDocs) {
-        public boolean ragDocs() {
-            return "rag".equalsIgnoreCase(referenceDocs);
+    public record Judge(Model claude, Model openai, String referenceDocs, Integer referenceDocsFullMaxChars) {
+        public static final int DEFAULT_FULL_MAX_CHARS = 12000;
+
+        /** auto | full | rag. 비었거나 모르는 값이면 auto */
+        public String referenceMode() {
+            if ("full".equalsIgnoreCase(referenceDocs)) return "full";
+            if ("rag".equalsIgnoreCase(referenceDocs)) return "rag";
+            return "auto";
+        }
+
+        public int fullMaxChars() {
+            return referenceDocsFullMaxChars == null || referenceDocsFullMaxChars < 0 ? DEFAULT_FULL_MAX_CHARS : referenceDocsFullMaxChars;
         }
     }
 

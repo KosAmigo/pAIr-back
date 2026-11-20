@@ -1,15 +1,22 @@
 package com.pair.task;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
@@ -30,16 +37,24 @@ public class TaskRepository {
             "AI는 대화창에 붙여 넣은 내용만 볼 수 있습니다. 필요한 자료는 직접 전달하세요.",
             "외부 검색은 허용되지 않습니다.");
 
+    private static final String REPORT_PATH = "_gen/report.json";
+    private static final Pattern PAGE_MARK = Pattern.compile("^--- (\\d+)쪽 ---");
+
     private final TaskRecordRepository records;
     private final TaskFileRecordRepository files;
     private final TaskQuestionRecordRepository questions;
+    private final DocumentPageRecordRepository pages;
+    private final QuestionSourceRecordRepository sources;
     private final ObjectMapper json;
 
     public TaskRepository(TaskRecordRepository records, TaskFileRecordRepository files,
-            TaskQuestionRecordRepository questions, ObjectMapper json) {
+            TaskQuestionRecordRepository questions, DocumentPageRecordRepository pages,
+            QuestionSourceRecordRepository sources, ObjectMapper json) {
         this.records = records;
         this.files = files;
         this.questions = questions;
+        this.pages = pages;
+        this.sources = sources;
         this.json = json;
     }
 
@@ -70,6 +85,95 @@ public class TaskRepository {
     @Transactional(readOnly = true)
     public Map<String, String> hiddenFiles(String id) {
         return readFiles(find(id), TaskFileRecord.HIDDEN);
+    }
+
+    /**
+     * 채점에 쓸 제공 자료: 과제 원본의 공개 파일 중 "자료/" 아래 파일 (경로 → 글, 경로 순).
+     * 텍스트 파일(CSV, md)은 content 그대로, PDF(content 없음)는 document_pages 를 쪽 순서로 "--- N쪽 ---" 줄과 함께 이어 붙인다.
+     * 응시 작업 파일이 아니라 과제 원본에서 읽으므로 응시자가 자료를 고쳐도 채점 근거는 그대로다.
+     * 실전 복사본은 원본 code 로 불러야 한다(TaskCatalog.definitionCode).
+     */
+    @Transactional(readOnly = true)
+    public Map<String, String> materials(String id) {
+        Map<String, String> out = new TreeMap<>();
+        for (TaskFileRecord f : files.findByTaskIdAndVisibilityOrderByPathAsc(find(id).getId(), TaskFileRecord.VISIBLE)) {
+            if (!f.getPath().startsWith("자료/")) continue;
+            if (f.getContent() != null) {
+                out.put(f.getPath(), f.getContent());
+            } else if (f.getStorageKey() != null) {
+                StringBuilder sb = new StringBuilder();
+                for (DocumentPageRecord p : pages.findByTaskFileIdOrderByPageNoAsc(f.getId())) {
+                    sb.append("--- ").append(p.getPageNo()).append("쪽 ---\n").append(p.getText().strip()).append("\n");
+                }
+                if (!sb.isEmpty()) out.put(f.getPath(), sb.toString());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * AI 가 만든 비개발 과제의 함정·근거를 채점 프롬프트용 글로 돌려준다. 함정 정보가 없으면(손으로 만든 과제 등) null.
+     * 함정은 생성 확인 결과(_gen/report.json 의 details.trap)에서 읽는다. 이미 만들어진 과제도 그대로 되고 생성 쪽 저장 형식은 바꾸지 않는다.
+     * 캐시되는 프롬프트 앞부분에 들어가므로 같은 과제면 글이 항상 같다(자료·문항 모두 고정 순서).
+     */
+    @Transactional(readOnly = true)
+    public String trapNotes(String id) {
+        TaskRecord t = find(id);
+        Optional<TaskFileRecord> report = files.findByTaskIdAndPath(t.getId(), REPORT_PATH);
+        if (report.isEmpty() || report.get().getContent() == null) return null;
+        String description, evidence;
+        try {
+            JsonNode trap = json.readTree(report.get().getContent()).path("details").path("trap");
+            description = trap.path("description").asText("").strip();
+            evidence = trap.path("evidence").asText("").strip();
+        } catch (IOException e) {
+            return null;
+        }
+        if (description.isEmpty() && evidence.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder("\n## 함정과 근거 (응시자는 보지 못함)\n");
+        if (!description.isEmpty()) sb.append("- 함정: ").append(description).append("\n");
+        if (!evidence.isEmpty()) {
+            sb.append("- 근거 문장: \"").append(unquote(evidence)).append("\"\n");
+            String where = locate(materials(id), evidence);
+            if (where != null) sb.append("- 근거 위치: ").append(where).append("\n");
+        }
+        Map<Long, String> paths = new HashMap<>();
+        for (TaskFileRecord f : files.findByTaskIdAndVisibilityOrderByPathAsc(t.getId(), TaskFileRecord.VISIBLE)) paths.put(f.getId(), f.getPath());
+        StringBuilder qs = new StringBuilder();
+        int n = 0;
+        for (TaskQuestionRecord q : questions.findByTaskIdAndStageOrderBySeqAsc(t.getId(), "TASK")) {
+            n++;
+            List<String> where = new ArrayList<>();
+            for (QuestionSourceRecord s : sources.findByQuestionId(q.getId())) {
+                String path = paths.get(s.getTaskFileId());
+                if (path == null) continue;
+                where.add(path + (s.getPages() == null || s.getPages().isBlank() ? "" : " " + s.getPages().strip() + "쪽"));
+            }
+            if (where.isEmpty()) continue;
+            Collections.sort(where);
+            qs.append("- 문항 ").append(n).append(": ").append(String.join(", ", where)).append("\n");
+        }
+        if (!qs.isEmpty()) sb.append("### 문항별 근거 자료\n").append(qs);
+        return sb.toString();
+    }
+
+    /** 근거 문장이 들어 있는 자료 경로와 쪽(PDF 만). 공백 차이는 무시한다. 못 찾으면 null */
+    static String locate(Map<String, String> materials, String evidence) {
+        String ev = unquote(evidence).replaceAll("\\s+", "");
+        if (ev.isEmpty()) return null;
+        for (var e : materials.entrySet()) {
+            String[] parts = e.getValue().split("(?m)^(?=--- \\d+쪽 ---\\s*$)");
+            for (String part : parts) {
+                if (!part.replaceAll("\\s+", "").contains(ev)) continue;
+                Matcher m = PAGE_MARK.matcher(part);
+                return e.getKey() + (m.find() ? " " + m.group(1) + "쪽" : "");
+            }
+        }
+        return null;
+    }
+
+    private static String unquote(String s) {
+        return s.replaceAll("^[\"'“”‘’]+|[\"'“”‘’]+$", "");
     }
 
     private TaskRecord find(String id) {
