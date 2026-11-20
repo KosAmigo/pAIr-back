@@ -9,14 +9,17 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
 import lombok.Getter;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 과제 행 (ERD tasks). 목록·공개 상태·용도(SELF/LIVE)는 DB 가 맡고, 과제 내용(설명·파일·숨은 테스트)은 아직
- * classpath:tasks/{원본 code} 에 있어 TaskRepository 가 읽는다. 실전(LIVE) 과제는 자가진단 원본의 복사본이라
- * parent_task_id 로 원본을 가리킨다. 행은 Flyway(V3)로 넣고, 여기서는 공개 상태만 바꾼다.
+ * 과제 행 (ERD tasks). 목록·공개 상태·용도(SELF/LIVE)와 과제 내용(설명·요구사항·settings)은 DB 가 맡고,
+ * 파일·후속 질문은 task_files / task_questions 에서 TaskRepository 가 읽는다. 실전(LIVE) 과제는 자가진단 원본의
+ * 복사본이라 parent_task_id 로 원본을 가리키며 내용 행을 따로 두지 않는다. 행은 Flyway(V3, V6)가 넣고, 여기서는 공개 상태만 바꾼다.
  */
 @Entity
 @Table(name = "tasks")
@@ -54,6 +57,16 @@ public class TaskRecord {
     @Column(nullable = false, length = 20)
     private Status status;
 
+    @Column(columnDefinition = "text")
+    private String description;
+
+    @Column(columnDefinition = "text")
+    private String requirements;
+
+    /** 응시 화면 설정 JSON: openFile, editableFile, requiredHeadings, d4Minutes. 내용이 들어 있는 원본 과제만 값이 있다 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    private String settings;
+
     @Column(name = "parent_task_id")
     private Long parentTaskId;
 
@@ -80,6 +93,13 @@ public class TaskRecord {
         this.createdBy = createdBy;
         this.updatedAt = at;
         this.publishedAt = status == Status.HIDDEN ? null : at;
+    }
+
+    /** 테스트·시드용: 과제 내용 채우기 */
+    public void setContent(String description, String requirements, String settingsJson) {
+        this.description = description;
+        this.requirements = requirements;
+        this.settings = settingsJson;
     }
 
     /** 처음 공개한 시각은 다시 숨겨도 남긴다 (ERD: HIDDEN 이 아니면 published_at 필수) */

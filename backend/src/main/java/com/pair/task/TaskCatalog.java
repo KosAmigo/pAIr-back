@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 과제 code(화면·API 에서 쓰는 이름) ↔ tasks.task_id(DB 외래 키) 변환과, 과제 행 → 과제 내용(TaskDef) 연결.
- * 실전 복사본(order-deadlock-live)은 내용 파일이 따로 없어 원본(parent) code 로 내용을 찾는다.
+ * 실전 복사본(order-deadlock-live)은 내용 행이 따로 없어 원본(parent) code 로 내용을 찾는다.
  */
 @Service
 public class TaskCatalog {
@@ -46,6 +46,31 @@ public class TaskCatalog {
     @Transactional(readOnly = true)
     public TaskDef definition(String code) {
         return definitions.get(definitionCode(require(code)));
+    }
+
+    /** 응시자에게 보이는 과제 한 줄 (목록용). id 는 과제 code, type 은 dev | biz */
+    public record Summary(String id, String type, String title, int minutes, TaskRecord.Status status) {}
+
+    /**
+     * 응시자에게 보이는 자가진단 과제 목록: 용도 SELF, 상태 OPEN(응시 가능)과 CLOSED(목록에만 보임). HIDDEN(검수 대기)과 실전(LIVE) 과제는 뺀다.
+     * track 이 있으면(dev | biz, 대소문자 무시) 그 직군만.
+     */
+    @Transactional(readOnly = true)
+    public List<Summary> selfTasks(String track) {
+        return records.findByUsageAndStatusInOrderByIdAsc(TaskRecord.Usage.SELF, List.of(TaskRecord.Status.OPEN, TaskRecord.Status.CLOSED)).stream()
+                .filter(t -> track == null || track.isBlank() || t.getTrack().equalsIgnoreCase(track))
+                .map(t -> new Summary(t.getCode(), t.getTrack().toLowerCase(), t.getTitle(), t.getTimeLimitMin(), t.getStatus()))
+                .toList();
+    }
+
+    /** 응시자에게 보여 줄 과제 상세. 목록에 나오지 않는 과제(실전 복사본, 검수 대기)는 없는 과제로 본다 */
+    @Transactional(readOnly = true)
+    public TaskDef publicSelfDefinition(String code) {
+        TaskRecord t = require(code);
+        if (t.getUsage() != TaskRecord.Usage.SELF || t.getStatus() == TaskRecord.Status.HIDDEN) {
+            throw new NoSuchElementException("없는 과제입니다: " + code);
+        }
+        return definition(code);
     }
 
     /** code 목록 → 행 (순서 유지). 없는 code 면 NoSuchElementException */

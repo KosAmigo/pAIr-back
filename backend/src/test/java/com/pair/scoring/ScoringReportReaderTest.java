@@ -46,6 +46,7 @@ class ScoringReportReaderTest {
     @Autowired AttemptStore store;
     @Autowired AttemptRegistry registry;
     @Autowired TaskRecordRepository taskRecords;
+    @Autowired com.pair.scoring.db.PromptVersionRecordRepository promptVersions;
 
     final Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     final PromptVersion version = new PromptVersion("20261119-1600_reader-test", "reader", null, now, null, "규칙", Map.of());
@@ -54,6 +55,7 @@ class ScoringReportReaderTest {
     @BeforeEach
     void setUp() {
         TestTasks.seed(taskRecords);
+        TestPromptVersions.ensure(promptVersions, version);
         attemptId = registry.save(AttemptRecord.self(1L, 1L, "gpt-test", now)).getId();
     }
 

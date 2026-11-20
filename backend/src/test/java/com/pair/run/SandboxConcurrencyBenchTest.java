@@ -19,10 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.pair.config.PairProperties;
-import com.pair.task.TaskRepository;
+import com.pair.task.TestTasks;
 
 /**
  * 동시에 N개를 돌렸을 때 걸리는 시간과 시간 초과 여부를 잰다 (빌드에서는 건너뜀).
@@ -37,11 +35,9 @@ class SandboxConcurrencyBenchTest {
 
     @Test
     void measure() throws Exception {
-        TaskRepository tasks = new TaskRepository(JsonMapper.builder().findAndAddModules()
-                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build());
         Map<String, String> files = new HashMap<>();
-        tasks.visibleFiles("order-deadlock").forEach((k, v) -> { if (k.startsWith("src/")) files.put(k, v); });
-        tasks.hiddenFiles("order-deadlock").forEach((k, v) -> files.put("hidden/" + k, v));
+        TestTasks.fixtureFiles("order-deadlock", "files").forEach((k, v) -> { if (k.startsWith("src/")) files.put(k, v); });
+        TestTasks.fixtureFiles("order-deadlock", "hidden").forEach((k, v) -> files.put("hidden/" + k, v));
         try (InputStream in = getClass().getResourceAsStream("/solutions/order-deadlock/OrderService.java")) {
             files.put("src/shop/OrderService.java", new String(in.readAllBytes(), StandardCharsets.UTF_8));
         }

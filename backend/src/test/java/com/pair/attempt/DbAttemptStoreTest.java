@@ -22,6 +22,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.task.TaskRecordRepository;
+import com.pair.task.TaskFileRecordRepository;
+import com.pair.task.TaskQuestionRecordRepository;
 import com.pair.task.TestTasks;
 
 /** 응시 기록이 DB 에 저장되고 그대로 다시 읽히는지 (H2 메모리 DB) */
@@ -40,6 +42,8 @@ class DbAttemptStoreTest {
     @Autowired AttemptStore store;
     @Autowired AttemptRegistry registry;
     @Autowired TaskRecordRepository taskRecords;
+    @Autowired TaskFileRecordRepository taskFiles;
+    @Autowired TaskQuestionRecordRepository taskQuestions;
     @Autowired ObjectMapper json;
 
     String id;
@@ -47,7 +51,7 @@ class DbAttemptStoreTest {
 
     @BeforeEach
     void setUp() {
-        TestTasks.seed(taskRecords);
+        TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         AttemptRecord r = registry.save(AttemptRecord.self(1L, 1L, "gpt-test", start));
         id = String.valueOf(r.getId());
         store.create(new Attempt(id, TestTasks.SELF_DEV, "openai", "gpt-test", start, null, null, null,

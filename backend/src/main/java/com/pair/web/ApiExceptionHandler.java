@@ -39,6 +39,11 @@ public class ApiExceptionHandler {
         return body(HttpStatus.CONFLICT, e.getMessage());
     }
 
+    @ExceptionHandler(com.pair.credit.InsufficientCreditException.class)
+    ResponseEntity<Map<String, String>> insufficientCredit(RuntimeException e) {
+        return body(HttpStatus.PAYMENT_REQUIRED, e.getMessage());
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<Map<String, String>> notFound(NoSuchElementException e) {
         return body(HttpStatus.NOT_FOUND, e.getMessage());

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.pair.exam.service.InviteTokens;
+import com.pair.credit.CreditService;
 
 /** 계정 생성·비밀번호 검증과 해시된 bearer 세션의 발급, 확인, 폐기를 처리한다. */
 @Service
@@ -23,10 +24,12 @@ public class AuthService {
 
     private final AuthAccountRepository accounts;
     private final AuthSessionRepository sessions;
+    private final CreditService credits;
 
-    public AuthService(AuthAccountRepository accounts, AuthSessionRepository sessions) {
+    public AuthService(AuthAccountRepository accounts, AuthSessionRepository sessions, CreditService credits) {
         this.accounts = accounts;
         this.sessions = sessions;
+        this.credits = credits;
     }
 
     /** 일반 회원을 생성하고 로그인 상태로 사용할 세션 토큰을 발급한다. */
@@ -42,6 +45,7 @@ public class AuthService {
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException("이미 가입된 이메일입니다.");
         }
+        credits.grantSignup(account.getId());
         return createSession(account);
     }
 

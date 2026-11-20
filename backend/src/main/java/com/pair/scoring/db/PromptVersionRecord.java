@@ -13,7 +13,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** 채점 프롬프트 버전 (ERD prompt_versions). name 에는 파일 버전 id 를 넣어 찾는다. */
+/** 채점 프롬프트 버전 (ERD prompt_versions). name 은 버전 id(예: 20261119-1500_v6-판정-일관성), title 은 화면에 보이는 이름이다. */
 @Entity
 @Table(name = "prompt_versions")
 @Getter
@@ -28,7 +28,11 @@ public class PromptVersionRecord {
     @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(length = 500)
+    /** 화면에 보이는 버전 이름. 예전 행은 비어 있을 수 있고, 그때는 name 을 쓴다. */
+    @Column(length = 100)
+    private String title;
+
+    @Column(columnDefinition = "text")
     private String note;
 
     @Column(name = "parent_version_id")
@@ -43,8 +47,9 @@ public class PromptVersionRecord {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    public PromptVersionRecord(String name, String note, Long parentVersionId, String judgeSystem, boolean active, Instant createdAt) {
+    public PromptVersionRecord(String name, String title, String note, Long parentVersionId, String judgeSystem, boolean active, Instant createdAt) {
         this.name = name;
+        this.title = title;
         this.note = note;
         this.parentVersionId = parentVersionId;
         this.judgeSystem = judgeSystem;
