@@ -230,4 +230,30 @@ class CreditIntegrationTest {
         }
         assertThat(credits.balance(userId)).isZero();
     }
+
+    @Test
+    void aiCallInFlightDoesNotHoldUserLockOrTransaction() throws Exception {
+        var user = signup();
+        long userId = user.user().id();
+        String id = attempts.startSelf(TestTasks.SELF_DEV, userId).id();
+        var inAiCall = new CountDownLatch(1);
+        var releaseAi = new CountDownLatch(1);
+        when(assistant.send(any())).thenAnswer(invocation -> {
+            inAiCall.countDown();
+            if (!releaseAi.await(30, TimeUnit.SECONDS)) throw new IllegalStateException("timed out");
+            return new AssistantClient.Reply("answer", "test", 10, 20, 0, "stop", 1);
+        });
+        try (var executor = Executors.newFixedThreadPool(1)) {
+            var chat = executor.submit(() -> attempts.chat(id, "hello"));
+            assertThat(inAiCall.await(10, TimeUnit.SECONDS)).isTrue();
+
+            // AI 가 답하는 동안에도 같은 회원의 다른 크레딧 작업(응시 시작)이 막히지 않는다
+            attempts.startSelf(TestTasks.SELF_DEV, userId);
+
+            releaseAi.countDown();
+            assertThat(chat.get(30, TimeUnit.SECONDS)).hasSize(2);
+        }
+        // 응시 시작 2번(20) + 채팅 1번(10)
+        assertThat(credits.balance(userId)).isEqualTo(200 - 10 - 10 - 10);
+    }
 }
