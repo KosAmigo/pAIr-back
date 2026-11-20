@@ -103,6 +103,8 @@ class ConsoleAuthIntegrationTest {
         mvc.perform(as(get("/api/console/sessions/" + id), 6, "PROCTOR", 502L)).andExpect(status().isOk());
         mvc.perform(as(post("/api/console/sessions/" + id + "/cancel"), 6, "PROCTOR", 502L)).andExpect(status().isForbidden());
         mvc.perform(as(get("/api/console/sessions/" + id + "/results"), 6, "PROCTOR", 502L)).andExpect(status().isForbidden());
+        mvc.perform(as(post("/api/console/sessions/" + id + "/rescue"), 6, "PROCTOR", 502L)).andExpect(status().isForbidden());
+        mvc.perform(as(post("/api/console/sessions/" + id + "/rescue"), 9, "MANAGER", 777L)).andExpect(status().isNotFound());
         mvc.perform(as(get("/api/console/sessions"), 2, "USER", null)).andExpect(status().isForbidden());
         mvc.perform(as(get("/api/console/sessions/" + id), 1, "ADMIN", null)).andExpect(status().isOk());
         mvc.perform(as(post("/api/console/sessions/" + id + "/cancel"), 4, "MANAGER", 502L))

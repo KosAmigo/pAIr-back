@@ -527,6 +527,83 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("자동 제출 마무리에 실패한 응시가 있으면 회차를 닫지 않고 간격을 두고 다시 시도하다가, 한계를 넘기면 포기하고 닫는다")
+    void autoSubmitRetriesThenGivesUp() {
+        SessionSummary s = createSession(122L, false);
+        String token = invite(s.id(), "retry@test.dev");
+        clock.set(s.startsAt());
+        entry.start(token);
+        when(attempts.finishAll(anyCollection())).thenReturn(1); // 마무리하지 못한 응시 1건
+
+        clock.set(s.endsAt().plusMillis(100));
+        for (int round = 1; round < AutoSubmitService.MAX_FAILED_ROUNDS; round++) {
+            autoSubmit.close(s.id());
+            // 닫지 않았고, 대기 시간 동안은 스케줄러가 다시 집지 않는다
+            assertThat(autoSubmit.dueSessionIds()).as("실패 %d회 직후: 기다리는 중", round).doesNotContain(s.id());
+            clock.set(clock.instant().plus(AutoSubmitService.MAX_BACKOFF).plusSeconds(1));
+            assertThat(autoSubmit.dueSessionIds()).as("실패 %d회 뒤 대기 시간이 지나면 다시 대상", round).contains(s.id());
+        }
+        autoSubmit.close(s.id()); // 마지막 시도도 실패: 포기하고 닫는다
+        clock.set(clock.instant().plus(AutoSubmitService.MAX_BACKOFF).plusSeconds(1));
+        assertThat(autoSubmit.dueSessionIds()).doesNotContain(s.id());
+        verify(attempts, times(AutoSubmitService.MAX_FAILED_ROUNDS)).finishAll(anyCollection());
+    }
+
+    @Test
+    @DisplayName("재시도에서 마무리에 성공하면 그때 회차를 닫는다")
+    void autoSubmitRetrySucceeds() {
+        SessionSummary s = createSession(123L, false);
+        String token = invite(s.id(), "retry2@test.dev");
+        clock.set(s.startsAt());
+        entry.start(token);
+        when(attempts.finishAll(anyCollection())).thenReturn(1, 0); // 첫 시도 실패, 두 번째 성공
+
+        clock.set(s.endsAt().plusMillis(100));
+        autoSubmit.close(s.id());
+        assertThat(autoSubmit.dueSessionIds()).doesNotContain(s.id());
+        clock.set(clock.instant().plus(AutoSubmitService.MAX_BACKOFF).plusSeconds(1));
+        assertThat(autoSubmit.dueSessionIds()).contains(s.id());
+
+        autoSubmit.close(s.id());
+
+        clock.set(clock.instant().plus(AutoSubmitService.MAX_BACKOFF).plusSeconds(1));
+        assertThat(autoSubmit.dueSessionIds()).doesNotContain(s.id());
+        verify(attempts, times(2)).finishAll(anyCollection());
+    }
+
+    @Test
+    @DisplayName("복구: 포기하고 닫힌 회차의 멈춘 응시를 다시 채점으로 넘긴다")
+    void rescueStuckAttempts() {
+        SessionSummary s = createSession(124L, false);
+        String token = invite(s.id(), "rescue@test.dev");
+        clock.set(s.startsAt());
+        entry.start(token);
+        when(attempts.finishAll(anyCollection())).thenReturn(1);
+        clock.set(s.endsAt().plusMillis(100));
+        for (int i = 0; i < AutoSubmitService.MAX_FAILED_ROUNDS; i++) {
+            autoSubmit.close(s.id());
+            clock.set(clock.instant().plus(AutoSubmitService.MAX_BACKOFF).plusSeconds(1));
+        }
+        when(attempts.finishAll(anyCollection())).thenReturn(0); // 이제는 성공한다
+
+        AutoSubmitService.RescueResult r = autoSubmit.rescue(s.id());
+
+        assertThat(r.pending()).isEqualTo(1);
+        assertThat(r.failed()).isZero();
+        verify(attempts, times(AutoSubmitService.MAX_FAILED_ROUNDS + 1)).finishAll(anyCollection());
+    }
+
+    @Test
+    @DisplayName("복구: 아직 끝나지 않은 회차나 취소한 회차에는 쓸 수 없다")
+    void rescueOnlyEndedSessions() {
+        SessionSummary s = createSession(125L, false);
+        invite(s.id(), "early@test.dev");
+
+        assertThatThrownBy(() -> autoSubmit.rescue(s.id())).hasMessageContaining("종료");
+        assertThatThrownBy(() -> autoSubmit.rescue(999_999L)).isInstanceOf(java.util.NoSuchElementException.class);
+    }
+
+    @Test
     @DisplayName("종료 뒤에는 시작도 직접 제출도 막힌다")
     void blockedAfterEnd() {
         SessionSummary s = createSession(109L, false);
