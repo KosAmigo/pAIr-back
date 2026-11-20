@@ -85,6 +85,9 @@ public class TaskRecord {
     @Column(name = "created_by", nullable = false)
     private Long createdBy;
 
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
@@ -103,6 +106,7 @@ public class TaskRecord {
         this.status = status;
         this.parentTaskId = parentTaskId;
         this.createdBy = createdBy;
+        this.createdAt = at;
         this.updatedAt = at;
         this.publishedAt = status == Status.HIDDEN ? null : at;
     }
@@ -119,6 +123,12 @@ public class TaskRecord {
         this.description = description;
         this.requirements = requirements;
         this.settings = settingsJson;
+    }
+
+    /** 용도 바꾸기. 공개 전(HIDDEN) 원본 과제만 허용하는 검사는 서비스가 한다 */
+    public void changeUsage(Usage next, Instant at) {
+        this.usage = next;
+        this.updatedAt = at;
     }
 
     /** 처음 공개한 시각은 다시 숨겨도 남긴다 (ERD: HIDDEN 이 아니면 published_at 필수) */

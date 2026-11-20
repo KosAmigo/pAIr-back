@@ -3,7 +3,9 @@ package com.pair.taskconsole;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -61,6 +63,16 @@ public class TaskConsoleController {
     public TaskSummary hide(CurrentUser user, @PathVariable String taskId) {
         requireAdmin(user);
         return console.changeStatus(taskId, TaskRecord.Status.HIDDEN);
+    }
+
+    public record UsageRequest(TaskRecord.Usage usage) {}
+
+    /** 검수 전(HIDDEN) 원본 과제의 용도(SELF/LIVE) 바꾸기. 공개한 과제·실전 복사본은 409 */
+    @PatchMapping("/{taskId}/usage")
+    public TaskSummary changeUsage(CurrentUser user, @PathVariable String taskId, @RequestBody UsageRequest req) {
+        requireAdmin(user);
+        if (req == null || req.usage() == null) throw new IllegalArgumentException("usage 는 SELF 또는 LIVE 여야 합니다.");
+        return console.changeUsage(taskId, req.usage());
     }
 
     /** 검수용 PDF 자료 목록 (공개 전 과제 포함, 숨은 파일 제외) */
