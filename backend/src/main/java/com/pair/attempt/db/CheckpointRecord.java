@@ -42,6 +42,11 @@ public class CheckpointRecord {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /** 이름을 붙이거나(최대 100자) 지운다(null) */
+    public void rename(String label) {
+        this.label = label;
+    }
+
     public CheckpointRecord(Long attemptId, int turnNo, Instant createdAt) {
         this.attemptId = attemptId;
         this.turnNo = turnNo;
