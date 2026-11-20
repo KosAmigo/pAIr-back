@@ -1,6 +1,5 @@
 package com.pair.taskgen;
 
-import java.net.URI;
 import java.util.Optional;
 
 import org.springframework.beans.factory.DisposableBean;
@@ -8,10 +7,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import com.pair.exam.service.S3Clients;
+
 import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -34,21 +33,18 @@ public class S3TaskFileStorage implements TaskFileStorage, DisposableBean {
             @Value("${pair.exam.s3.bucket}") String bucket,
             @Value("${pair.exam.s3.region:ap-northeast-2}") String region,
             @Value("${pair.exam.s3.prefix:}") String prefix,
-            @Value("${pair.exam.s3.endpoint:}") String endpoint) {
-        this(build(region, endpoint), bucket, prefix);
+            @Value("${pair.exam.s3.endpoint:}") String endpoint,
+            // 로컬 개발용. 둘 다 비우면 AWS 기본 방식을 쓴다
+            @Value("${pair.exam.s3.access-key:}") String accessKey,
+            @Value("${pair.exam.s3.secret-key:}") String secretKey) {
+        this(S3Clients.build(region, endpoint, accessKey, secretKey), bucket, prefix);
     }
 
     S3TaskFileStorage(S3Client s3, String bucket, String prefix) {
-        if (bucket == null || bucket.isBlank()) throw new IllegalStateException("pair.exam.s3.bucket 을 설정하세요.");
+        if (bucket == null || bucket.isBlank()) throw new IllegalStateException("S3 버킷 이름이 비어 있습니다. PAIR_S3_BUCKET(pair.exam.s3.bucket)을 설정하세요.");
         this.s3 = s3;
         this.bucket = bucket;
         this.prefix = prefix == null || prefix.isEmpty() || prefix.endsWith("/") ? (prefix == null ? "" : prefix) : prefix + "/";
-    }
-
-    private static S3Client build(String region, String endpoint) {
-        S3ClientBuilder b = S3Client.builder().region(Region.of(region));
-        if (endpoint != null && !endpoint.isBlank()) b = b.endpointOverride(URI.create(endpoint)).forcePathStyle(true);
-        return b.build();
     }
 
     @Override

@@ -51,10 +51,12 @@ public class TaskGenJobs {
     private final DevTaskGenerator dev;
     private final BizTaskGenerator biz;
     private final int maxConcurrent;
+    private final TaskFileStorageGuard storageGuard;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    public TaskGenJobs(DevTaskGenerator dev, BizTaskGenerator biz, TaskGenProperties props) {
+    public TaskGenJobs(DevTaskGenerator dev, BizTaskGenerator biz, TaskGenProperties props, TaskFileStorageGuard storageGuard) {
+        this.storageGuard = storageGuard;
         this.dev = dev;
         this.biz = biz;
         this.maxConcurrent = props.maxConcurrent();
@@ -62,6 +64,7 @@ public class TaskGenJobs {
 
     /** 폼은 검증이 끝난 것이어야 한다. 작업을 시작하고 jobId 를 돌려준다 */
     public String start(TaskGenForm form, long adminId) {
+        storageGuard.requireSafe(form.track()); // AI 를 부르기 전에 막는다
         Job job = new Job();
         synchronized (this) {
             evictOld();

@@ -1,6 +1,5 @@
 package com.pair.exam.service;
 
-import java.net.URI;
 import java.util.Optional;
 
 import org.springframework.beans.factory.DisposableBean;
@@ -9,9 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import software.amazon.awssdk.core.sync.RequestBody;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.S3ClientBuilder;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -38,8 +35,11 @@ public class S3SnapshotStorage implements SnapshotStorage, DisposableBean {
             @Value("${pair.exam.s3.region:ap-northeast-2}") String region,
             @Value("${pair.exam.s3.prefix:}") String prefix,
             // MinIO·LocalStack 같은 S3 호환 서버로 테스트할 때만 넣는다 (비우면 AWS)
-            @Value("${pair.exam.s3.endpoint:}") String endpoint) {
-        this(build(region, endpoint), bucket, prefix);
+            @Value("${pair.exam.s3.endpoint:}") String endpoint,
+            // 로컬 개발용. 둘 다 비우면 AWS 기본 방식을 쓴다
+            @Value("${pair.exam.s3.access-key:}") String accessKey,
+            @Value("${pair.exam.s3.secret-key:}") String secretKey) {
+        this(S3Clients.build(region, endpoint, accessKey, secretKey), bucket, prefix);
     }
 
     S3SnapshotStorage(S3Client s3, String bucket, String prefix) {
@@ -47,12 +47,6 @@ public class S3SnapshotStorage implements SnapshotStorage, DisposableBean {
         this.s3 = s3;
         this.bucket = bucket;
         this.prefix = prefix == null || prefix.isEmpty() || prefix.endsWith("/") ? (prefix == null ? "" : prefix) : prefix + "/";
-    }
-
-    private static S3Client build(String region, String endpoint) {
-        S3ClientBuilder b = S3Client.builder().region(Region.of(region));
-        if (endpoint != null && !endpoint.isBlank()) b = b.endpointOverride(URI.create(endpoint)).forcePathStyle(true);
-        return b.build();
     }
 
     @Override
