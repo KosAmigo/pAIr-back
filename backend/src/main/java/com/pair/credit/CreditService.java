@@ -56,9 +56,13 @@ public class CreditService {
         charge(userId, attemptCost, "ATTEMPT_START", attemptId, null);
     }
 
-    @Transactional(propagation = Propagation.MANDATORY)
+    /** AI 를 부르기 전에 잔액만 읽어 확인한다(잠금 없음). 실제 차감은 chargeChat 이 잠그고 다시 확인한다 */
+    @Transactional(readOnly = true)
     public void checkChat(Long userId) {
-        check(userId, chatCost);
+        int current = balance(userId);
+        if (current < chatCost) {
+            throw new InsufficientCreditException("크레딧이 부족합니다. 필요: " + chatCost + ", 잔액: " + current);
+        }
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
