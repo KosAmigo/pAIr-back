@@ -25,6 +25,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.pair.attempt.db.CheckpointRecordRepository;
 import com.pair.run.CodeRunner;
+import com.pair.task.TaskFileRecordRepository;
+import com.pair.task.TaskQuestionRecordRepository;
 import com.pair.task.TaskRecordRepository;
 import com.pair.task.TaskRepository;
 import com.pair.task.TestTasks;
@@ -54,6 +56,8 @@ class RollbackRunTest {
     @Autowired AttemptStore store;
     @Autowired AttemptRegistry registry;
     @Autowired TaskRecordRepository taskRecords;
+    @Autowired TaskFileRecordRepository taskFiles;
+    @Autowired TaskQuestionRecordRepository taskQuestions;
     @Autowired TaskRepository tasks;
     @Autowired CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
@@ -68,7 +72,7 @@ class RollbackRunTest {
 
     @BeforeEach
     void setUp() {
-        TestTasks.seed(taskRecords);
+        TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         // 가입하면 크레딧이 지급된다 (롤백은 크레딧을 차감하므로 필요)
         userId = auth.signup(new AuthDtos.SignupRequest("응시자", UUID.randomUUID() + "@pair.test", "password123")).user().id();
         Map<String, String> files = tasks.visibleFiles(TestTasks.SELF_DEV);
