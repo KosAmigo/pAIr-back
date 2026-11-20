@@ -79,6 +79,8 @@ class AttemptOwnerTest {
                 with(post("/api/attempts/{id}/followups", attemptId).contentType(json).content("{\"answers\":[]}"), bearer),
                 with(post("/api/attempts/{id}/rescore", attemptId), bearer),
                 with(get("/api/attempts/{id}/report", attemptId), bearer),
+                with(get("/api/attempts/{id}/questions", attemptId), bearer),
+                with(put("/api/attempts/{id}/questions/1/answer", attemptId).contentType(json).content("{\"text\":\"1\"}"), bearer),
                 with(get("/api/attempts/{id}/checkpoints", attemptId), bearer),
                 with(get("/api/attempts/{id}/tree", attemptId), bearer));
     }

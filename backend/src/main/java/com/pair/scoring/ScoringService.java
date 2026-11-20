@@ -57,6 +57,7 @@ public class ScoringService {
     private final PromptStore prompts;
     private final ReferenceDocs referenceDocs;
     private final ScoringRecords records;
+    private final com.pair.question.QuestionService questions;
     /** 채점 작업(실제 응시 채점, 채점 툴 실험 채점). 여러 건을 동시에 채점한다. */
     private final ExecutorService executor;
     /** 두 채점 모델을 동시에 부를 때 쓴다. */
@@ -68,7 +69,8 @@ public class ScoringService {
 
     public ScoringService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
                           ClaudeJudge claudeJudge, OpenAiJudge openAiJudge, PairProperties props,
-                          PromptStore prompts, ReferenceDocs referenceDocs, ScoringRecords records) {
+                          PromptStore prompts, ReferenceDocs referenceDocs, ScoringRecords records,
+                          com.pair.question.QuestionService questions) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -77,6 +79,7 @@ public class ScoringService {
         this.prompts = prompts;
         this.referenceDocs = referenceDocs;
         this.records = records;
+        this.questions = questions;
         int parallel = props.grader() == null || props.grader().parallel() < 1 ? 4 : props.grader().parallel();
         this.executor = Executors.newFixedThreadPool(parallel, r -> {
             Thread t = new Thread(r, "scoring");
@@ -172,6 +175,7 @@ public class ScoringService {
         List<ItemResult> items = (List<ItemResult>) report.get("items");
         try {
             store.writeReport(a.id(), report);
+            questions.grade(scoringId, Long.parseLong(a.id())); // 문항 채점: 코드로만, 6개 역량 점수와 따로
             records.finish(scoringId, tasks.get(a.taskId()).isDev(), items, (List<JudgeCall>) report.get("judgeCalls"));
             store.save(store.load(a.id()).withStatus(Attempt.Status.DONE));
         } catch (RuntimeException | Error e) {

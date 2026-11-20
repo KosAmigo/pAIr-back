@@ -43,10 +43,12 @@ public class ApiController {
     private final com.pair.attempt.CheckpointService checkpoints;
     private final com.pair.attempt.RollbackService rollbacks;
     private final com.pair.attempt.ReplayTreeService replayTree;
+    private final com.pair.question.QuestionService questions;
 
     public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.config.PairProperties props,
             AttemptRecordRepository records, TaskCatalog catalog, com.pair.attempt.CheckpointService checkpoints,
-            com.pair.attempt.RollbackService rollbacks, com.pair.attempt.ReplayTreeService replayTree) {
+            com.pair.attempt.RollbackService rollbacks, com.pair.attempt.ReplayTreeService replayTree,
+            com.pair.question.QuestionService questions) {
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
@@ -56,6 +58,7 @@ public class ApiController {
         this.checkpoints = checkpoints;
         this.rollbacks = rollbacks;
         this.replayTree = replayTree;
+        this.questions = questions;
     }
 
     public record CheckpointLabelRequest(String label) {}
@@ -280,7 +283,22 @@ public class ApiController {
         m.put("error", a.error());
         JsonNode report = a.status() == Attempt.Status.DONE ? store.readReport(id) : null;
         m.put("report", report);
+        // 문항(객관식·단답형) 점수는 6개 역량 점수와 따로 보여 준다. 문항이 없으면 null. 정답은 제출 뒤 리포트에서만 나간다.
+        m.put("questions", a.status() == Attempt.Status.DONE ? questions.report(Long.parseLong(id)) : null);
         return m;
+    }
+
+    /** 풀이 화면의 문항(객관식·단답형)과 저장한 답. 정답 정보는 내보내지 않는다 */
+    @GetMapping("/attempts/{id}/questions")
+    public List<com.pair.question.QuestionService.QuestionView> questions(@PathVariable String id) {
+        return questions.list(Long.parseLong(id));
+    }
+
+    /** 문항 답 저장(덮어쓰기). 풀이 중에만 */
+    @PutMapping("/attempts/{id}/questions/{questionId}/answer")
+    public com.pair.question.QuestionService.AnswerView answer(@PathVariable String id, @PathVariable Long questionId,
+            @RequestBody com.pair.question.QuestionService.AnswerRequest req) {
+        return questions.answer(Long.parseLong(id), questionId, req);
     }
 
     private static TurnView view(Attempt a, ChatTurn t, List<AttemptService.EditView> edits) {
