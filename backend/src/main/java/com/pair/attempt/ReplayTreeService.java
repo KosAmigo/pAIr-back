@@ -37,12 +37,12 @@ public class ReplayTreeService {
 
     private final AttemptRecordRepository records;
     private final CheckpointRecordRepository checkpoints;
-    private final AttemptStore store;
+    private final ReplayReports reports;
 
-    public ReplayTreeService(AttemptRecordRepository records, CheckpointRecordRepository checkpoints, AttemptStore store) {
+    public ReplayTreeService(AttemptRecordRepository records, CheckpointRecordRepository checkpoints, ReplayReports reports) {
         this.records = records;
         this.checkpoints = checkpoints;
-        this.store = store;
+        this.reports = reports;
     }
 
     @Transactional(readOnly = true)
@@ -76,20 +76,10 @@ public class ReplayTreeService {
         return out;
     }
 
-    /**
-     * 점수를 읽는 곳은 여기 한 군데다(팀원 2 의 리포트 형식: version, total, max, items[key,name,max,score]).
-     * 리포트 형식이 바뀌면 이 메서드만 고친다. 리포트가 없거나 깨져도 트리는 보여 준다.
-     */
+    /** 트리 노드의 점수(팀원 2 의 리포트: total, max, items[key,name,max,score]). 읽을 수 있는 리포트가 없어도 트리는 보여 준다 */
     private Score scoreOf(AttemptRecord r) {
-        if (r.getStatus() != Attempt.Status.DONE) return null;
-        JsonNode rep;
-        try {
-            rep = store.readReport(String.valueOf(r.getId()));
-        } catch (RuntimeException e) {
-            return null;
-        }
-        // version 2(감점식)만 총점이 있다. 이전 형식은 다시 채점해야 한다
-        if (rep == null || rep.path("version").asInt() < 2) return null;
+        JsonNode rep = reports.scored(r).orElse(null);
+        if (rep == null) return null;
         List<ItemScore> items = new ArrayList<>();
         for (JsonNode it : rep.path("items")) {
             JsonNode sc = it.path("score");
