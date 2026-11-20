@@ -1,7 +1,6 @@
 package com.pair.web.auth;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
@@ -15,22 +14,23 @@ import org.springframework.transaction.annotation.Transactional;
 import com.pair.exam.service.InviteTokens;
 import com.pair.credit.CreditService;
 
-/** 계정 생성·비밀번호 검증과 해시된 bearer 세션의 발급, 확인, 폐기를 처리한다. */
+/** 계정 생성·비밀번호 검증과 JWT 발급, 확인, 재발급 및 폐기를 처리한다. */
 @Service
 public class AuthService {
 
-    private static final Duration SESSION_LIFETIME = Duration.ofDays(7);
     private static final PasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder(12);
 
     private final AuthAccountRepository accounts;
-    private final AuthSessionRepository sessions;
+    private final RefreshSessionRepository sessions;
+    private final JwtTokens tokens;
     private final CreditService credits;
     private final EmailVerificationService emailVerification;
 
-    public AuthService(AuthAccountRepository accounts, AuthSessionRepository sessions, CreditService credits,
-            EmailVerificationService emailVerification) {
+    public AuthService(AuthAccountRepository accounts, RefreshSessionRepository sessions, JwtTokens tokens,
+            CreditService credits, EmailVerificationService emailVerification) {
         this.accounts = accounts;
         this.sessions = sessions;
+        this.tokens = tokens;
         this.credits = credits;
         this.emailVerification = emailVerification;
     }
@@ -76,25 +76,52 @@ public class AuthService {
         return createSession(account);
     }
 
-    /** 원문 bearer 토큰의 해시로 만료 전 세션과 회원을 확인한다. */
+    /** Access Token을 검증하고 현재 회원 상태와 권한을 DB에서 확인한다. */
     @Transactional(readOnly = true)
     public Optional<AuthAccount> findAccount(String token) {
-        if (token == null || !InviteTokens.looksValid(token)) return Optional.empty();
-        return sessions.findByTokenHashAndExpiresAtAfter(InviteTokens.hash(token), Instant.now()).map(AuthSession::getAccount);
+        return tokens.verify(token, "access")
+                .flatMap(jwt -> accounts.findById(jwt.userId()))
+                .filter(AuthAccount::isActive);
     }
 
-    /** 토큰 해시로 현재 로그인 세션을 폐기한다. */
+    /** Refresh Token을 원자적으로 교체한다. */
     @Transactional
-    public void logout(String token) {
-        if (token != null && InviteTokens.looksValid(token)) sessions.revoke(InviteTokens.hash(token));
+    public AuthDtos.AuthResponse refresh(String refreshToken) {
+        JwtTokens.VerifiedToken jwt = tokens.verify(refreshToken, "refresh")
+                .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
+        AuthAccount account = accounts.findById(jwt.userId()).filter(AuthAccount::isActive)
+                .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
+        Instant now = Instant.now();
+        String replacement = tokens.refresh(account.getId(), jwt.sessionId(), now);
+        int updated = sessions.rotate(jwt.sessionId(), account.getId(), InviteTokens.hash(refreshToken),
+                InviteTokens.hash(replacement), now, now.plus(JwtTokens.REFRESH_LIFETIME));
+        if (updated != 1) throw new UnauthorizedException("유효하지 않은 리프레시 토큰입니다.");
+        return response(account, replacement, now);
+    }
+
+    /** 현재 Refresh Token을 폐기한다. 발급된 Access Token은 만료까지 유효하다. */
+    @Transactional
+    public void logout(String refreshToken) {
+        JwtTokens.VerifiedToken jwt = tokens.verify(refreshToken, "refresh")
+                .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
+        if (sessions.revoke(jwt.sessionId(), jwt.userId(), InviteTokens.hash(refreshToken), Instant.now()) != 1) {
+            throw new UnauthorizedException("유효하지 않은 리프레시 토큰입니다.");
+        }
     }
 
     private AuthDtos.AuthResponse createSession(AuthAccount account) {
         Instant now = Instant.now();
         sessions.deleteExpired(now);
-        String token = InviteTokens.next();
-        sessions.save(new AuthSession(InviteTokens.hash(token), account, now, now.plus(SESSION_LIFETIME)));
-        return new AuthDtos.AuthResponse(token, AuthDtos.UserView.from(account));
+        String sessionId = InviteTokens.next();
+        String refreshToken = tokens.refresh(account.getId(), sessionId, now);
+        sessions.save(new RefreshSession(sessionId, account.getId(), InviteTokens.hash(refreshToken),
+                now, now.plus(JwtTokens.REFRESH_LIFETIME)));
+        return response(account, refreshToken, now);
+    }
+
+    private AuthDtos.AuthResponse response(AuthAccount account, String refreshToken, Instant now) {
+        return new AuthDtos.AuthResponse(tokens.access(account.getId(), now), refreshToken,
+                JwtTokens.ACCESS_LIFETIME.toSeconds(), AuthDtos.UserView.from(account));
     }
 
     private static String normalizeEmail(String email) {

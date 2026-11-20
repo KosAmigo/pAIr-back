@@ -1,6 +1,7 @@
 package com.pair.web.auth;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,13 +36,13 @@ public class AuthController {
     /** 이메일 인증 코드를 확인한 뒤 일반 회원 계정을 만들고 로그인 토큰을 반환한다. */
     @PostMapping("/signup")
     public ResponseEntity<AuthDtos.AuthResponse> signup(@Valid @RequestBody AuthDtos.SignupRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(auth.signup(request));
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(auth.signup(request));
     }
 
     /** 이메일과 비밀번호를 확인하고 새 로그인 세션을 발급한다. */
     @PostMapping("/login")
-    public AuthDtos.AuthResponse login(@Valid @RequestBody AuthDtos.Credentials request) {
-        return auth.login(request);
+    public ResponseEntity<AuthDtos.AuthResponse> login(@Valid @RequestBody AuthDtos.Credentials request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(auth.login(request));
     }
 
     /** bearer 토큰에 연결된 현재 회원 정보를 반환한다. */
@@ -51,10 +52,16 @@ public class AuthController {
                 .orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
     }
 
-    /** 현재 bearer 세션을 폐기해 해당 토큰을 무효화한다. */
+    /** Refresh Token을 교체하고 새로운 토큰 쌍을 반환한다. */
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthDtos.AuthResponse> refresh(@Valid @RequestBody AuthDtos.RefreshRequest request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(auth.refresh(request.refreshToken()));
+    }
+
+    /** Refresh Token을 폐기한다. Access Token은 만료될 때까지 유효하다. */
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(@RequestHeader(name = "Authorization", required = false) String authorization) {
-        auth.logout(bearerToken(authorization));
+    public ResponseEntity<Void> logout(@Valid @RequestBody AuthDtos.RefreshRequest request) {
+        auth.logout(request.refreshToken());
         return ResponseEntity.noContent().build();
     }
 
