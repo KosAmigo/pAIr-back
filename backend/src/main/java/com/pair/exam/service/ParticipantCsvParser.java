@@ -24,6 +24,7 @@ public final class ParticipantCsvParser {
     private ParticipantCsvParser() {}
 
     public static List<CsvRow> parse(byte[] bytes, int maxRows) {
+        if (ExamWorkbooks.isXlsx(bytes)) return ExamWorkbooks.readParticipants(bytes, maxRows);
         String text = decode(bytes);
         if (!text.isEmpty() && text.charAt(0) == BOM) text = text.substring(1);
         List<List<String>> records = records(text);
@@ -97,9 +98,10 @@ public final class ParticipantCsvParser {
         return out;
     }
 
-    private static int findColumn(List<String> header, String... names) {
+    static int findColumn(List<String> header, String... names) {
         for (int i = 0; i < header.size(); i++) {
-            String v = header.get(i).trim().toLowerCase();
+            // '이름 *', '이메일(필수)' 처럼 표시가 붙은 열 이름도 읽는다
+            String v = header.get(i).replaceAll("\\(.*?\\)|[*\\s]", "").toLowerCase();
             for (String n : names) if (v.equals(n)) return i;
         }
         return -1;
