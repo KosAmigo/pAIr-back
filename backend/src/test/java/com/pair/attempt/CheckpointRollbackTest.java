@@ -1,0 +1,163 @@
+package com.pair.attempt;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.UUID;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import com.pair.attempt.db.CheckpointFileRecordRepository;
+import com.pair.attempt.db.CheckpointRecordRepository;
+import com.pair.task.TaskRecordRepository;
+import com.pair.task.TaskRepository;
+import com.pair.task.TestTasks;
+import com.pair.web.auth.AuthAccount;
+import com.pair.web.auth.AuthAccountRepository;
+
+/** 체크포인트 자동 생성(바뀐 파일만), 시점 복원, 롤백(분기), 복기 트리 (H2 메모리 DB) */
+@SpringBootTest
+@ActiveProfiles("examtest")
+class CheckpointRollbackTest {
+
+    @TempDir
+    static Path dataDir;
+
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry r) {
+        r.add("pair.data-dir", () -> dataDir.toString());
+    }
+
+    @Autowired AttemptStore store;
+    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRecordRepository records;
+    @Autowired TaskRecordRepository taskRecords;
+    @Autowired TaskRepository tasks;
+    @Autowired CheckpointService checkpoints;
+    @Autowired RollbackService rollbacks;
+    @Autowired CheckpointRecordRepository checkpointRecords;
+    @Autowired CheckpointFileRecordRepository checkpointFiles;
+    @Autowired AuthAccountRepository accounts;
+    @Autowired ReplayTreeService replayTree;
+
+    Long userId;
+    String id;
+    String path;
+    String original;
+    String edited;
+
+    @BeforeEach
+    void setUp() {
+        TestTasks.seed(taskRecords);
+        userId = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "응시자", "x")).getId();
+        Map<String, String> files = tasks.visibleFiles(TestTasks.SELF_DEV);
+        path = files.keySet().iterator().next();
+        original = files.get(path);
+        edited = original + "\n// 고침";
+
+        AttemptRecord r = registry.save(AttemptRecord.self(userId, 1L, "gpt-test", Instant.now()));
+        id = String.valueOf(r.getId());
+        store.create(attempt(id), files);
+        // 질문 1(파일 그대로) → 답 2 → 파일을 고침 → 질문 3 → 답 4
+        ask(id, 1, files);
+        store.appendTurn(id, turn(2, "ai", "답1"));
+        Map<String, String> after = new java.util.TreeMap<>(files);
+        after.put(path, edited);
+        ask(id, 3, after);
+        store.appendTurn(id, turn(4, "ai", "답3"));
+    }
+
+    @Test
+    void 체크포인트는_질문마다_만들고_바뀐_파일만_저장한다() {
+        List<CheckpointService.View> list = checkpoints.list(id);
+        assertThat(list).extracting(CheckpointService.View::turnNo).containsExactly(1, 3);
+        // 질문 1은 과제 원본과 같아서 파일 0행, 질문 3은 고친 파일 1행
+        assertThat(checkpointFiles.findUpTo(Long.valueOf(id), 1)).isEmpty();
+        assertThat(checkpointFiles.findUpTo(Long.valueOf(id), 3)).hasSize(1);
+    }
+
+    @Test
+    void 질문_시점의_파일로_복원한다() {
+        assertThat(checkpoints.restore(id, 1).get(path)).isEqualTo(original);
+        assertThat(checkpoints.restore(id, 3).get(path)).isEqualTo(edited);
+    }
+
+    @Test
+    void 롤백하면_그_시점_파일과_앞_대화로_새_응시가_갈라지고_크레딧을_차감한다() {
+        Long cp3 = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(1).getId();
+
+        RollbackService.Result res = rollbacks.rollback(userId, cp3);
+
+        assertThat(res.attemptId()).isNotEqualTo(id);
+        AttemptRecord fork = records.findById(Long.valueOf(res.attemptId())).orElseThrow();
+        assertThat(fork.getForkedFromCheckpointId()).isEqualTo(cp3);
+        assertThat(fork.getMode()).isEqualTo(AttemptRecord.Mode.SELF);
+        assertThat(fork.getStatus()).isEqualTo(Attempt.Status.SOLVING);
+        assertThat(store.readFiles(res.attemptId()).get(path)).isEqualTo(edited);
+        // 질문 3 앞의 대화(1, 2)만 같은 번호로 복사된다
+        assertThat(store.turns(res.attemptId())).extracting(ChatTurn::turn).containsExactly(1, 2);
+        // 원래 응시는 그대로
+        assertThat(store.turns(id)).hasSize(4);
+    }
+
+    @Test
+    void 남의_체크포인트는_롤백할_수_없다() {
+        Long other = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "다른 사람", "x")).getId();
+        Long cp1 = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
+
+        assertThatThrownBy(() -> rollbacks.rollback(other, cp1)).isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void 복기_트리는_뿌리부터_모든_갈래를_부모와_갈라진_질문_시점과_함께_돌려준다() {
+        Long cp3 = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(1).getId();
+        String a = rollbacks.rollback(userId, cp3).attemptId();                   // 원래 응시 → A (질문 3에서)
+        ask(a, 3, checkpoints.restore(a, Integer.MAX_VALUE));                      // A 에서 새 질문 3
+        Long aCp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(a)).get(0).getId();
+        String b = rollbacks.rollback(userId, aCp).attemptId();                   // A → B (질문 3에서)
+
+        // 어느 노드에서 물어도 같은 트리
+        for (String from : List.of(id, a, b)) {
+            List<ReplayTreeService.Node> nodes = replayTree.tree(userId, from);
+            assertThat(nodes).extracting(ReplayTreeService.Node::attemptId).containsExactly(id, a, b);
+            assertThat(nodes.get(0).parentAttemptId()).isNull();
+            assertThat(nodes.get(1).parentAttemptId()).isEqualTo(id);
+            assertThat(nodes.get(1).forkedAtTurn()).isEqualTo(3);
+            assertThat(nodes.get(2).parentAttemptId()).isEqualTo(a);
+            assertThat(nodes.get(2).forkedFromCheckpointId()).isEqualTo(aCp);
+        }
+    }
+
+    @Test
+    void 남의_복기_트리는_볼_수_없다() {
+        Long other = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "다른 사람", "x")).getId();
+        assertThatThrownBy(() -> replayTree.tree(other, id)).isInstanceOf(NoSuchElementException.class);
+    }
+
+    // ── 도우미 ───────────────────────────
+
+    void ask(String attemptId, int turn, Map<String, String> files) {
+        checkpoints.appendQuestion(attemptId, turn(turn, "user", "질문" + turn), files);
+    }
+
+    static ChatTurn turn(int no, String role, String text) {
+        return new ChatTurn(no, role, Instant.now(), text, null, null, null, null, null, null);
+    }
+
+    static Attempt attempt(String id) {
+        return new Attempt(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
+                Attempt.Status.SOLVING, List.of(), null, null);
+    }
+}

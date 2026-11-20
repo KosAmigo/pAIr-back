@@ -19,6 +19,9 @@ public interface AttemptRecordRepository extends JpaRepository<AttemptRecord, Lo
 
     boolean existsByParticipantId(Long participantId);
 
+    /** 이 체크포인트들에서 갈라진 응시 (복기 트리의 자식) */
+    List<AttemptRecord> findByForkedFromCheckpointIdIn(Collection<Long> checkpointIds);
+
     /** 후속 질문까지 마친 응시 ID (최근 순). 채점 툴의 "내 응시" 목록 */
     @Query("select a.id from AttemptRecord a where a.followupsDoneAt is not null order by a.id desc")
     List<Long> findFinishedIds();
