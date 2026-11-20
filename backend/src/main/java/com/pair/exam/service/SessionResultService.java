@@ -131,6 +131,12 @@ public class SessionResultService {
         return sb.toString();
     }
 
+    /** 꾸민 엑셀(.xlsx) 결과표 */
+    @Transactional(readOnly = true)
+    public byte[] xlsx(Long sessionId) {
+        return ExamWorkbooks.results(result(sessionId));
+    }
+
     static String cell(String v) {
         if (v == null) return "";
         String s = v;

@@ -76,8 +76,14 @@ public class ExamSessionService {
         if (req.companyId() == null) throw new IllegalArgumentException("회사를 알 수 없습니다.");
         validateSchedule(req, now);
         List<Long> taskIds = liveTaskIds(req.taskIds()); // 없는 과제면 404, 공개한 실전 과제만
-        ExamSession s = sessions.save(new ExamSession(req.companyId(), req.title().trim(), req.startsAt(), req.endsAt(),
-                req.proctoring(), taskIds, createdBy, now));
+        ExamSession s;
+        try {
+            s = sessions.save(new ExamSession(req.companyId(), req.title().trim(), req.startsAt(), req.endsAt(),
+                    req.proctoring(), taskIds, createdBy, now));
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // companies 외래 키 위반: 관리자가 없는 회사 번호를 넣은 경우
+            throw new IllegalArgumentException("없는 회사 번호입니다: " + req.companyId());
+        }
         return summary(s, null, now);
     }
 
@@ -135,9 +141,32 @@ public class ExamSessionService {
         List<Long> taskIds = liveTaskIds(req.taskIds());
         boolean changed = !s.getTitle().equals(req.title().trim()) || !s.getStartsAt().equals(req.startsAt())
                 || !s.getEndsAt().equals(req.endsAt()) || !s.getTaskIds().equals(taskIds);
+        boolean rescheduled = !s.getStartsAt().equals(req.startsAt()) || !s.getEndsAt().equals(req.endsAt());
         s.update(req.title().trim(), req.startsAt(), req.endsAt(), req.proctoring(), taskIds);
-        if (changed) notifyParticipants(s, SessionNotice.Kind.CHANGED);
+        if (rescheduled) reinviteAll(s, now);
+        else if (changed) notifyParticipants(s, SessionNotice.Kind.CHANGED);
         return summary(s, null, now);
+    }
+
+    /**
+     * 일시가 바뀌면 초대 메일을 바뀐 시각으로 다시 보낸다 (새 입장 링크, 이전 링크는 못 쓴다).
+     * 이미 입장한 대상자는 링크를 바꾸면 곤란하므로 변경 안내 메일만 보낸다.
+     */
+    private void reinviteAll(ExamSession s, Instant now) {
+        List<ExamParticipant> all = participants.findBySessionIdOrderByIdAsc(s.getId());
+        List<InvitesCreated.Invite> invites = new ArrayList<>();
+        List<Long> entered = new ArrayList<>();
+        for (ExamParticipant p : all) {
+            if (p.getEnteredAt() != null) {
+                entered.add(p.getId());
+                continue;
+            }
+            String token = InviteTokens.next();
+            p.reissueInvite(InviteTokens.hash(token), now);
+            invites.add(new InvitesCreated.Invite(p.getId(), token));
+        }
+        if (!invites.isEmpty()) events.publishEvent(new InvitesCreated(invites));
+        if (!entered.isEmpty()) events.publishEvent(new SessionNotice(s.getId(), SessionNotice.Kind.CHANGED, entered));
     }
 
     /** 시작 전에만 취소한다. 회차는 지우지 않고 canceled_at 을 남기고, 대상자에게 취소 안내 메일을 보낸다 */

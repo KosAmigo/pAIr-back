@@ -20,7 +20,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
     ResponseEntity<Map<String, String>> noResource(Exception e) {
-        return body(HttpStatus.NOT_FOUND, "없는 경로입니다. 화면은 http://localhost:5173 에서 여세요.");
+        return body(HttpStatus.NOT_FOUND, "없는 경로입니다. 화면은 https://localhost:5173 에서 여세요.");
     }
 
     @ExceptionHandler(com.pair.web.auth.UnauthorizedException.class)

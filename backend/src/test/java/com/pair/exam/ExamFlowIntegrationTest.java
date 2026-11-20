@@ -177,18 +177,45 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
-    @DisplayName("시작 전 수정: 시간·과제가 바뀌면 대상자에게 변경 안내를 보내고, 같은 내용이면 보내지 않는다")
+    @DisplayName("시작 전 수정: 일시가 바뀌면 초대 메일을 새 링크로 다시 보내고, 이름만 바뀌면 변경 안내, 같으면 아무것도 안 보낸다")
     void updateNotifiesOnlyWhenChanged() {
         SessionSummary s = createSession(115L, true);
-        invite(s.id(), "change@test.dev");
+        String oldToken = invite(s.id(), "change@test.dev");
         SessionRequest same = new SessionRequest(115L, s.title(), s.startsAt(), s.endsAt(), true, List.of(TASK));
 
         sessions.update(s.id(), same);
         assertThat(appEvents.stream(SessionNotice.class)).isEmpty();
 
-        sessions.update(s.id(), new SessionRequest(115L, s.title(), s.startsAt().plusSeconds(60), s.endsAt(), true, List.of(TASK)));
+        sessions.update(s.id(), new SessionRequest(115L, s.title() + " 수정", s.startsAt(), s.endsAt(), true, List.of(TASK)));
         assertThat(appEvents.stream(SessionNotice.class)).singleElement()
                 .satisfies(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CHANGED));
+
+        sessions.update(s.id(), new SessionRequest(115L, s.title() + " 수정", s.startsAt().plusSeconds(60), s.endsAt(), true, List.of(TASK)));
+        String newToken = lastToken(participant(s.id(), "change@test.dev").getId());
+        assertThat(newToken).isNotEqualTo(oldToken);
+        assertThat(appEvents.stream(SessionNotice.class)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("엑셀 양식: 내려받은 양식을 그대로 읽을 수 있고, 결과 엑셀이 만들어진다")
+    void xlsxRoundTrip() {
+        byte[] template = com.pair.exam.service.ExamWorkbooks.participantsTemplate();
+        var rows = com.pair.exam.service.ParticipantCsvParser.parse(template, 1000);
+        assertThat(rows).as("지우지 않은 예시 행은 등록하지 않는다").isEmpty();
+
+        SessionSummary s = createSession(116L, true);
+        invite(s.id(), "x@test.dev");
+        byte[] xlsx = results.xlsx(s.id());
+        assertThat(com.pair.exam.service.ExamWorkbooks.isXlsx(xlsx)).isTrue();
+        // 눈으로 확인하려고 파일로 남긴다 (build/xlsx-samples)
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of("build", "xlsx-samples");
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Files.write(dir.resolve("대상자_양식.xlsx"), template);
+            java.nio.file.Files.write(dir.resolve("회차_결과.xlsx"), xlsx);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test
