@@ -52,6 +52,8 @@ logs/
 *.log
 !src/main/resources/tasks/**/logs/
 !src/main/resources/tasks/**/*.log
+!backend/src/test/resources/task-fixtures/**/logs/
+!backend/src/test/resources/task-fixtures/**/*.log
 !grader/samples/**/logs/
 !grader/samples/**/*.log
 
