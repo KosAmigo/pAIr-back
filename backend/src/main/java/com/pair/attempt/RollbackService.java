@@ -10,13 +10,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.pair.attempt.db.CheckpointRecord;
 import com.pair.attempt.db.CheckpointRecordRepository;
+import com.pair.credit.CreditService;
 
 /**
  * 롤백: 체크포인트(질문 k)에서 갈라진 새 자가진단 응시를 만든다. 원래 응시는 그대로 둔다.
  * 새 응시는 질문 k 를 보낸 순간의 파일과 원래 응시의 1 ~ k-1 턴 대화(같은 턴 번호)를 가지고 풀이 중(SOLVING)으로 시작한다.
  * 롤백 횟수 제한은 없다. 파일·대화 복사까지 한 트랜잭션이다.
- * TODO: 크레딧 차감(ROLLBACK, 새 응시 ID 기준)은 팀원 1 의 크레딧 API 가 정해지면 이 트랜잭션 끝에서 호출한다.
- *       잔액이 모자라면 예외를 던져 위에서 만든 응시도 함께 롤백되게 한다.
  */
 @Service
 public class RollbackService {
@@ -28,14 +27,16 @@ public class RollbackService {
     private final AttemptRecordRepository records;
     private final AttemptRegistry registry;
     private final AttemptStore store;
+    private final CreditService credits;
 
     public RollbackService(CheckpointRecordRepository checkpoints, CheckpointService checkpointService,
-                           AttemptRecordRepository records, AttemptRegistry registry, AttemptStore store) {
+                           AttemptRecordRepository records, AttemptRegistry registry, AttemptStore store, CreditService credits) {
         this.checkpoints = checkpoints;
         this.checkpointService = checkpointService;
         this.records = records;
         this.registry = registry;
         this.store = store;
+        this.credits = credits;
     }
 
     @Transactional
@@ -48,6 +49,7 @@ public class RollbackService {
         if (source.getMode() != AttemptRecord.Mode.SELF || !userId.equals(source.getUserId())) {
             throw new NoSuchElementException("없는 체크포인트입니다.");
         }
+        credits.checkRollback(userId);
         String sourceId = String.valueOf(source.getId());
         Attempt original = store.load(sourceId);
 
@@ -61,6 +63,7 @@ public class RollbackService {
             if (t.turn() < cp.getTurnNo()) store.appendTurn(forkId, t);
         }
         store.appendEvent(forkId, "start", Map.of("taskId", original.taskId(), "forkedFromCheckpointId", cp.getId()));
+        credits.chargeRollback(userId, fork.getId());
         return new Result(forkId);
     }
 }
