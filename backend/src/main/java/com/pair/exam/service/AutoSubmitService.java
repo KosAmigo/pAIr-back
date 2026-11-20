@@ -3,6 +3,7 @@ package com.pair.exam.service;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -57,12 +58,19 @@ public class AutoSubmitService {
         List<ExamParticipant> ps = participants.lockBySessionId(sessionId);
         int submitted = 0;
         var states = progress.of(ps);
+        List<String> toFinish = new ArrayList<>();
         for (ExamParticipant p : ps) {
             ParticipantProgress.Progress pr = states.get(p.getId());
-            if (!pr.started() || pr.finished()) continue;
-            ExamEntryService.submitAll(attempts, registry, pr, now);
-            submitted++;
+            if (!pr.started()) continue;
+            if (!pr.finished()) {
+                ExamEntryService.submitAll(attempts, registry, pr, now);
+                submitted++;
+            }
+            // 직접 제출했더라도 후속 질문 단계에서 시간이 끝났으면 채점이 시작되지 않는다. 빈 답으로 마무리해 채점으로 넘긴다
+            pr.records().forEach(r -> toFinish.add(String.valueOf(r.getId())));
         }
+        int failed = attempts.finishAll(toFinish);
+        if (failed > 0) log.error("회차 {} 종료: 응시 {}건을 채점으로 넘기지 못했습니다", sessionId, failed);
         s.close(now);
         long lagMs = Duration.between(s.getEndsAt(), now).toMillis();
         log.info("회차 {} 종료: 자동 제출 {}명, 종료 시각 대비 {}ms 뒤 처리", sessionId, submitted, lagMs);

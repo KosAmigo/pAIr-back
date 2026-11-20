@@ -498,7 +498,7 @@ class ExamFlowIntegrationTest {
     // ── 종료·자동 제출 ──
 
     @Test
-    @DisplayName("종료 시각이 지나면 시작한 응시자만 자동 제출하고, 직접 제출한 응시자는 그대로 둔다")
+    @DisplayName("종료 시각이 지나면 시작한 응시자만 자동 제출하고, 직접 제출한 응시자의 제출 시각은 그대로 둔다")
     void autoSubmitAtEnd() {
         SessionSummary s = createSession(108L, false);
         String solving = invite(s.id(), "solving@test.dev");
@@ -514,6 +514,8 @@ class ExamFlowIntegrationTest {
         int n = autoSubmit.close(s.id());
 
         assertThat(n).isEqualTo(1);
+        // 직접 제출한 응시자도 후속 질문 단계에서 시간이 끝났을 수 있어, 시작한 응시자 전원의 응시를 마무리한다 (불참자는 제외)
+        verify(attempts).finishAll(org.mockito.ArgumentMatchers.argThat(ids -> ids.size() == 2));
         assertThat(entry.info(solving).submittedAt()).isEqualTo(s.endsAt().plusMillis(800));
         assertThat(entry.info(manual).submittedAt()).isEqualTo(s.startsAt()); // 직접 제출한 시각 그대로
         assertThat(entry.info(absent).submittedAt()).isNull();
