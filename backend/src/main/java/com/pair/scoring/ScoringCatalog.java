@@ -91,6 +91,7 @@ public class ScoringCatalog {
         if (checkIds == null) syncRubric();
         return tx.execute(status -> {
             PromptVersionRecord rec = versions.findFirstByNameOrderByIdAsc(v.id()).orElse(null);
+            if (rec != null && rec.isActive()) return rec.getId(); // 이미 활성이면 아무것도 쓰지 않는다
             if (rec == null) {
                 Long parentId = v.parent() == null ? null
                         : versions.findFirstByNameOrderByIdAsc(v.parent()).map(PromptVersionRecord::getId).orElse(null);
