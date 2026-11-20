@@ -448,6 +448,8 @@ public class ScoringService {
         if (!task.isDev()) {
             sb.append("\n## 숨은 체크리스트 (응시자는 보지 못함)\n")
               .append(tasks.hiddenFiles(task.id()).getOrDefault("checklist.md", "")).append("\n");
+            String trap = tasks.trapNotes(task.id()); // AI 가 만든 과제만 있다(함정 설명, 근거 문장, 자료 위치)
+            if (trap != null) sb.append(trap);
         }
         // 제공 자료를 통째로 넣는 경우: 같은 과제면 글이 똑같아(경로 순 고정) 프롬프트 캐시가 맞는다. 체크 목록보다 앞에 둔다.
         if (reference != null) sb.append("\n# 제공 자료 (수치 대조용)\n").append(reference);

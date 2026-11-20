@@ -33,6 +33,7 @@ import com.pair.task.DocumentPageRecordRepository;
 import com.pair.task.TaskCatalog;
 import com.pair.task.TaskFileRecord;
 import com.pair.task.TaskFileRecordRepository;
+import com.pair.task.TaskQuestionRecord;
 import com.pair.task.TaskQuestionRecordRepository;
 import com.pair.task.TaskRecord;
 import com.pair.task.TaskRecordRepository;
@@ -64,6 +65,7 @@ class ScoringReferenceTest {
     @Autowired TaskFileRecordRepository taskFiles;
     @Autowired TaskQuestionRecordRepository taskQuestions;
     @Autowired DocumentPageRecordRepository pages;
+    @Autowired com.pair.task.QuestionSourceRecordRepository sourceRecords;
     @Autowired com.pair.attempt.AttemptRegistry registry;
 
     static final String BIG = "big-biz";
@@ -93,6 +95,16 @@ class ScoringReferenceTest {
             String filler = ("쪽" + i + " 내용 ").repeat(2500 / 6);
             pages.save(new DocumentPageRecord(bigPdf.getId(), i, (i == 6 ? "가격 " : "") + filler));
         }
+        // 함정 정보(_gen/report.json)와 문항 근거(question_sources): 큰 자료 과제에만 있다
+        taskQuestions.deleteAll(taskQuestions.findAll().stream().filter(q -> q.getTaskId() == 60L).toList());
+        sourceRecords.deleteAll();
+        taskFiles.save(new TaskFileRecord(60L, "_gen/report.json",
+                "{\"details\":{\"trap\":{\"description\":\"6쪽의 단서를 놓치면 가격 인상이 이득처럼 보인다\",\"evidence\":\"\\\"쪽6 내용 쪽6 내용\\\"\"}}}",
+                "application/json", 100, TaskFileRecord.HIDDEN, true));
+        var q1 = taskQuestions.save(new TaskQuestionRecord(60L, "TASK", "SHORT", 1, "문항 하나"));
+        var q2 = taskQuestions.save(new TaskQuestionRecord(60L, "TASK", "SINGLE", 2, "문항 둘"));
+        sourceRecords.save(new com.pair.task.QuestionSourceRecord(q1.getId(), bigPdf.getId(), "5,6"));
+        sourceRecords.save(new com.pair.task.QuestionSourceRecord(q2.getId(), bigPdf.getId(), null));
         when(embeddings.embed(anyList())).thenAnswer(inv -> {
             List<String> texts = inv.getArgument(0);
             List<float[]> v = new ArrayList<>();
@@ -212,6 +224,37 @@ class ScoringReferenceTest {
         assertThat(seen.get(0).body()).contains("# 제공 자료").contains("가격");
     }
 
+    // ── 함정·근거 ─────────────────
+
+    @Test
+    void 함정이_있는_과제의_prefix에는_근거_문장과_위치가_들어가고_두_응시가_같다() {
+        List<Prompt> p1 = Collections.synchronizedList(new ArrayList<>());
+        List<Prompt> p2 = Collections.synchronizedList(new ArrayList<>());
+        run(newAttempt(BIG, 60L, Map.of("기획안.md", "# 기획안\n가격은 5,900원이다.")), p1);
+        run(newAttempt(BIG, 60L, Map.of("기획안.md", "# 다른 기획안\n매출은 100만원이다.")), p2);
+
+        String prefix = p1.get(0).prefix();
+        assertThat(prefix).contains("## 함정과 근거 (응시자는 보지 못함)")
+                .contains("- 함정: 6쪽의 단서를 놓치면 가격 인상이 이득처럼 보인다")
+                .contains("- 근거 문장: \"쪽6 내용 쪽6 내용\"")
+                .contains("- 근거 위치: 자료/큰보고서.pdf 6쪽")
+                .contains("- 문항 1: 자료/큰보고서.pdf 5,6쪽")
+                .contains("- 문항 2: 자료/큰보고서.pdf");
+        // 숨은 체크리스트 바로 뒤, 체크 항목 앞
+        assertThat(prefix.indexOf("## 숨은 체크리스트")).isLessThan(prefix.indexOf("## 함정과 근거"));
+        assertThat(prefix.indexOf("## 함정과 근거")).isLessThan(prefix.indexOf("# 판정할 체크 항목"));
+        assertThat(p2.get(0).prefix()).isEqualTo(prefix);
+        assertThat(p1.get(0).body()).doesNotContain("## 함정과 근거");
+    }
+
+    @Test
+    void 함정_정보가_없는_과제에는_절이_없다() {
+        List<Prompt> seen = Collections.synchronizedList(new ArrayList<>());
+        run(newAttempt(TestTasks.SELF_BIZ, 2L, Map.of("기획안.md", "# 기획안")), seen);
+        assertThat(seen.get(0).prefix()).doesNotContain("함정과 근거");
+        assertThat(tasks.trapNotes(TestTasks.SELF_BIZ)).isNull();
+    }
+
     // ── 글자 수 비교 (출력용) ─────
 
     @Test
@@ -231,6 +274,8 @@ class ScoringReferenceTest {
             out.append(String.format("%s | 자료 원문 %d자 | full 자료 %d / 전체 %d | rag 자료 %d / 전체 %d | auto=%s%n",
                     code, m.values().stream().mapToInt(String::length).sum(), full, base + full, rag, base + rag, autoRag ? "rag" : "full"));
         }
+        String notes = tasks.trapNotes(BIG);
+        out.append(String.format("함정·근거 절(big-biz): %d자%n", notes == null ? 0 : notes.length()));
         System.out.println(out);
     }
 }
