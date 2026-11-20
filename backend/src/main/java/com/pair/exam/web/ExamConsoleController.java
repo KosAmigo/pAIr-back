@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.pair.exam.service.ExamSessionService;
+import com.pair.exam.service.ExamWorkbooks;
 import com.pair.exam.service.ProctorService;
 import com.pair.exam.service.SessionResultService;
 import com.pair.exam.web.ExamDtos.AddParticipantsRequest;
@@ -111,7 +112,7 @@ public class ExamConsoleController {
         manage(user, sessionId);
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("파일이 비어 있습니다.");
         String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
-        if (!name.endsWith(".csv")) throw new IllegalArgumentException("CSV(.csv) 파일만 올릴 수 있습니다. 양식을 내려받아 써 주세요.");
+        if (!name.endsWith(".csv") && !name.endsWith(".xlsx")) throw new IllegalArgumentException("CSV(.csv) 또는 엑셀(.xlsx) 파일만 올릴 수 있습니다. 양식을 내려받아 써 주세요.");
         try {
             return sessions.importCsv(sessionId, file.getBytes(), dryRun);
         } catch (IOException e) {
@@ -127,6 +128,12 @@ public class ExamConsoleController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
                 .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
                 .body(PARTICIPANTS_TEMPLATE.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** 꾸민 엑셀 양식 (기본 양식). CSV 양식은 그대로 둔다 */
+    @GetMapping("/participants-template.xlsx")
+    public ResponseEntity<byte[]> participantsTemplateXlsx() {
+        return xlsx("대상자_양식.xlsx", ExamWorkbooks.participantsTemplate());
     }
 
     @org.springframework.web.bind.annotation.DeleteMapping("/{sessionId}/participants/{participantId}")
@@ -185,6 +192,20 @@ public class ExamConsoleController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
                 .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
                 .body(results.csv(sessionId).getBytes(StandardCharsets.UTF_8));
+    }
+
+    @GetMapping("/{sessionId}/results.xlsx")
+    public ResponseEntity<byte[]> resultsXlsx(CurrentUser user, @PathVariable Long sessionId) {
+        manage(user, sessionId);
+        return xlsx("session-" + sessionId + "-results.xlsx", results.xlsx(sessionId));
+    }
+
+    private static ResponseEntity<byte[]> xlsx(String filename, byte[] body) {
+        ContentDisposition cd = ContentDisposition.attachment().filename(filename, StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, cd.toString())
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(body);
     }
 
     private void manage(CurrentUser user, Long sessionId) {

@@ -13,7 +13,7 @@ public record ExamProperties(
         int maxParticipantsPerUpload) {
 
     public ExamProperties {
-        if (entryBaseUrl == null || entryBaseUrl.isBlank()) entryBaseUrl = "http://localhost:5173";
+        if (entryBaseUrl == null || entryBaseUrl.isBlank()) entryBaseUrl = "https://" + LanAddress.find().orElse("localhost") + ":5173"; // 개발 서버(npm run dev)는 HTTPS, 같은 네트워크 팀원도 열 수 있게 사내 IP
         if (mailFrom == null || mailFrom.isBlank()) mailFrom = "no-reply@pair.test";
         if (autoSubmitIntervalMs <= 0) autoSubmitIntervalMs = 2000;
         if (snapshotRetentionDays <= 0) snapshotRetentionDays = 30;
