@@ -115,7 +115,10 @@ public class QuestionService {
 
     // ── 답 저장 ─────────────────
 
-    /** 풀이 중에만 저장한다. 다시 보내면 덮어쓴다(객관식은 그 문항의 기존 선택을 지우고 새로 저장) */
+    /**
+     * 풀이 중에만 저장한다. 다시 보내면 덮어쓴다(객관식은 그 문항의 기존 선택을 지우고 새로 저장).
+     * 빈 답(choiceIds 가 빈 배열, text 가 공백뿐)은 "답 지우기"로 처리하고 null 을 돌려준다.
+     */
     @Transactional
     public AnswerView answer(long attemptId, long questionId, AnswerRequest req) {
         AttemptRecord a = attempt(attemptId);
@@ -134,25 +137,26 @@ public class QuestionService {
             if (req.text() != null) throw new IllegalArgumentException("객관식 문항은 choiceIds 로 답해야 합니다.");
             List<Long> ids = req.choiceIds() == null ? List.of() : req.choiceIds().stream().distinct().toList();
             if (ids.stream().anyMatch(java.util.Objects::isNull)) throw new IllegalArgumentException("보기 번호가 올바르지 않습니다.");
-            if (q.getQuestionType().equals("SINGLE") ? ids.size() != 1 : ids.isEmpty()) {
-                throw new IllegalArgumentException(q.getQuestionType().equals("SINGLE")
-                        ? "한 개만 고를 수 있는 문항입니다." : "보기를 하나 이상 골라 주세요.");
-            }
+            if (q.getQuestionType().equals("SINGLE") && ids.size() > 1) throw new IllegalArgumentException("한 개만 고를 수 있는 문항입니다.");
             Set<Long> valid = choices.findByQuestionIdOrderByIdAsc(q.getId()).stream().map(QuestionChoiceRecord::getId).collect(Collectors.toSet());
             if (!valid.containsAll(ids)) throw new IllegalArgumentException("이 문항의 보기가 아닙니다.");
             choiceAnswers.deleteByAttemptAndQuestion(attemptId, questionId);
             for (Long id : ids) choiceAnswers.save(new ChoiceAnswerRecord(attemptId, id, questionId, q.getQuestionType(), now));
-            saved = new AnswerView(ids, null);
+            saved = ids.isEmpty() ? null : new AnswerView(ids, null);
             event.put("choiceIds", ids);
         } else if (q.getQuestionType().equals("SHORT")) {
             if (req.choiceIds() != null && !req.choiceIds().isEmpty()) throw new IllegalArgumentException("단답형 문항은 text 로 답해야 합니다.");
             String text = req.text() == null ? "" : req.text().strip();
-            if (text.isEmpty()) throw new IllegalArgumentException("답을 입력해 주세요.");
             if (text.length() > SHORT_MAX_CHARS) throw new IllegalArgumentException("답은 " + SHORT_MAX_CHARS + "자 이하로 입력하세요.");
             TextAnswerRecord row = textAnswers.findByAttemptIdAndQuestionId(attemptId, questionId).orElse(null);
-            if (row == null) textAnswers.save(new TextAnswerRecord(attemptId, questionId, "SHORT", text, now));
-            else row.update(text, now);
-            saved = new AnswerView(null, text);
+            if (text.isEmpty()) {
+                if (row != null) textAnswers.delete(row);
+                saved = null;
+            } else {
+                if (row == null) textAnswers.save(new TextAnswerRecord(attemptId, questionId, "SHORT", text, now));
+                else row.update(text, now);
+                saved = new AnswerView(null, text);
+            }
             event.put("text", text);
         } else {
             throw new IllegalArgumentException("답할 수 없는 문항 유형입니다: " + q.getQuestionType());

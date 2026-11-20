@@ -202,11 +202,36 @@ class QuestionApiTest {
         putAnswer(id, single, "{\"text\":\"B안\"}", token()).andExpect(status().isBadRequest()); // 유형 불일치
         putAnswer(id, shortQ, "{\"choiceIds\":[" + singleA + "]}", token()).andExpect(status().isBadRequest());
         putAnswer(id, single, "{\"choiceIds\":[" + singleA + "," + singleB + "]}", token()).andExpect(status().isBadRequest()); // SINGLE 은 1개
-        putAnswer(id, multi, "{\"choiceIds\":[]}", token()).andExpect(status().isBadRequest()); // MULTI 는 1개 이상
         putAnswer(id, shortQ, "{\"text\":\"" + "9".repeat(201) + "\"}", token()).andExpect(status().isBadRequest()); // 200자 초과
-        putAnswer(id, shortQ, "{\"text\":\"   \"}", token()).andExpect(status().isBadRequest());
         putAnswer(id, 999999L, "{\"text\":\"1\"}", token()).andExpect(status().isBadRequest());
         assertThat(choiceAnswers.findAll()).isEmpty();
+    }
+
+    @Test
+    void 빈_답은_답_지우기로_처리하고_채점에서는_답_없음이다() throws Exception {
+        putAnswer(id, single, "{\"choiceIds\":[" + singleB + "]}", token()).andExpect(status().isOk());
+        putAnswer(id, multi, "{\"choiceIds\":[" + multiA + "," + multiC + "]}", token()).andExpect(status().isOk());
+        putAnswer(id, shortQ, "{\"text\":\"8430\"}", token()).andExpect(status().isOk());
+        assertThat(getJson("/api/attempts/{id}/questions").get(0).path("answer").isNull()).isFalse();
+
+        for (var body : List.of(Map.entry(single, "{\"choiceIds\":[]}"), Map.entry(multi, "{\"choiceIds\":[]}"),
+                Map.entry(shortQ, "{\"text\":\"  \"}"))) {
+            String res = putAnswer(id, body.getKey(), body.getValue(), token()).andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            assertThat(res).isEqualTo("null");
+        }
+        JsonNode arr = getJson("/api/attempts/{id}/questions");
+        for (JsonNode n : arr) assertThat(n.path("answer").isNull()).isTrue();
+        assertThat(choiceAnswers.findAll()).isEmpty();
+        assertThat(textAnswers.findAll()).isEmpty();
+        // 빈 답도 작업 기록에 남는다 (답 3 + 지우기 3)
+        assertThat(store.events(id).stream().filter(e -> "answer".equals(e.path("type").asText())).count()).isEqualTo(6);
+        // 아직 답하지 않은 문항을 지워도 200
+        putAnswer(id, single, "{\"choiceIds\":[]}", token()).andExpect(status().isOk());
+
+        long sid = finishScoring(id);
+        assertThat(results.findByScoringId(sid)).extracting(QuestionResultRecord::getReason).containsOnly("답 없음");
+        assertThat(results.findByScoringId(sid)).extracting(QuestionResultRecord::getScore).containsOnly(0);
     }
 
     // ── 채점 흐름 ─────────────────

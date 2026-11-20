@@ -294,11 +294,13 @@ public class ApiController {
         return questions.list(Long.parseLong(id));
     }
 
-    /** 문항 답 저장(덮어쓰기). 풀이 중에만 */
+    /** 문항 답 저장(덮어쓰기). 빈 답은 답 지우기. 풀이 중에만 */
     @PutMapping("/attempts/{id}/questions/{questionId}/answer")
-    public com.pair.question.QuestionService.AnswerView answer(@PathVariable String id, @PathVariable Long questionId,
-            @RequestBody com.pair.question.QuestionService.AnswerRequest req) {
-        return questions.answer(Long.parseLong(id), questionId, req);
+    public org.springframework.http.ResponseEntity<String> answer(@PathVariable String id, @PathVariable Long questionId,
+            @RequestBody com.pair.question.QuestionService.AnswerRequest req) throws com.fasterxml.jackson.core.JsonProcessingException {
+        // 답 지우기(빈 답)는 JSON null 을 돌려준다
+        String body = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(questions.answer(Long.parseLong(id), questionId, req));
+        return org.springframework.http.ResponseEntity.ok().contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(body);
     }
 
     private static TurnView view(Attempt a, ChatTurn t, List<AttemptService.EditView> edits) {
