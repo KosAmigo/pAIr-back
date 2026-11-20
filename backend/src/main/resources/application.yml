@@ -112,6 +112,19 @@ pair:
     # CSV 한 번에 올릴 수 있는 대상자 수
     max-participants-per-upload: 1000
 
+  # AI 과제 생성 (코드 기본값과 같은 값)
+  taskgen:
+    # 과제 PDF 저장소: local = pilot-data/ 아래(혼자 쓰는 로컬 DB용), s3 = 공용 RDS·배포
+    # 따로 안 정하면 감독 사진 설정(PAIR_SNAPSHOT_STORAGE)을 따라간다
+    # local 인데 DB 가 공용(원격)이면 비개발 과제 생성이 막힌다
+    # s3 접속 값(bucket, region, endpoint)은 새로 만들지 않고 위의 pair.exam.s3.* 를 그대로 쓴다. 저장 키는 task-files/...
+    file-storage: ${PAIR_TASKFILE_STORAGE:${PAIR_SNAPSHOT_STORAGE:local}}
+    model: gpt-6.1-terra
+    solver-model: claude-sonnet-5-5
+    max-concurrent: 2
+    effort: medium
+    max-tokens: 32000
+
   # 응시자가 쓰는 AI 어시스턴트.
   assistant:
     provider: openai

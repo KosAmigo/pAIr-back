@@ -39,7 +39,7 @@ public class S3TaskFileStorage implements TaskFileStorage, DisposableBean {
     }
 
     S3TaskFileStorage(S3Client s3, String bucket, String prefix) {
-        if (bucket == null || bucket.isBlank()) throw new IllegalStateException("pair.exam.s3.bucket 을 설정하세요.");
+        if (bucket == null || bucket.isBlank()) throw new IllegalStateException("S3 버킷 이름이 비어 있습니다. PAIR_S3_BUCKET(pair.exam.s3.bucket)을 설정하세요.");
         this.s3 = s3;
         this.bucket = bucket;
         this.prefix = prefix == null || prefix.isEmpty() || prefix.endsWith("/") ? (prefix == null ? "" : prefix) : prefix + "/";
