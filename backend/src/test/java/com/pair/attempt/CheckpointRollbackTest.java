@@ -141,6 +141,27 @@ class CheckpointRollbackTest {
     }
 
     @Test
+    void 체크포인트에_이름을_붙이고_지운다() {
+        Long cp1 = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
+
+        assertThat(checkpoints.rename(userId, cp1, "  처음 접근  ").label()).isEqualTo("처음 접근");
+        assertThat(checkpoints.list(id).get(0).label()).isEqualTo("처음 접근");
+
+        assertThat(checkpoints.rename(userId, cp1, "   ").label()).isNull();
+        assertThat(checkpoints.list(id).get(0).label()).isNull();
+    }
+
+    @Test
+    void 이름이_너무_길거나_남의_체크포인트면_바꿀_수_없다() {
+        Long cp1 = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
+        Long other = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "다른 사람", "x")).getId();
+
+        assertThatThrownBy(() -> checkpoints.rename(userId, cp1, "가".repeat(101))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> checkpoints.rename(other, cp1, "내 것")).isInstanceOf(NoSuchElementException.class);
+        assertThat(checkpoints.list(id).get(0).label()).isNull();
+    }
+
+    @Test
     void 남의_복기_트리는_볼_수_없다() {
         Long other = accounts.save(new AuthAccount(UUID.randomUUID() + "@pair.test", "다른 사람", "x")).getId();
         assertThatThrownBy(() -> replayTree.tree(other, id)).isInstanceOf(NoSuchElementException.class);

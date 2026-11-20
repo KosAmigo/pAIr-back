@@ -8,6 +8,7 @@ import java.util.Map;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -56,6 +57,8 @@ public class ApiController {
         this.rollbacks = rollbacks;
         this.replayTree = replayTree;
     }
+
+    public record CheckpointLabelRequest(String label) {}
 
     public record StartRequest(String taskId) {}
 
@@ -227,6 +230,13 @@ public class ApiController {
     @GetMapping("/attempts/{id}/checkpoints")
     public List<com.pair.attempt.CheckpointService.View> checkpoints(@PathVariable String id) {
         return checkpoints.list(id);
+    }
+
+    /** 체크포인트 이름 붙이기(복기 트리에서). 빈 값이면 이름을 지운다. 내 체크포인트만 */
+    @PatchMapping("/checkpoints/{checkpointId}")
+    public com.pair.attempt.CheckpointService.View renameCheckpoint(CurrentUser user, @PathVariable Long checkpointId,
+            @RequestBody CheckpointLabelRequest req) {
+        return checkpoints.rename(user.userId(), checkpointId, req.label());
     }
 
     /** 복기 트리: 이 응시가 속한 트리의 모든 응시(부모, 갈라진 질문 시점 포함). 내 응시만 */
