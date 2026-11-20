@@ -58,6 +58,10 @@ public class AttemptRecord {
     @Column(name = "assistant_model", nullable = false, length = 50)
     private String assistantModel;
 
+    /** 롤백으로 갈라진 응시만: 출발한 체크포인트 (복기 트리의 부모) */
+    @Column(name = "forked_from_checkpoint_id")
+    private Long forkedFromCheckpointId;
+
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
 
@@ -98,6 +102,13 @@ public class AttemptRecord {
     public static AttemptRecord self(Long userId, Long taskId, String model, Instant at) {
         if (userId == null) throw new IllegalArgumentException("자가진단 응시는 회원이 있어야 합니다.");
         return new AttemptRecord(Mode.SELF, userId, null, taskId, model, at);
+    }
+
+    /** 체크포인트에서 갈라진 자가진단 응시 */
+    public static AttemptRecord forkedSelf(Long userId, Long taskId, String model, Long checkpointId, Instant at) {
+        AttemptRecord r = self(userId, taskId, model, at);
+        r.forkedFromCheckpointId = checkpointId;
+        return r;
     }
 
     public static AttemptRecord live(Long participantId, Long taskId, String model, Instant at) {

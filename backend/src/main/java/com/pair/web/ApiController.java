@@ -39,15 +39,22 @@ public class ApiController {
     private final com.pair.config.PairProperties props;
     private final AttemptRecordRepository records;
     private final TaskCatalog catalog;
+    private final com.pair.attempt.CheckpointService checkpoints;
+    private final com.pair.attempt.RollbackService rollbacks;
+    private final com.pair.attempt.ReplayTreeService replayTree;
 
     public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.config.PairProperties props,
-            AttemptRecordRepository records, TaskCatalog catalog) {
+            AttemptRecordRepository records, TaskCatalog catalog, com.pair.attempt.CheckpointService checkpoints,
+            com.pair.attempt.RollbackService rollbacks, com.pair.attempt.ReplayTreeService replayTree) {
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
         this.props = props;
         this.records = records;
         this.catalog = catalog;
+        this.checkpoints = checkpoints;
+        this.rollbacks = rollbacks;
+        this.replayTree = replayTree;
     }
 
     public record StartRequest(String taskId) {}
@@ -214,6 +221,24 @@ public class ApiController {
     public AttemptService.EditDecision decideEdit(@PathVariable String id, @RequestBody EditRequest req) {
         if (!"apply".equals(req.action()) && !"reject".equals(req.action())) throw new IllegalArgumentException("action 은 apply 또는 reject 입니다.");
         return attempts.decideEdit(id, req.turn(), req.index(), "apply".equals(req.action()));
+    }
+
+    /** 복기 트리: 이 응시의 체크포인트(질문마다 하나) 목록 */
+    @GetMapping("/attempts/{id}/checkpoints")
+    public List<com.pair.attempt.CheckpointService.View> checkpoints(@PathVariable String id) {
+        return checkpoints.list(id);
+    }
+
+    /** 복기 트리: 이 응시가 속한 트리의 모든 응시(부모, 갈라진 질문 시점 포함). 내 응시만 */
+    @GetMapping("/attempts/{id}/tree")
+    public List<com.pair.attempt.ReplayTreeService.Node> tree(CurrentUser user, @PathVariable String id) {
+        return replayTree.tree(user.userId(), id);
+    }
+
+    /** 롤백: 체크포인트에서 갈라진 새 응시를 만든다 */
+    @PostMapping("/checkpoints/{checkpointId}/rollback")
+    public com.pair.attempt.RollbackService.Result rollback(CurrentUser user, @PathVariable Long checkpointId) {
+        return rollbacks.rollback(user.userId(), checkpointId);
     }
 
     @PostMapping("/attempts/{id}/submit")

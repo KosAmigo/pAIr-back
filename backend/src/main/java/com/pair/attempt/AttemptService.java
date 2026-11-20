@@ -37,10 +37,11 @@ public class AttemptService {
     private final PairProperties props;
     private final TaskCatalog catalog;
     private final AttemptRegistry registry;
+    private final CheckpointService checkpoints;
 
     public AttemptService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
-                          TaskCatalog catalog, AttemptRegistry registry) {
+                          TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -49,6 +50,7 @@ public class AttemptService {
         this.props = props;
         this.catalog = catalog;
         this.registry = registry;
+        this.checkpoints = checkpoints;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -152,7 +154,9 @@ public class AttemptService {
         List<Message> msgs = new ArrayList<>();
         for (ChatTurn t : history) msgs.add(new Message("user".equals(t.role()) ? "user" : "assistant", t.text()));
         msgs.add(new Message("user", message));
-        String system = props.assistant().systemPrompt() + editGuide(new TreeSet<>(store.readFiles(id).keySet()));
+        // 질문을 보낸 순간의 파일 상태: 체크포인트에 저장한다
+        Map<String, String> filesAtAsk = store.readFiles(id);
+        String system = props.assistant().systemPrompt() + editGuide(new TreeSet<>(filesAtAsk.keySet()));
         AssistantRequest req = new AssistantRequest(a.model(), props.assistant().maxOutputTokens(),
                 props.assistant().reasoningEffort(), system, List.copyOf(msgs));
         Instant askedAt = Instant.now();
@@ -168,7 +172,7 @@ public class AttemptService {
         ChatTurn user = new ChatTurn(n + 1, "user", askedAt, message, null, null, null, null, null, null);
         ChatTurn ai = new ChatTurn(n + 2, "ai", Instant.now(), reply.text(), a.provider(), reply.model(), req,
                 reply.inputTokens(), reply.outputTokens(), reply.latencyMs());
-        store.appendTurn(id, user);
+        checkpoints.appendQuestion(id, user, filesAtAsk);
         store.appendTurn(id, ai);
         store.appendEvent(id, "chat", Map.of("turn", ai.turn(), "inputTokens", reply.inputTokens(), "outputTokens", reply.outputTokens()));
         return List.of(user, ai);
