@@ -73,7 +73,11 @@ final class MailLayout {
             sb.append("<tr><td align=\"center\" style=\"padding:28px 32px 8px 32px;\">")
                     .append("<a href=\"").append(url).append("\" style=\"display:inline-block;background:").append(BRAND)
                     .append(";background-image:linear-gradient(120deg,#8B5CF6,#6C47FF 45%,#2F5BEA);color:#FFFFFF;text-decoration:none;font-size:16px;font-weight:700;padding:14px 36px;border-radius:999px;\">")
-                    .append(esc(button.label())).append("</a></td></tr>");
+                    .append(esc(button.label())).append("</a>")
+                    .append("<div style=\"margin-top:12px;font-size:12px;line-height:1.6;color:").append(MUTED)
+                    .append(";word-break:break-all;\">단추가 열리지 않으면 아래 주소를 브라우저에 붙여 넣으세요.<br>")
+                    .append("<a href=\"").append(url).append("\" style=\"color:").append(MUTED).append(";\">").append(url)
+                    .append("</a></div></td></tr>");
         }
 
         sb.append("<tr><td style=\"padding:20px 32px 28px 32px;\">");

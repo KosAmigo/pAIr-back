@@ -26,7 +26,8 @@ class MailLayoutTest {
         String without = MailLayout.html("제목", "인사", List.of(), List.of(), null, List.of());
 
         assertThat(withButton).contains("href=\"https://x.test/entry?invite=a&amp;b=&quot;c\"");
-        assertThat(without).doesNotContain("<a ");
+        assertThat(withButton).contains("단추가 열리지 않으면 아래 주소를 브라우저에 붙여 넣으세요.");
+        assertThat(without).doesNotContain("<a ").doesNotContain("붙여 넣으세요");
     }
 
     @Test
