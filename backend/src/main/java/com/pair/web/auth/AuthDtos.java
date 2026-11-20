@@ -25,11 +25,13 @@ public final class AuthDtos {
 
     public record EmailVerificationResponse(String message) {}
 
+    public record RefreshRequest(@NotBlank @Size(max = 4096) String refreshToken) {}
+
     public record UserView(long id, String email, String name, CurrentUser.Role role, Long companyId) {
         static UserView from(AuthAccount account) {
             return new UserView(account.getId(), account.getEmail(), account.getName(), account.getRole(), account.getCompanyId());
         }
     }
 
-    public record AuthResponse(String token, UserView user) {}
+    public record AuthResponse(String token, String refreshToken, long expiresIn, UserView user) {}
 }

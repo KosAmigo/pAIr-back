@@ -6,7 +6,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.ActiveProfiles;
@@ -34,6 +40,9 @@ class AuthIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+    @Autowired AuthService auth;
+    @Autowired JwtTokens tokens;
+    @Autowired JdbcTemplate jdbc;
     @MockitoBean JavaMailSender mail;
 
     @Test
@@ -46,6 +55,9 @@ class AuthIntegrationTest {
                 .andReturn();
         JsonNode signupBody = json.readTree(signup.getResponse().getContentAsString());
         String signupToken = signupBody.path("token").asText();
+        String refreshToken = signupBody.path("refreshToken").asText();
+        assertThat(signupBody.path("expiresIn").asLong()).isEqualTo(900);
+        assertThat(signupToken.split("\\.")).hasSize(3);
 
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
                 .andExpect(status().isOk())
@@ -58,10 +70,23 @@ class AuthIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.user.role").value("USER"));
 
-        mvc.perform(post("/api/auth/logout").header("Authorization", "Bearer " + signupToken))
-                .andExpect(status().isNoContent());
-        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
+        MvcResult refreshed = mvc.perform(tokenRequest("/api/auth/refresh", refreshToken))
+                .andExpect(status().isOk()).andReturn();
+        JsonNode refreshedBody = json.readTree(refreshed.getResponse().getContentAsString());
+        String newRefresh = refreshedBody.path("refreshToken").asText();
+        assertThat(newRefresh).isNotEqualTo(refreshToken);
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + refreshedBody.path("token").asText()))
+                .andExpect(status().isOk());
+        mvc.perform(tokenRequest("/api/auth/refresh", refreshToken)).andExpect(status().isUnauthorized());
+        mvc.perform(tokenRequest("/api/auth/logout", refreshToken)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + refreshToken))
                 .andExpect(status().isUnauthorized());
+
+        mvc.perform(tokenRequest("/api/auth/logout", newRefresh))
+                .andExpect(status().isNoContent());
+        mvc.perform(tokenRequest("/api/auth/refresh", newRefresh)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -109,6 +134,73 @@ class AuthIntegrationTest {
                 .andExpect(status().isCreated());
         mvc.perform(signup("인증 사용자", "verified@example.com", "secure-pass-123", code))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void rejectsExpiredTamperedWrongTypeAndLegacyTokens() throws Exception {
+        String code = requestVerificationCode("jwt-check@example.com");
+        MvcResult result = mvc.perform(signup("테스트 사용자", "jwt-check@example.com", "secure-pass-123", code))
+                .andExpect(status().isCreated()).andReturn();
+        JsonNode body = json.readTree(result.getResponse().getContentAsString());
+        long userId = body.path("user").path("id").asLong();
+        String access = body.path("token").asText();
+        String expiredAccess = tokens.access(userId, Instant.now().minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1));
+        String expiredRefresh = tokens.refresh(userId, com.pair.exam.service.InviteTokens.next(),
+                Instant.now().minus(JwtTokens.REFRESH_LIFETIME).minusSeconds(1));
+        String[] parts = access.split("\\.");
+        String tampered = parts[0] + "." + parts[1] + "." + (parts[2].startsWith("A") ? "B" : "A") + parts[2].substring(1);
+
+        for (String invalid : new String[] { expiredAccess, tampered, com.pair.exam.service.InviteTokens.next() }) {
+            mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + invalid))
+                    .andExpect(status().isUnauthorized());
+        }
+        mvc.perform(tokenRequest("/api/auth/refresh", expiredRefresh)).andExpect(status().isUnauthorized());
+        mvc.perform(tokenRequest("/api/auth/refresh", access)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void inactiveAccountCannotUseOrRefreshExistingTokens() throws Exception {
+        String code = requestVerificationCode("inactive-jwt@example.com");
+        MvcResult result = mvc.perform(signup("테스트 사용자", "inactive-jwt@example.com", "secure-pass-123", code))
+                .andExpect(status().isCreated()).andReturn();
+        JsonNode body = json.readTree(result.getResponse().getContentAsString());
+        jdbc.update("update users set member_status = ? where user_id = ?", "WITHDRAWN", body.path("user").path("id").asLong());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + body.path("token").asText()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(tokenRequest("/api/auth/refresh", body.path("refreshToken").asText()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void onlyOneConcurrentRefreshCanConsumeTheSameToken() throws Exception {
+        String code = requestVerificationCode("concurrent-jwt@example.com");
+        MvcResult result = mvc.perform(signup("테스트 사용자", "concurrent-jwt@example.com", "secure-pass-123", code))
+                .andExpect(status().isCreated()).andReturn();
+        String refresh = json.readTree(result.getResponse().getContentAsString()).path("refreshToken").asText();
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> tryRefresh(refresh, start));
+            var second = executor.submit(() -> tryRefresh(refresh, start));
+            start.countDown();
+            assertThat(new boolean[] { first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS) })
+                    .containsExactlyInAnyOrder(true, false);
+        }
+    }
+
+    private boolean tryRefresh(String token, CountDownLatch start) throws InterruptedException {
+        start.await();
+        try {
+            auth.refresh(token);
+            return true;
+        } catch (UnauthorizedException e) {
+            return false;
+        }
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder tokenRequest(
+            String path, String refreshToken) throws Exception {
+        return post(path).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new AuthDtos.RefreshRequest(refreshToken)));
     }
 
     private String requestVerificationCode(String email) throws Exception {
