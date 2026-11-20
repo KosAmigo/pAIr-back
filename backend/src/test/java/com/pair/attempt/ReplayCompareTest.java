@@ -155,6 +155,48 @@ class ReplayCompareTest {
         mvc.perform(get("/api/attempts/{id}/compare", a).param("with", solvingOf()).header("Authorization", token)).andExpect(status().isBadRequest());
     }
 
+    @Test
+    void 두_풀이에서_내용이_다른_파일만_돌려준다() {
+        Map<String, String> files = store.readFiles(a);
+        String javaPath = files.keySet().stream().filter(k -> k.endsWith(".java")).sorted().findFirst().orElseThrow();
+        store.writeWorkspaceFile(b, javaPath, files.get(javaPath) + "\n// B 에서 고침");
+        store.createWorkspaceFile(b, "src/shop/OnlyInB.java");
+        store.writeWorkspaceFile(b, "src/shop/OnlyInB.java", "class OnlyInB {}");
+
+        var diffs = compare.files(owner.user().id(), a, b);
+
+        // 같은 파일은 빠지고, 고친 파일과 B 에만 있는 파일만 경로 순으로 나온다
+        assertThat(diffs).extracting(ReplayCompareService.FileDiff::path).containsExactly(javaPath, "src/shop/OnlyInB.java");
+        assertThat(diffs.get(0).a()).isEqualTo(files.get(javaPath));
+        assertThat(diffs.get(0).b()).isEqualTo(files.get(javaPath) + "\n// B 에서 고침");
+        assertThat(diffs.get(1).a()).isNull();
+        assertThat(diffs.get(1).b()).isEqualTo("class OnlyInB {}");
+    }
+
+    @Test
+    void 파일이_모두_같으면_빈_목록이고_채점이_안_끝나도_비교할_수_있다() {
+        String solving = attempts.startSelf(TestTasks.SELF_DEV, owner.user().id()).id();
+        assertThat(compare.files(owner.user().id(), a, b)).isEmpty();
+        assertThat(compare.files(owner.user().id(), a, solving)).isEmpty();
+    }
+
+    @Test
+    void 파일_비교_API_는_주인만_쓸_수_있다() throws Exception {
+        String token = "Bearer " + owner.token();
+        String path = store.readFiles(b).keySet().stream().filter(k -> k.endsWith(".java")).sorted().findFirst().orElseThrow();
+        store.writeWorkspaceFile(b, path, "// 고침");
+        mvc.perform(get("/api/attempts/{id}/compare/files", a).param("with", b).header("Authorization", token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].path").value(path))
+                .andExpect(jsonPath("$[0].b").value("// 고침"));
+
+        mvc.perform(get("/api/attempts/{id}/compare/files", a).param("with", b)).andExpect(status().isUnauthorized());
+        var other = signup();
+        String othersAttempt = attempts.startSelf(TestTasks.SELF_DEV, other.user().id()).id();
+        mvc.perform(get("/api/attempts/{id}/compare/files", a).param("with", othersAttempt).header("Authorization", token)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/attempts/{id}/compare/files", othersAttempt).param("with", a).header("Authorization", token)).andExpect(status().isForbidden());
+    }
+
     private String solvingOf() {
         return attempts.startSelf(TestTasks.SELF_DEV, owner.user().id()).id();
     }

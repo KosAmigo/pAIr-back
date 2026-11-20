@@ -262,6 +262,13 @@ public class ApiController {
         return replayCompare.compare(user.userId(), id, with);
     }
 
+    /** 복기 비교: 두 풀이에서 내용이 다른 파일만(코드 변경 비교용). 내 자가진단 응시만 */
+    @GetMapping("/attempts/{id}/compare/files")
+    public List<com.pair.attempt.ReplayCompareService.FileDiff> compareFiles(CurrentUser user, @PathVariable String id,
+            @RequestParam("with") String with) {
+        return replayCompare.files(user.userId(), id, with);
+    }
+
     /** 롤백: 체크포인트에서 갈라진 새 응시를 만든다 */
     @PostMapping("/checkpoints/{checkpointId}/rollback")
     public com.pair.attempt.RollbackService.Result rollback(CurrentUser user, @PathVariable Long checkpointId) {

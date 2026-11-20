@@ -2,10 +2,13 @@ package com.pair.attempt;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,12 +31,42 @@ public class ReplayCompareService {
 
     public record Result(String a, String b, List<ItemDiff> items) {}
 
+    /** 두 풀이에서 내용이 다른 파일 하나. 한쪽에만 있는 파일이면 없는 쪽이 null */
+    public record FileDiff(String path, String a, String b) {}
+
     private final AttemptRecordRepository records;
     private final ReplayReports reports;
+    private final AttemptStore store;
 
-    public ReplayCompareService(AttemptRecordRepository records, ReplayReports reports) {
+    public ReplayCompareService(AttemptRecordRepository records, ReplayReports reports, AttemptStore store) {
         this.records = records;
         this.reports = reports;
+        this.store = store;
+    }
+
+    /**
+     * 두 풀이의 최종 작업 파일을 비교해 내용이 다른 파일만 경로 순으로 돌려준다(같은 파일은 보내지 않는다).
+     * 채점이 끝나지 않아도 된다. 두 응시 모두 내 자가진단 응시여야 하고, 남의 응시는 있는지도 알려 주지 않는다(404).
+     */
+    @Transactional(readOnly = true)
+    public List<FileDiff> files(Long userId, String aId, String bId) {
+        mine(userId, aId);
+        mine(userId, bId);
+        Map<String, String> fa = store.readFiles(aId);
+        Map<String, String> fb = store.readFiles(bId);
+        List<FileDiff> out = new ArrayList<>();
+        for (String path : new TreeSet<>(union(fa, fb))) {
+            String x = fa.get(path);
+            String y = fb.get(path);
+            if (!Objects.equals(x, y)) out.add(new FileDiff(path, x, y));
+        }
+        return out;
+    }
+
+    private static Set<String> union(Map<String, String> a, Map<String, String> b) {
+        Set<String> keys = new LinkedHashSet<>(a.keySet());
+        keys.addAll(b.keySet());
+        return keys;
     }
 
     /** 두 응시 모두 내 자가진단 응시이고 채점이 끝나 있어야 한다. 남의 응시는 있는지도 알려 주지 않는다(404) */
