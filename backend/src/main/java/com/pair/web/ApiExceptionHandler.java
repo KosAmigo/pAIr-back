@@ -44,6 +44,12 @@ public class ApiExceptionHandler {
         return body(HttpStatus.PAYMENT_REQUIRED, e.getMessage());
     }
 
+    /** 동시 실행 상한 초과 (AI 과제 생성) */
+    @ExceptionHandler(com.pair.taskgen.TooManyJobsException.class)
+    ResponseEntity<Map<String, String>> tooManyJobs(RuntimeException e) {
+        return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<Map<String, String>> notFound(NoSuchElementException e) {
         return body(HttpStatus.NOT_FOUND, e.getMessage());
