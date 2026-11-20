@@ -31,11 +31,14 @@ public class TaskConsoleController {
     private final TaskConsoleService console;
     private final TaskCatalog tasks;
     private final TaskMaterialService materials;
+    private final TaskReviewService review;
 
-    public TaskConsoleController(TaskConsoleService console, TaskCatalog tasks, TaskMaterialService materials) {
+    public TaskConsoleController(TaskConsoleService console, TaskCatalog tasks, TaskMaterialService materials,
+            TaskReviewService review) {
         this.console = console;
         this.tasks = tasks;
         this.materials = materials;
+        this.review = review;
     }
 
     /** 관리자: 모든 과제. 매니저: 공개한 실전(LIVE) 과제만 (회차 만들 때 고르는 목록) */
@@ -73,6 +76,20 @@ public class TaskConsoleController {
         requireAdmin(user);
         if (req == null || req.usage() == null) throw new IllegalArgumentException("usage 는 SELF 또는 LIVE 여야 합니다.");
         return console.changeUsage(taskId, req.usage());
+    }
+
+    /** 검수용: 과제의 모든 파일(숨은 파일 포함). PDF 는 content 가 null (기존 /materials 로 본다) */
+    @GetMapping("/{taskId}/files")
+    public List<TaskReviewService.FileView> files(CurrentUser user, @PathVariable String taskId) {
+        requireAdmin(user);
+        return review.files(taskId);
+    }
+
+    /** 검수용: 과제 문항과 정답·근거 (후속 질문 제외) */
+    @GetMapping("/{taskId}/questions")
+    public List<TaskReviewService.QuestionView> questions(CurrentUser user, @PathVariable String taskId) {
+        requireAdmin(user);
+        return review.questions(taskId);
     }
 
     /** 검수용 PDF 자료 목록 (공개 전 과제 포함, 숨은 파일 제외) */

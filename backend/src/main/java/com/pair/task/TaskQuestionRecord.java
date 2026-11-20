@@ -57,6 +57,10 @@ public class TaskQuestionRecord {
         this.content = content;
     }
 
+    public void setActive(boolean active) {
+        this.active = active;
+    }
+
     public void setPoints(Integer points) {
         this.points = points;
     }

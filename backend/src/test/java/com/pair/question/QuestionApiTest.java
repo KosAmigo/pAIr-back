@@ -132,6 +132,14 @@ class QuestionApiTest {
     }
 
     @Test
+    void 응시자_문항_목록에는_정답_표시와_인정_답안_값이_없다() throws Exception {
+        String body = mvc.perform(get("/api/attempts/{id}/questions", id).header("Authorization", token()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        // 관리자 검수 API 가 생겨도 응시자 응답에는 correct·answers·인정 답안(8430)이 나가면 안 된다
+        assertThat(body).doesNotContain("\"correct\"").doesNotContain("\"answers\"").doesNotContain("8430");
+    }
+
+    @Test
     void 문항_목록은_순서대로_나오고_정답_정보는_없다() throws Exception {
         String body = mvc.perform(get("/api/attempts/{id}/questions", id).header("Authorization", token()))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
