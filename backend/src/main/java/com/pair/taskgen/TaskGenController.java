@@ -21,8 +21,10 @@ public class TaskGenController {
 
     private final TaskGenJobs jobs;
     private final GeneratedTaskWriter writer;
+    private final TaskSuggestions suggestions;
 
-    public TaskGenController(TaskGenJobs jobs, GeneratedTaskWriter writer) {
+    public TaskGenController(TaskGenJobs jobs, GeneratedTaskWriter writer, TaskSuggestions suggestions) {
+        this.suggestions = suggestions;
         this.jobs = jobs;
         this.writer = writer;
     }
@@ -33,6 +35,13 @@ public class TaskGenController {
         requireAdmin(user);
         String jobId = jobs.start(form.validated(), user.userId());
         return ResponseEntity.accepted().body(Map.of("jobId", jobId));
+    }
+
+    /** 주제·함정 후보 3개를 AI 가 추천한다(동기 호출). 400 입력 오류, 429 분당 한도, 503 AI 실패 */
+    @PostMapping("/task-gen/suggestions")
+    public TaskSuggestions.Result suggest(CurrentUser user, @RequestBody TaskSuggestions.Request req) {
+        requireAdmin(user);
+        return suggestions.suggest(req, user.userId());
     }
 
     @GetMapping("/task-gen/{jobId}")

@@ -7,4 +7,9 @@ public interface TaskGenAi {
 
     /** 호출이 실패하면 AiUnavailableException */
     <T> Output<T> generate(String model, String system, String user, Class<T> type);
+
+    /** 출력 토큰 상한과 추론 강도를 따로 정해 부른다(추천처럼 짧고 싼 호출용). 기본은 위 설정을 그대로 쓴다 */
+    default <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
+        return generate(model, system, user, type);
+    }
 }

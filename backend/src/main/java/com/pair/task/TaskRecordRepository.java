@@ -16,4 +16,7 @@ public interface TaskRecordRepository extends JpaRepository<TaskRecord, Long> {
 
     /** 응시자에게 보이는 과제 목록용 (용도와 상태로 거른다) */
     List<TaskRecord> findByUsageAndStatusInOrderByIdAsc(TaskRecord.Usage usage, Collection<TaskRecord.Status> statuses);
+
+    /** AI 추천이 겹침을 피하려고 보는 최근 과제 50개 (상태 무관) */
+    List<TaskRecord> findTop50ByOrderByIdDesc();
 }

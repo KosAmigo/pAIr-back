@@ -46,12 +46,17 @@ public class OpenAiTaskGenAi implements TaskGenAi {
 
     @Override
     public <T> Output<T> generate(String model, String system, String user, Class<T> type) {
+        return generate(model, system, user, type, cfg.maxTokens(), cfg.effort());
+    }
+
+    @Override
+    public <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
         BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
                 .model(model)
-                .maxCompletionTokens(cfg.maxTokens())
+                .maxCompletionTokens(maxTokens)
                 .responseFormat(new ResponseFormat(ResponseFormat.Type.JSON_SCHEMA, converter.getJsonSchema()));
-        if (!cfg.effort().equalsIgnoreCase("none")) options.reasoningEffort(cfg.effort());
+        if (!effort.equalsIgnoreCase("none")) options.reasoningEffort(effort);
         Prompt prompt = new Prompt(List.of(new SystemMessage(system), new UserMessage(user)), options.build());
         ChatResponse res = SpringAi.call("OpenAI 과제 생성", () -> chatModel().call(prompt));
         String text = SpringAi.text(res);
