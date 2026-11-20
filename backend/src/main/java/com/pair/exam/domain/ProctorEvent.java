@@ -28,7 +28,9 @@ public class ProctorEvent {
         NO_FACE(Source.PC_CAM), MULTI_FACE(Source.PC_CAM), HEAD_TURN(Source.PC_CAM), HEAD_DOWN(Source.PC_CAM),
         GAZE_AWAY(Source.PC_CAM), TORSO_SHIFT(Source.PC_CAM), TORSO_TURN(Source.PC_CAM),
         HAND_MISSING(Source.PHONE_CAM), HAND_MOVED(Source.PHONE_CAM), ARM_MOVE(Source.PHONE_CAM), PHONE(Source.PHONE_CAM),
-        EXTRA_SCREEN(Source.PHONE_CAM), BOOK(Source.PHONE_CAM), PHONE_DISCONNECTED(Source.PHONE_CAM);
+        EXTRA_SCREEN(Source.PHONE_CAM), BOOK(Source.PHONE_CAM), PHONE_DISCONNECTED(Source.PHONE_CAM),
+        /** 서버가 직접 남기는 기록 (연결 끊김·링크 만료). 응시자 화면이 보내는 이벤트로는 받지 않는다 */
+        CONNECTION_LOST(Source.BROWSER), LINK_EXPIRED(Source.BROWSER);
 
         private final Source source;
 

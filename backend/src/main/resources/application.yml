@@ -28,6 +28,8 @@ spring:
     # 빈 DB 에서는 V1 부터 차례로 적용한다
     baseline-on-migrate: true
     baseline-version: 1
+    # 공유 RDS 에는 이 저장소에 없는 V6(email verifications)가 적용돼 있다. 없는 마이그레이션은 검증에서 무시한다
+    ignore-migration-patterns: "*:missing"
   mail:
     host: ${PAIR_MAIL_HOST:localhost}
     port: ${PAIR_MAIL_PORT:1025}
@@ -73,6 +75,11 @@ pair:
   # 실제 요청은 저장된 bearer 세션으로 인증하며, 임의 사용자 헤더는 신뢰하지 않는다.
   auth:
     mode: bearer
+    email-from: ${PAIR_MAIL_FROM:no-reply@pair.test}
+    email-verification:
+      code-lifetime: 10m
+      resend-interval: 60s
+      max-attempts: 5
   # 응시 기록을 쌓는 폴더 (bootRun 은 저장소 루트에서 실행되므로 pAIr/pilot-data)
   data-dir: pilot-data
 

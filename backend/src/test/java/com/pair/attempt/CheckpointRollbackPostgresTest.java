@@ -18,6 +18,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.mail.javamail.JavaMailSender;
 
 import com.pair.attempt.db.CheckpointRecordRepository;
 import com.pair.task.TaskRepository;
@@ -25,6 +27,7 @@ import com.pair.web.auth.AuthAccount;
 import com.pair.web.auth.AuthAccountRepository;
 import com.pair.web.auth.AuthDtos;
 import com.pair.web.auth.AuthService;
+import com.pair.web.auth.AuthTestSupport;
 import com.pair.credit.CreditService;
 import com.pair.credit.CreditLedgerRepository;
 
@@ -66,11 +69,12 @@ class CheckpointRollbackPostgresTest {
     @Autowired AuthService auth;
     @Autowired CreditService credits;
     @Autowired CreditLedgerRepository ledger;
+    @MockitoBean JavaMailSender mail;
 
     @Test
     void 체크포인트_롤백_복기_트리가_운영_스키마에서_돈다() {
         // V3 기본 데이터: 과제 1 = order-deadlock (자가진단)
-        Long userId = auth.signup(new AuthDtos.SignupRequest("응시자", UUID.randomUUID() + "@pair.test", "password123"))
+        Long userId = AuthTestSupport.signup(auth, mail, "응시자", UUID.randomUUID() + "@pair.test")
                 .user().id();
         Map<String, String> files = tasks.visibleFiles("order-deadlock");
         String path = files.keySet().iterator().next();

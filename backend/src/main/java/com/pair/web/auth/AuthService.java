@@ -25,19 +25,32 @@ public class AuthService {
     private final AuthAccountRepository accounts;
     private final AuthSessionRepository sessions;
     private final CreditService credits;
+    private final EmailVerificationService emailVerification;
 
-    public AuthService(AuthAccountRepository accounts, AuthSessionRepository sessions, CreditService credits) {
+    public AuthService(AuthAccountRepository accounts, AuthSessionRepository sessions, CreditService credits,
+            EmailVerificationService emailVerification) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.credits = credits;
+        this.emailVerification = emailVerification;
     }
 
-    /** 일반 회원을 생성하고 로그인 상태로 사용할 세션 토큰을 발급한다. */
+    public void requestEmailVerification(String email) {
+        String normalizedEmail = normalizeEmail(email);
+        if (accounts.existsByEmailIgnoreCase(normalizedEmail)) throw new ConflictException("이미 가입된 이메일입니다.");
+        emailVerification.sendCode(normalizedEmail);
+    }
+
+    /** 인증된 이메일로 일반 회원을 생성하고 로그인 상태로 사용할 세션 토큰을 발급한다. */
     @Transactional
     public AuthDtos.AuthResponse signup(AuthDtos.SignupRequest request) {
         requireBcryptLength(request.password());
         String email = normalizeEmail(request.email());
         if (accounts.existsByEmailIgnoreCase(email)) throw new ConflictException("이미 가입된 이메일입니다.");
+        EmailVerificationService.ConsumeResult verification = emailVerification.consume(email, request.code());
+        if (verification != EmailVerificationService.ConsumeResult.CONSUMED) {
+            throw new IllegalArgumentException(verification.message());
+        }
 
         AuthAccount account;
         try {

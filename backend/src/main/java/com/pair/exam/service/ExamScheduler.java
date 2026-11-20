@@ -24,9 +24,11 @@ public class ExamScheduler {
     private final ProctorService proctor;
     private final ReminderService reminders;
     private final InviteMailer mailer;
+    private final ConnectionGrace grace;
 
     public ExamScheduler(AutoSubmitService autoSubmit, ProctorService proctor, ReminderService reminders,
-            InviteMailer mailer) {
+            InviteMailer mailer, ConnectionGrace grace) {
+        this.grace = grace;
         this.autoSubmit = autoSubmit;
         this.proctor = proctor;
         this.reminders = reminders;
@@ -41,6 +43,17 @@ public class ExamScheduler {
             } catch (RuntimeException e) {
                 log.error("회차 {} 자동 제출 실패. 다음 주기에 다시 시도합니다.", id, e);
             }
+        }
+    }
+
+    /** 진행 중 회차에서 유예(5분) 안에 돌아오지 못한 응시자의 링크를 만료시키고 기록을 남긴다 */
+    @Scheduled(fixedDelay = 30_000, initialDelay = 30_000)
+    public void expireAbsentLinks() {
+        try {
+            int n = grace.expireAbsent();
+            if (n > 0) log.info("연결 유예를 넘긴 응시자 {}명의 링크를 만료시켰습니다", n);
+        } catch (RuntimeException e) {
+            log.error("연결 유예 점검 실패", e);
         }
     }
 

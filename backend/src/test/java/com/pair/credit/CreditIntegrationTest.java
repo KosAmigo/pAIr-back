@@ -32,6 +32,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mail.javamail.JavaMailSender;
 
 import com.pair.ai.AiUnavailableException;
 import com.pair.ai.AssistantClient;
@@ -47,6 +48,7 @@ import com.pair.web.auth.AuthAccount;
 import com.pair.web.auth.AuthAccountRepository;
 import com.pair.web.auth.AuthDtos;
 import com.pair.web.auth.AuthService;
+import com.pair.web.auth.AuthTestSupport;
 
 @SpringBootTest(properties = "pair.auth.mode=bearer")
 @AutoConfigureMockMvc
@@ -63,6 +65,7 @@ class CreditIntegrationTest {
     @Autowired TaskRecordRepository tasks;
     @Autowired MockMvc mvc;
     @MockitoBean AssistantClient assistant;
+    @MockitoBean JavaMailSender mail;
 
     @BeforeEach
     void seed() {
@@ -70,7 +73,7 @@ class CreditIntegrationTest {
     }
 
     private AuthDtos.AuthResponse signup() {
-        return auth.signup(new AuthDtos.SignupRequest("Test", UUID.randomUUID() + "@example.com", "password123"));
+        return AuthTestSupport.signup(auth, mail, "Test", UUID.randomUUID() + "@example.com");
     }
 
     @Test

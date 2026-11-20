@@ -26,6 +26,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.mail.javamail.JavaMailSender;
 
 import com.pair.attempt.db.CheckpointFileRecordRepository;
 import com.pair.attempt.db.CheckpointRecordRepository;
@@ -42,6 +44,7 @@ import com.pair.web.auth.AuthAccount;
 import com.pair.web.auth.AuthAccountRepository;
 import com.pair.web.auth.AuthDtos;
 import com.pair.web.auth.AuthService;
+import com.pair.web.auth.AuthTestSupport;
 
 /** 체크포인트 자동 생성(바뀐 파일만), 시점 복원, 롤백(분기), 복기 트리 (H2 메모리 DB) */
 @SpringBootTest
@@ -72,6 +75,7 @@ class CheckpointRollbackTest {
     @Autowired AuthService auth;
     @Autowired CreditService credits;
     @MockitoSpyBean CreditLedgerRepository ledger;
+    @MockitoBean JavaMailSender mail;
 
     Long userId;
     String id;
@@ -82,7 +86,7 @@ class CheckpointRollbackTest {
     @BeforeEach
     void setUp() {
         TestTasks.seed(taskRecords, taskFiles, taskQuestions);
-        userId = auth.signup(new AuthDtos.SignupRequest("응시자", UUID.randomUUID() + "@pair.test", "password123"))
+        userId = AuthTestSupport.signup(auth, mail, "응시자", UUID.randomUUID() + "@pair.test")
                 .user().id();
         Map<String, String> files = tasks.visibleFiles(TestTasks.SELF_DEV);
         path = files.keySet().iterator().next();

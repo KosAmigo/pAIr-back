@@ -32,6 +32,8 @@ import com.pair.task.TaskRepository;
 import com.pair.task.TestTasks;
 import com.pair.web.auth.AuthDtos;
 import com.pair.web.auth.AuthService;
+import com.pair.web.auth.AuthTestSupport;
+import org.springframework.mail.javamail.JavaMailSender;
 
 /**
  * 롤백으로 갈라진 응시를 실행하면, 실행기(CodeRunner)가 복원된 파일을 받는지 확인한다.
@@ -51,6 +53,7 @@ class RollbackRunTest {
     }
 
     @MockitoBean CodeRunner runner;
+    @MockitoBean JavaMailSender mail;
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStore store;
@@ -74,7 +77,7 @@ class RollbackRunTest {
     void setUp() {
         TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         // 가입하면 크레딧이 지급된다 (롤백은 크레딧을 차감하므로 필요)
-        userId = auth.signup(new AuthDtos.SignupRequest("응시자", UUID.randomUUID() + "@pair.test", "password123")).user().id();
+        userId = AuthTestSupport.signup(auth, mail, "응시자", UUID.randomUUID() + "@pair.test").user().id();
         Map<String, String> files = tasks.visibleFiles(TestTasks.SELF_DEV);
         javaPath = files.keySet().stream().filter(k -> k.startsWith("src/") && k.endsWith(".java")).sorted().findFirst().orElseThrow();
         original = files.get(javaPath);

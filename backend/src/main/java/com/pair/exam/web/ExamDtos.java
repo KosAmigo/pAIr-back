@@ -75,10 +75,11 @@ public final class ExamDtos {
     /**
      * companyName: 아직 채우지 않는다 (명세상 선택 필드).
      * submittedAt: 모든 과제를 제출한 시각. 과제별 제출 여부는 tasks.
+     * linkExpired: 시험 중 연결이 끊긴 뒤 유예(5분) 안에 돌아오지 않아 입장 링크가 만료됨.
      */
     public record EntryInfo(String sessionTitle, String companyName, String name, String email, Instant startsAt, Instant endsAt, Instant serverNow,
             ExamSession.Phase phase, boolean proctoring, boolean consented, Instant startedAt, Instant submittedAt,
-            List<String> taskIds, Map<String, String> attempts, List<TaskStatus> tasks) {}
+            List<String> taskIds, Map<String, String> attempts, List<TaskStatus> tasks, boolean linkExpired) {}
 
     /** 회차 과제 하나의 진행 상태. attemptId 는 시작 전이면 null */
     public record TaskStatus(String taskId, String attemptId, boolean submitted) {}
