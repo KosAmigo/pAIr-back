@@ -108,7 +108,8 @@ public class ProctorService {
         ExamParticipant p = findParticipant(token);
         ExamSession s = p.getSession();
         if (!s.isProctoring()) throw new IllegalStateException("감독을 쓰지 않는 회차입니다.");
-        if (req.type() == ProctorEvent.Type.CONNECTION_LOST || req.type() == ProctorEvent.Type.LINK_EXPIRED) {
+        if (req.type() == ProctorEvent.Type.CONNECTION_LOST || req.type() == ProctorEvent.Type.LINK_EXPIRED
+                || req.type() == ProctorEvent.Type.LINK_RESTORED) {
             throw new IllegalArgumentException("서버가 직접 남기는 이벤트입니다.");
         }
         if (!attempts.existsByParticipantId(p.getId())) throw new IllegalStateException("시작하지 않은 시험입니다.");
@@ -132,11 +133,12 @@ public class ProctorService {
         Instant startedAt = clampToExam(req.startedAt(), s.getStartsAt(), now);
 
         // 한 사람의 사진이 너무 많이 쌓이면 이벤트는 남기고 사진만 더 받지 않는다 (저장 공간 보호)
-        if (jpeg != null && events.countByParticipantIdAndSnapshotKeyIsNotNull(p.getId()) >= MAX_SNAPSHOTS_PER_PARTICIPANT) {
-            jpeg = null;
-        }
+        boolean overLimit = jpeg != null
+                && events.countByParticipantIdAndSnapshotKeyIsNotNull(p.getId()) >= MAX_SNAPSHOTS_PER_PARTICIPANT;
+        if (overLimit) jpeg = null;
         ProctorEvent e = events.save(new ProctorEvent(p.getId(), req.type(), startedAt, req.durationMs(),
                 req.confidence(), detail(req), now));
+        if (overLimit) e.skipSnapshot(ProctorEvent.SnapshotSkipReason.LIMIT_EXCEEDED); // 감독 화면에 "상한 초과"로 보인다
         e.assignClientId(req.clientId());
         events.flush(); // 같은 clientId 가 동시에 들어왔다면 여기서 유니크 위반으로 드러난다
         return new Stored(ProctorEventView.from(e), e.getId(), s.getId(), jpeg, true);

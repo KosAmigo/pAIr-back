@@ -45,14 +45,19 @@ public final class ExamDtos {
             ExamSession.Phase phase, List<String> taskIds, long participants, long entered, long submitted,
             Instant canceledAt, long unreviewedEvents, Instant createdAt) {}
 
-    /** startedAt·submittedAt·attempts 는 과제별 응시(attempts)에서 계산한다 (ParticipantProgress). attempts: 과제 code → 응시 ID */
+    /**
+     * startedAt·submittedAt·attempts 는 과제별 응시(attempts)에서 계산한다 (ParticipantProgress). attempts: 과제 code → 응시 ID
+     * linkExpired: 연결 유예(5분)를 넘겨 입장 링크가 만료된 상태 (진행 중인 시험에서만 true. 콘솔의 "링크 복구" 버튼 조건)
+     */
     public record ParticipantView(Long id, String name, String email, ExamParticipant.InviteStatus inviteStatus,
             String inviteError, Instant invitedAt, Instant remindedAt, Instant enteredAt, Instant startedAt,
-            Instant submittedAt, Map<String, String> attempts) {
+            Instant submittedAt, Map<String, String> attempts, boolean linkExpired) {
 
-        public static ParticipantView from(ExamParticipant p, com.pair.exam.service.ParticipantProgress.Progress pr) {
+        public static ParticipantView from(ExamParticipant p, com.pair.exam.service.ParticipantProgress.Progress pr, Instant now) {
+            boolean live = p.getSession().phase(now) == ExamSession.Phase.LIVE;
+            boolean expired = live && com.pair.exam.service.ConnectionGrace.isExpired(p, pr.started(), pr.finished(), now);
             return new ParticipantView(p.getId(), p.getName(), p.getEmail(), p.getInviteStatus(), p.getInviteError(),
-                    p.getInvitedAt(), p.getRemindedAt(), p.getEnteredAt(), pr.startedAt(), pr.submittedAt(), pr.attempts());
+                    p.getInvitedAt(), p.getRemindedAt(), p.getEnteredAt(), pr.startedAt(), pr.submittedAt(), pr.attempts(), expired);
         }
     }
 
@@ -111,13 +116,19 @@ public final class ExamDtos {
 
     public record ProctorEventView(Long id, Long participantId, ProctorEvent.Type type, ProctorEvent.Source source, Instant startedAt,
             int durationMs, BigDecimal confidence, String detail, String snapshot, int snapshotBytes,
-            ProctorEvent.Review review, String reviewNote, Long reviewedBy, Instant reviewedAt) {
+            ProctorEvent.Review review, String reviewNote, Long reviewedBy, Instant reviewedAt,
+            /** 사진이 없는 카메라 이벤트의 사유: LIMIT_EXCEEDED(서버 사진 상한 초과) / UPLOAD_FAILED(업로드 실패·사진 없이 도착). 사진이 있거나 삭제됐거나 브라우저 이벤트면 null */
+            String snapshotMissing) {
 
         public static ProctorEventView from(ProctorEvent e) {
             String snap = e.getSnapshotKey() == null ? null : e.getSnapshotDeletedAt() != null ? "deleted" : "ok";
+            String missing = null;
+            if (e.getSnapshotKey() == null && e.getSource() != ProctorEvent.Source.BROWSER) {
+                missing = e.getSnapshotSkipReason() != null ? e.getSnapshotSkipReason().name() : "UPLOAD_FAILED";
+            }
             return new ProctorEventView(e.getId(), e.getParticipantId(), e.getType(), e.getSource(), e.getStartedAt(), e.getDurationMs(),
                     e.getConfidence(), e.getDetail(), snap, e.getSnapshotBytes(), e.getReview(), e.getReviewNote(),
-                    e.getReviewedBy(), e.getReviewedAt());
+                    e.getReviewedBy(), e.getReviewedAt(), missing);
         }
     }
 

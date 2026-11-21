@@ -112,6 +112,27 @@ class ConsoleAuthIntegrationTest {
     }
 
     @Test
+    @DisplayName("링크 복구: 매니저·감독관·관리자는 권한을 통과하고(시험 전이라 400), 응시자 역할은 403, 다른 회사는 404")
+    void restoreLinkPermission() throws Exception {
+        long id = createAsManager(504);
+        String added = mvc.perform(as(post("/api/console/sessions/" + id + "/participants"), 4, "MANAGER", 504L)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"participants\":[{\"name\":\"홍길동\",\"email\":\"restore@test.dev\"}]}"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        org.assertj.core.api.Assertions.assertThat(json.readTree(added).path("added").asInt()).isEqualTo(1);
+        long participantId = json.readTree(mvc.perform(as(get("/api/console/sessions/" + id), 4, "MANAGER", 504L))
+                .andReturn().getResponse().getContentAsString()).path("participants").get(0).path("id").asLong();
+        String url = "/api/console/sessions/" + id + "/participants/" + participantId + "/restore-link";
+
+        mvc.perform(as(post(url), 2, "USER", null)).andExpect(status().isForbidden());
+        mvc.perform(as(post(url), 9, "MANAGER", 777L)).andExpect(status().isNotFound());
+        // 권한은 통과하지만 아직 시작 전이라 상태 검사에서 거절된다 (진행 중인 시험에서만 되살릴 수 있다)
+        for (var who : java.util.List.of(new Object[] {4L, "MANAGER", 504L}, new Object[] {6L, "PROCTOR", 504L}, new Object[] {1L, "ADMIN", null})) {
+            mvc.perform(as(post(url), (Long) who[0], (String) who[1], (Long) who[2]))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("진행 중인 시험")));
+        }
+    }
+
+    @Test
     @DisplayName("관리자는 회차를 만들 때 회사를 넣어야 한다")
     void adminMustChooseCompany() throws Exception {
         mvc.perform(as(post("/api/console/sessions"), 1, "ADMIN", null).contentType(MediaType.APPLICATION_JSON).content(sessionBody(null)))

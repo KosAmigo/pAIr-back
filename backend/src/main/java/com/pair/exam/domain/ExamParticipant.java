@@ -106,6 +106,12 @@ public class ExamParticipant {
         if (linkExpiredAt == null) linkExpiredAt = at;
     }
 
+    /** 담당자가 만료된 링크를 되살린다. 마지막 연결 시각을 지금으로 맞춰 바로 다시 만료되지 않게 한다 */
+    public void restoreLink(Instant at) {
+        this.linkExpiredAt = null;
+        this.lastSeenAt = at;
+    }
+
     /** invite_error 컬럼 길이에 맞춘다 */
     public static String trimInviteError(String error) {
         return error == null ? null : error.substring(0, Math.min(255, error.length()));
