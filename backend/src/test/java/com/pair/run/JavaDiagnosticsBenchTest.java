@@ -70,6 +70,7 @@ class JavaDiagnosticsBenchTest {
         ops.put("자동 완성 - 이름(complete)", () -> diagnostics.complete(files, path, name));
         ops.put("정의로 이동(definition)", () -> diagnostics.definition(files, path, text.indexOf("inventory", dot)));
         for (var op : ops.entrySet()) {
+            for (int i = 0; i < 5; i++) op.getValue().call(); // 작업마다 예열 (처음 한 번만 채우는 캐시·JIT 가 평균을 흐리지 않게)
             List<Long> ms = new ArrayList<>();
             for (int i = 0; i < 50; i++) {
                 long t = System.nanoTime();

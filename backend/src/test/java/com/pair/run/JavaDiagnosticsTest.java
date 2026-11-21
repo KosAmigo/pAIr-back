@@ -206,7 +206,7 @@ class JavaDiagnosticsTest {
     }
 
     @Test
-    void completesJavaLangAndImportedLibraryClassesButNotUnimportedOnes() {
+    void completesJavaLangAndImportedLibraryClasses() {
         String src = "package app;\nimport java.util.List;\nimport java.util.Map.*;\npublic class A {\n    void run() {\n        %s\n    }\n}\n";
         java.util.function.BiFunction<String, String, List<String>> complete = (line, typed) -> {
             String text = src.formatted(line);
@@ -215,10 +215,8 @@ class JavaDiagnosticsTest {
                     .filter(c -> c.kind().equals("class")).map(JavaDiagnostics.Completion::name).toList();
         };
         assertThat(complete.apply("Str;", "Str")).contains("String", "StringBuilder");
-        assertThat(complete.apply("Math;", "Math")).containsExactly("Math");
-        assertThat(complete.apply("Lis;", "Lis")).containsExactly("List");
-        // import 한 적 없는 클래스는 나오지 않는다 (자동 import 는 하지 않는다)
-        assertThat(complete.apply("ArrayL;", "ArrayL")).isEmpty();
+        assertThat(complete.apply("Math;", "Math")).contains("Math");
+        assertThat(complete.apply("Lis;", "Lis")).contains("List");
         // 패키지 전체 import (java.util.Map.* → Map 안의 Entry)
         assertThat(complete.apply("Ent;", "Ent")).contains("Entry");
         var detail = diagnostics.complete(Map.of("src/app/A.java", src.formatted("Str;")), "src/app/A.java",
@@ -231,6 +229,97 @@ class JavaDiagnosticsTest {
         String src = "package app;\npublic class A {\n    void run() {\n        int v = Math.ab;\n    }\n}\n";
         var items = diagnostics.complete(Map.of("src/app/A.java", src), "src/app/A.java", src.indexOf("Math.ab") + 7);
         assertThat(items).extracting(JavaDiagnostics.Completion::name).contains("abs");
+    }
+
+    @Test
+    void completesLibraryTypesInTypePositionsToo() {
+        // 필드 타입, 메서드 반환 타입, 매개변수 타입, new 뒤, 제네릭 인자, 캐스트: 모두 문장 안이 아닌 "타입 자리"
+        String[][] cases = {
+                {"public class A {\n    private final Str\n}\n", "Str"},
+                {"public class A {\n    private Str name;\n}\n", "Str"},
+                {"public class A {\n    public Str title() { return null; }\n}\n", "Str"},
+                {"public class A {\n    void run(Str label) {}\n}\n", "Str"},
+                {"public class A {\n    void run() {\n        Object o = new Str();\n    }\n}\n", "Str"},
+                {"import java.util.List;\npublic class A {\n    List<Str> names;\n}\n", "Str"},
+                {"public class A {\n    void run(Object o) {\n        Object s = (Str) o;\n    }\n}\n", "Str"},
+                {"public class A {\n    void run() {\n        Str x = null;\n    }\n}\n", "Str"},
+        };
+        for (String[] c : cases) {
+            String src = "package app;\n" + c[0];
+            var items = diagnostics.complete(Map.of("src/app/A.java", src), "src/app/A.java", src.indexOf(c[1]) + c[1].length());
+            assertThat(items).as(c[0]).extracting(JavaDiagnostics.Completion::name).contains("String");
+        }
+    }
+
+    @Test
+    void noCompletionOnPackageAndImportLines() {
+        String src = "package app;\nimport java.util.Li;\npublic class A {}\n";
+        assertThat(diagnostics.complete(Map.of("src/app/A.java", src), "src/app/A.java", src.indexOf("Li;") + 2)).isEmpty();
+        assertThat(diagnostics.complete(Map.of("src/app/A.java", src), "src/app/A.java", 3)).isEmpty();
+    }
+
+    // ── 자동 import ──
+
+    /** src 안의 "앞 + 친 글자" 바로 뒤에 커서를 두고 클래스 후보만 받는다 */
+    private List<JavaDiagnostics.Completion> classes(String src, String before, String word, String path, Map<String, String> others) {
+        Map<String, String> files = new HashMap<>(others);
+        files.put(path, src);
+        int offset = src.indexOf(before + word) + before.length() + word.length();
+        return diagnostics.complete(files, path, offset).stream().filter(c -> c.kind().equals("class")).toList();
+    }
+
+    private static JavaDiagnostics.Completion named(List<JavaDiagnostics.Completion> items, String name) {
+        return items.stream().filter(c -> c.name().equals(name)).findFirst().orElseThrow(() -> new AssertionError(name + " 없음: " + items));
+    }
+
+    @Test
+    void offersUnimportedLibraryClassesWithTheImportTheyNeed() {
+        String src = "package app;\npublic class A {\n    void run() {\n        Arr x;\n    }\n}\n";
+        var items = classes(src, "        ", "Arr", "src/app/A.java", Map.of());
+        assertThat(named(items, "ArrayList").importName()).isEqualTo("java.util.ArrayList");
+        assertThat(named(items, "ArrayList").signature()).isEqualTo(": java.util.ArrayList");
+        assertThat(named(items, "Arrays").importName()).isEqualTo("java.util.Arrays");
+        // 글자를 치기 전(빈 이름)에는 수가 많은 import 안 한 라이브러리는 내지 않는다
+        String empty = "package app;\npublic class A {\n    void run() {\n        \n    }\n}\n";
+        var none = diagnostics.complete(Map.of("src/app/A.java", empty), "src/app/A.java", empty.indexOf("        \n") + 8);
+        assertThat(none).noneMatch(c -> c.importName() != null);
+    }
+
+    @Test
+    void lowercaseNamesDoNotOfferUnimportedLibraryClasses() {
+        // 변수 이름을 치는 중에 Year, ListIterator 같은 클래스가 끼어들면 방해다
+        String src = "package app;\npublic class A {\n    void run() {\n        int year = 1;\n    }\n}\n";
+        var items = classes(src, "        int ", "year", "src/app/A.java", Map.of());
+        assertThat(items).noneMatch(c -> c.importName() != null);
+    }
+
+    @Test
+    void noImportNeededForJavaLangSamePackageAndAlreadyImported() {
+        Map<String, String> others = Map.of(
+                "src/app/Basket.java", "package app;\npublic class Basket {}\n",
+                "src/shop/Cart.java", "package shop;\npublic class Cart {}\n",
+                "src/shop/Hidden.java", "package shop;\nclass Hidden {}\n");
+        String src = "package app;\nimport java.util.List;\nimport java.util.concurrent.*;\npublic class A {\n    void run() {\n        X x;\n    }\n}\n";
+        String[] typed = {"Strin", "Bask", "Lis", "ConcurrentH", "Car", "Hid"};
+        for (String t : typed) {
+            String text = src.replace("X x;", t + " x;");
+            var items = classes(text, "        ", t, "src/app/A.java", others);
+            switch (t) {
+                case "Strin" -> assertThat(named(items, "String").importName()).isNull(); // java.lang
+                case "Bask" -> assertThat(named(items, "Basket").importName()).isNull(); // 같은 패키지
+                case "Lis" -> assertThat(named(items, "List").importName()).isNull(); // 이미 import
+                case "ConcurrentH" -> assertThat(named(items, "ConcurrentHashMap").importName()).isNull(); // 패키지 전체 import
+                case "Car" -> assertThat(named(items, "Cart").importName()).isEqualTo("shop.Cart"); // 다른 패키지의 작업 파일
+                default -> assertThat(items).extracting(JavaDiagnostics.Completion::name).doesNotContain("Hidden"); // 공개가 아닌 다른 패키지 클래스
+            }
+        }
+    }
+
+    @Test
+    void junitClassesAreOfferedInTestFiles() {
+        String src = "package app;\npublic class ATest {\n    @Tes\n    void one() {}\n}\n";
+        var items = classes(src, "@", "Tes", "test/app/ATest.java", Map.of());
+        assertThat(named(items, "Test").importName()).isEqualTo("org.junit.jupiter.api.Test");
     }
 
     // ── 정의로 이동 ──

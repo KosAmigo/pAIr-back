@@ -100,7 +100,8 @@ public class JavaDiagnostics {
     }
 
     /** 자동 완성 후보 하나. kind 는 method 또는 field, signature 는 화면에 보일 설명 */
-    public record Completion(String name, String kind, String signature, boolean hasParams) {}
+    /** importName 은 이 클래스를 쓰려면 파일에 넣어야 할 import 의 정식 이름(필요 없으면 null) */
+    public record Completion(String name, String kind, String signature, boolean hasParams, String importName) {}
 
     /** 정의 위치. 라이브러리(JDK, JUnit)에 있으면 찾지 못한 것으로 본다 */
     public record Definition(String file, long line, long column, String kind, String name) {}
@@ -167,6 +168,11 @@ public class JavaDiagnostics {
         while (start > 0 && Character.isJavaIdentifierPart(text.charAt(start - 1))) start--;
         String prefix = text.substring(start, offset);
         if (!prefix.isEmpty() && !Character.isJavaIdentifierStart(prefix.charAt(0))) return List.of();
+        // package·import 줄은 이름을 직접 쓰는 자리라 목록을 내지 않는다
+        int lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;
+        int lineEnd = text.indexOf('\n', offset);
+        String line = text.substring(lineStart, lineEnd < 0 ? text.length() : lineEnd).stripLeading();
+        if (line.startsWith("package ") || line.startsWith("import ")) return List.of();
         boolean member = start > 0 && text.charAt(start - 1) == '.';
         String marker = prefix + "__pairCursor";
         // 끊긴 식("s." 또는 "inv")은 문법 트리에서 빠지므로, 커서 자리를 메서드 호출 "표시()" 로 바꿔 올바른 식으로 만든다.
@@ -195,11 +201,15 @@ public class JavaDiagnostics {
                     return super.visitIdentifier(t, v);
                 }
             }.scan(unit, null);
-            if (found[0] == null) return List.<Completion>of();
             var seen = new LinkedHashSet<Completion>();
-            if (member) addMembers(a, found[0], prefix, seen);
+            if (found[0] == null) {
+                // 점 앞의 식을 못 찾으면 낼 게 없다. 점이 없는 자리인데 못 찾았다면 필드·반환·매개변수 타입처럼
+                // 문장 밖의 "타입 자리"이므로 쓸 수 있는 타입(작업 파일·java.lang·import)이라도 낸다
+                if (member) return List.<Completion>of();
+                addTypes(a, unit, prefix, seen);
+            } else if (member) addMembers(a, found[0], prefix, seen);
             else addVisibleNames(a, found[0], prefix, seen);
-            return seen.stream().sorted(Comparator.comparingInt((Completion c) -> rank(c.kind())).thenComparing(Completion::name)
+            return seen.stream().sorted(Comparator.comparingInt((Completion c) -> rank(c.kind()) + (c.importName() != null ? 1 : 0)).thenComparing(Completion::name)
                     .thenComparing(Completion::signature)).limit(MAX_COMPLETIONS).toList();
         });
     }
@@ -223,9 +233,9 @@ public class JavaDiagnostics {
     private static Completion member(Element e) {
         if (e instanceof ExecutableElement m) {
             String params = String.join(", ", m.getParameters().stream().map(p -> p.asType() + " " + p.getSimpleName()).toList());
-            return new Completion(m.getSimpleName().toString(), "method", "(" + params + ") : " + m.getReturnType(), !m.getParameters().isEmpty());
+            return new Completion(m.getSimpleName().toString(), "method", "(" + params + ") : " + m.getReturnType(), !m.getParameters().isEmpty(), null);
         }
-        return new Completion(e.getSimpleName().toString(), "field", ": " + e.asType(), false);
+        return new Completion(e.getSimpleName().toString(), "field", ": " + e.asType(), false, null);
     }
 
     /** "식." 의 식이 가진 멤버 */
@@ -252,7 +262,7 @@ public class JavaDiagnostics {
                 boolean local = k == ElementKind.LOCAL_VARIABLE || k == ElementKind.PARAMETER || k == ElementKind.EXCEPTION_PARAMETER
                         || k == ElementKind.RESOURCE_VARIABLE;
                 if (local && startsWithIgnoreCase(e.getSimpleName().toString(), prefix)) {
-                    out.add(new Completion(e.getSimpleName().toString(), "variable", ": " + e.asType(), false));
+                    out.add(new Completion(e.getSimpleName().toString(), "variable", ": " + e.asType(), false, null));
                 }
             }
         }
@@ -265,46 +275,89 @@ public class JavaDiagnostics {
                 out.add(member(e));
             }
         }
-        for (CompilationUnitTree unit : a.units()) {
-            for (Tree decl : unit.getTypeDecls()) {
-                Element e = a.trees().getElement(new TreePath(new TreePath(unit), decl));
-                if (e instanceof TypeElement t) addType(t, prefix, out);
-            }
-        }
-        // 라이브러리 클래스: 따로 import 하지 않아도 쓰는 java.lang 과, 이 파일이 import 한 클래스
+        addTypes(a, at.getCompilationUnit(), prefix, out);
+    }
+
+    /** 아직 import 하지 않았어도 후보로 내는 자주 쓰는 라이브러리 패키지. 후보를 고르면 import 문을 함께 넣는다 */
+    static final List<String> IMPORTABLE_PACKAGES = List.of(
+            "java.util", "java.util.function", "java.util.stream", "java.util.concurrent", "java.util.concurrent.atomic",
+            "java.util.concurrent.locks", "java.io", "java.nio.file", "java.nio.charset", "java.time", "java.time.format",
+            "java.math", "java.net", "java.text", "org.junit.jupiter.api");
+
+    /**
+     * 쓸 수 있는 타입: 작업 파일의 클래스, java.lang, 이 파일이 import 한 클래스, 그리고 아직 import 하지 않은 자주 쓰는 라이브러리.
+     * import 가 필요한 것은 importName 으로 알려 준다. import 안 한 라이브러리는 대문자로 시작하는 글자를 쳤을 때만 낸다(수가 많고, 소문자는 변수 이름이라서).
+     */
+    private static void addTypes(Analysis a, CompilationUnitTree current, String prefix, java.util.Set<Completion> out) {
         var elements = a.task().getElements();
-        addPackageTypes(elements.getPackageElement("java.lang"), prefix, out);
-        for (ImportTree imp : at.getCompilationUnit().getImports()) {
+        String pkg = current.getPackageName() == null ? "" : current.getPackageName().toString();
+        var explicit = new java.util.HashSet<String>(); // 단일 타입 import
+        var onDemand = new java.util.HashSet<String>(); // 패키지 또는 바깥 클래스 전체 import ("java.util.*", "java.util.Map.*")
+        for (ImportTree imp : current.getImports()) {
             if (imp.isStatic()) continue;
             String name = imp.getQualifiedIdentifier().toString();
-            if (name.endsWith(".*")) {
-                String owner = name.substring(0, name.length() - 2);
-                // "java.util.*" 은 패키지, "java.util.Map.*" 은 클래스 안의 중첩 타입
-                if (elements.getPackageElement(owner) != null) addPackageTypes(elements.getPackageElement(owner), prefix, out);
-                else if (elements.getTypeElement(owner) instanceof TypeElement outer) addMemberTypes(outer, prefix, out);
-            } else if (elements.getTypeElement(name) instanceof TypeElement t) {
-                addType(t, prefix, out);
+            if (name.endsWith(".*")) onDemand.add(name.substring(0, name.length() - 2));
+            else explicit.add(name);
+        }
+        var candidates = new LinkedHashSet<TypeElement>();
+        for (CompilationUnitTree unit : a.units()) {
+            for (Tree decl : unit.getTypeDecls()) {
+                if (a.trees().getElement(new TreePath(new TreePath(unit), decl)) instanceof TypeElement t) candidates.add(t);
+            }
+        }
+        addPublicTypes(elements.getPackageElement("java.lang"), candidates);
+        for (String name : explicit) {
+            if (elements.getTypeElement(name) instanceof TypeElement t) candidates.add(t);
+        }
+        for (String owner : onDemand) {
+            if (elements.getPackageElement(owner) != null) addPublicTypes(elements.getPackageElement(owner), candidates);
+            else if (elements.getTypeElement(owner) instanceof TypeElement outer) addPublicTypes(outer, candidates);
+        }
+        // 클래스 이름은 대문자로 시작하는 게 관례라, 소문자로 치는 변수 이름(int y, String name)에는 낼 필요가 없다
+        for (TypeElement t : candidates) {
+            String simple = t.getSimpleName().toString();
+            if (!startsWithIgnoreCase(simple, prefix)) continue;
+            String typePackage = elements.getPackageOf(t).getQualifiedName().toString();
+            // 다른 패키지의 공개 아닌 클래스는 쓸 수 없다
+            if (!typePackage.equals(pkg) && !t.getModifiers().contains(javax.lang.model.element.Modifier.PUBLIC)) continue;
+            String qualified = t.getQualifiedName().toString();
+            boolean visible = typePackage.equals("java.lang") || typePackage.equals(pkg) || explicit.contains(qualified)
+                    || onDemand.contains(typePackage)
+                    || (t.getEnclosingElement() instanceof TypeElement outer && onDemand.contains(outer.getQualifiedName().toString()));
+            out.add(new Completion(simple, "class", ": " + qualified, false, visible ? null : qualified));
+        }
+        if (!prefix.isEmpty() && Character.isUpperCase(prefix.charAt(0))) {
+            for (String libraryPackage : IMPORTABLE_PACKAGES) {
+                // 이미 import 한 패키지·클래스는 위에서 import 가 필요 없는 후보로 냈다
+                if (onDemand.contains(libraryPackage) || libraryPackage.equals(pkg)) continue;
+                for (String simple : publicTypeNames(elements, libraryPackage)) {
+                    String qualified = libraryPackage + "." + simple;
+                    if (startsWithIgnoreCase(simple, prefix) && !explicit.contains(qualified)) {
+                        out.add(new Completion(simple, "class", ": " + qualified, false, qualified));
+                    }
+                }
             }
         }
     }
 
-    private static void addType(TypeElement t, String prefix, java.util.Set<Completion> out) {
-        if (startsWithIgnoreCase(t.getSimpleName().toString(), prefix)) {
-            out.add(new Completion(t.getSimpleName().toString(), "class", ": " + t.getQualifiedName(), false));
-        }
+    /** JDK·라이브러리 패키지의 공개 타입 이름. 바뀌지 않으니 한 번만 읽어 둔다 */
+    private static final java.util.concurrent.ConcurrentHashMap<String, List<String>> PACKAGE_TYPE_NAMES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static List<String> publicTypeNames(javax.lang.model.util.Elements elements, String packageName) {
+        return PACKAGE_TYPE_NAMES.computeIfAbsent(packageName, name -> {
+            var pkg = elements.getPackageElement(name);
+            if (pkg == null) return List.of();
+            return pkg.getEnclosedElements().stream()
+                    .filter(e -> e instanceof TypeElement t && t.getModifiers().contains(javax.lang.model.element.Modifier.PUBLIC))
+                    .map(e -> e.getSimpleName().toString()).toList();
+        });
     }
 
-    private static void addMemberTypes(TypeElement outer, String prefix, java.util.Set<Completion> out) {
-        for (Element e : outer.getEnclosedElements()) {
-            if (e instanceof TypeElement t && t.getModifiers().contains(javax.lang.model.element.Modifier.PUBLIC)) addType(t, prefix, out);
-        }
-    }
-
-    /** 패키지의 공개 타입(클래스·인터페이스·열거형·레코드)들 */
-    private static void addPackageTypes(javax.lang.model.element.PackageElement pkg, String prefix, java.util.Set<Completion> out) {
-        if (pkg == null) return;
-        for (Element e : pkg.getEnclosedElements()) {
-            if (e instanceof TypeElement t && t.getModifiers().contains(javax.lang.model.element.Modifier.PUBLIC)) addType(t, prefix, out);
+    /** 패키지(또는 클래스 안)의 공개 타입(클래스·인터페이스·열거형·레코드)들 */
+    private static void addPublicTypes(Element container, java.util.Set<TypeElement> out) {
+        if (container == null) return;
+        for (Element e : container.getEnclosedElements()) {
+            if (e instanceof TypeElement t && t.getModifiers().contains(javax.lang.model.element.Modifier.PUBLIC)) out.add(t);
         }
     }
 
