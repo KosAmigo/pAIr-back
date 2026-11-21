@@ -55,6 +55,11 @@ public interface AttemptStore {
     /** 없으면 null */
     JsonNode readReport(String id);
 
+    /** 응시자가 고칠 수 없는 경로: 로그와 과제 자료. 화면(RealExam 의 readOnlyPath)과 같은 규칙이다 */
+    static boolean readOnlyPath(String path) {
+        return path != null && (path.startsWith("logs/") || path.startsWith("자료/"));
+    }
+
     /** AI 수정 제안으로 새로 만들 수 있는 경로: .java, .md 만, logs/·자료/ 아래와 상위 경로(..)는 안 됨 */
     static boolean creatable(String path) {
         return path != null && (path.endsWith(".java") || path.endsWith(".md"))

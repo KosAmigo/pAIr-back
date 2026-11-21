@@ -113,6 +113,12 @@ public class TaskMaterialService {
         return pageTexts(contentTaskId(catalog.require(code)), path, pagesParam);
     }
 
+    /** 응시의 작업 파일이 과제에서 읽기 전용(task_files.read_only)으로 정해졌는지. 과제에 없는 경로(새로 만든 파일)는 아니다 */
+    @Transactional(readOnly = true)
+    public boolean readOnlyForAttempt(long attemptId, String path) {
+        return files.findByTaskIdAndPath(contentTaskId(attemptTask(attemptId)), path).map(TaskFileRecord::isReadOnly).orElse(false);
+    }
+
     private TaskRecord attemptTask(long attemptId) {
         var a = attempts.findById(attemptId).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + attemptId));
         return catalog.require(a.getTaskId());

@@ -24,6 +24,7 @@ import com.pair.attempt.ChatAttachmentService.Resolved;
 import com.pair.attempt.db.ChatTurnRecordRepository;
 import com.pair.run.CodeRunner;
 import com.pair.run.JavaDiagnostics;
+import com.pair.task.TaskMaterialService;
 import com.pair.scoring.ScoringService;
 import com.pair.task.TaskCatalog;
 import com.pair.task.TaskDef;
@@ -49,12 +50,14 @@ public class AttemptService {
     private final TransactionTemplate transactions;
     private final ChatAttachmentService attachments;
     private final JavaDiagnostics diagnostics;
+    private final TaskMaterialService materials;
 
     public AttemptService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
                           TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints, CreditService credits,
                           ChatTurnRecordRepository chatRecords, TransactionTemplate transactions,
-                          ChatAttachmentService attachments, JavaDiagnostics diagnostics) {
+                          ChatAttachmentService attachments, JavaDiagnostics diagnostics,
+                          TaskMaterialService materials) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -69,6 +72,7 @@ public class AttemptService {
         this.transactions = transactions;
         this.attachments = attachments;
         this.diagnostics = diagnostics;
+        this.materials = materials;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -102,6 +106,7 @@ public class AttemptService {
 
     public void saveFile(String id, String path, String content) {
         Attempt a = requireStatus(id, Attempt.Status.SOLVING);
+        requireWritable(id, path);
         store.writeWorkspaceFile(id, path, content);
         // 저장할 때마다 내용을 함께 남긴다 (예전 snapshots/, D3·R2 분석용)
         store.appendEvent(id, "save", Map.of("path", path, "length", content.length(), "content", content));
@@ -323,6 +328,8 @@ public class AttemptService {
             store.appendEvent(id, "aiEdit", Map.of("turn", turn, "index", index, "path", p.path(), "action", "reject"));
             return new EditDecision("REJECTED", p.path(), null);
         }
+        // 적용 기록을 남기기 전에 막는다 (기록이 먼저 남으면 거부됐는데도 "적용함"으로 보인다)
+        requireWritable(id, p.path());
         Map<String, String> files = store.readFiles(id);
         Optional<String> next = EditProposals.apply(p, files.get(p.path()));
         if (next.isEmpty()) {
@@ -378,6 +385,14 @@ public class AttemptService {
         if (a.firstValidAt() != null) return;
         store.save(a.withFirstValid(Instant.now()));
         store.appendEvent(a.id(), "firstValid", Map.of());
+    }
+
+    /** 읽기 전용 파일(로그·자료 경로, 또는 과제에서 read_only 로 정한 파일)은 고칠 수 없다 */
+    private void requireWritable(String id, String path) {
+        boolean flagged = id.chars().allMatch(Character::isDigit) && materials.readOnlyForAttempt(Long.parseLong(id), path);
+        if (AttemptStore.readOnlyPath(path) || flagged) {
+            throw new IllegalArgumentException("읽기 전용 파일은 고칠 수 없습니다: " + path);
+        }
     }
 
     private Attempt requireStatus(String id, Attempt.Status status) {

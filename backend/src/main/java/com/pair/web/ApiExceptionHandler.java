@@ -94,6 +94,12 @@ public class ApiExceptionHandler {
         return body(HttpStatus.PAYLOAD_TOO_LARGE, "파일이 너무 큽니다 (최대 2MB).");
     }
 
+    /** 코드 실행 대기열이 꽉 차 자리를 못 얻었다. 잠시 뒤 다시 시도하면 된다 */
+    @ExceptionHandler(com.pair.run.SandboxRunner.BusyException.class)
+    ResponseEntity<Map<String, String>> runnerBusy(RuntimeException e) {
+        return body(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+    }
+
     @ExceptionHandler(AiUnavailableException.class)
     ResponseEntity<Map<String, String>> ai(AiUnavailableException e) {
         log.warn("AI 호출 실패: {}", e.getMessage());
