@@ -2,7 +2,6 @@ package com.pair.attempt;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -14,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.pair.task.TaskRepository;
 
 /**
  * 복기에서 두 풀이의 감점 근거를 항목·체크별로 나란히 맞춘다. 점수가 왜 달라졌는지(어느 체크가 감점에서 통과로 바뀌었는지)를 보여 주기 위한 것.
@@ -31,42 +31,49 @@ public class ReplayCompareService {
 
     public record Result(String a, String b, List<ItemDiff> items) {}
 
-    /** 두 풀이에서 내용이 다른 파일 하나. 한쪽에만 있는 파일이면 없는 쪽이 null */
-    public record FileDiff(String path, String a, String b) {}
+    /**
+     * 코드 비교에 쓰는 파일 하나. base 는 과제 원본, a·b 는 두 풀이의 최종 내용이다. 그 파일이 없으면 null
+     * (base 가 null 이면 풀이에서 새로 만든 파일). 원본과 A, B 가 모두 같은 파일은 보내지 않는다.
+     */
+    public record FileDiff(String path, String base, String a, String b) {}
 
     private final AttemptRecordRepository records;
     private final ReplayReports reports;
     private final AttemptStore store;
+    private final TaskRepository tasks;
 
-    public ReplayCompareService(AttemptRecordRepository records, ReplayReports reports, AttemptStore store) {
+    public ReplayCompareService(AttemptRecordRepository records, ReplayReports reports, AttemptStore store, TaskRepository tasks) {
         this.records = records;
         this.reports = reports;
         this.store = store;
+        this.tasks = tasks;
     }
 
     /**
-     * 두 풀이의 최종 작업 파일을 비교해 내용이 다른 파일만 경로 순으로 돌려준다(같은 파일은 보내지 않는다).
-     * 채점이 끝나지 않아도 된다. 두 응시 모두 내 자가진단 응시여야 하고, 남의 응시는 있는지도 알려 주지 않는다(404).
+     * 두 풀이의 최종 작업 파일을 과제 원본과 함께 돌려준다. 원본과 두 풀이가 모두 같은 파일은 빼고 경로 순으로 준다.
+     * 원본을 같이 주는 이유: A→B 차이만 보면 두 풀이가 똑같이 고친 부분이 안 보여서, 각 풀이가 원본에서 무엇을 바꿨는지 알 수 없다.
+     * 같은 과제의 풀이끼리만 비교할 수 있고(400), 채점이 끝나지 않아도 된다.
+     * 두 응시 모두 내 자가진단 응시여야 하고, 남의 응시는 있는지도 알려 주지 않는다(404).
      */
     @Transactional(readOnly = true)
     public List<FileDiff> files(Long userId, String aId, String bId) {
-        mine(userId, aId);
-        mine(userId, bId);
+        AttemptRecord ra = mine(userId, aId);
+        AttemptRecord rb = mine(userId, bId);
+        if (!ra.getTaskId().equals(rb.getTaskId())) throw new IllegalArgumentException("같은 과제의 풀이끼리만 비교할 수 있습니다.");
+        Map<String, String> base = tasks.visibleFiles(store.load(aId).taskId());
         Map<String, String> fa = store.readFiles(aId);
         Map<String, String> fb = store.readFiles(bId);
+        Set<String> paths = new TreeSet<>(base.keySet());
+        paths.addAll(fa.keySet());
+        paths.addAll(fb.keySet());
         List<FileDiff> out = new ArrayList<>();
-        for (String path : new TreeSet<>(union(fa, fb))) {
+        for (String path : paths) {
+            String o = base.get(path);
             String x = fa.get(path);
             String y = fb.get(path);
-            if (!Objects.equals(x, y)) out.add(new FileDiff(path, x, y));
+            if (!(Objects.equals(o, x) && Objects.equals(o, y))) out.add(new FileDiff(path, o, x, y));
         }
         return out;
-    }
-
-    private static Set<String> union(Map<String, String> a, Map<String, String> b) {
-        Set<String> keys = new LinkedHashSet<>(a.keySet());
-        keys.addAll(b.keySet());
-        return keys;
     }
 
     /** 두 응시 모두 내 자가진단 응시이고 채점이 끝나 있어야 한다. 남의 응시는 있는지도 알려 주지 않는다(404) */

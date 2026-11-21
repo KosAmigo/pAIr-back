@@ -262,7 +262,7 @@ public class ApiController {
         return replayCompare.compare(user.userId(), id, with);
     }
 
-    /** 복기 비교: 두 풀이에서 내용이 다른 파일만(코드 변경 비교용). 내 자가진단 응시만 */
+    /** 복기 비교: 과제 원본과 두 풀이의 최종 코드(코드 변경 비교용). 원본·A·B 가 모두 같은 파일은 뺀다. 내 자가진단 응시만 */
     @GetMapping("/attempts/{id}/compare/files")
     public List<com.pair.attempt.ReplayCompareService.FileDiff> compareFiles(CurrentUser user, @PathVariable String id,
             @RequestParam("with") String with) {
