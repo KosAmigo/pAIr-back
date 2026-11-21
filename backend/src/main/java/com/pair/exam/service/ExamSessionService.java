@@ -137,7 +137,7 @@ public class ExamSessionService {
         long submitted = states.values().stream().filter(ParticipantProgress.Progress::finished).count();
         SessionSummary sum = new SessionSummary(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(),
                 s.phase(now), tasks.codesInOrder(s.getTaskIds()), ps.size(), entered, submitted, s.getCanceledAt(), 0, s.getCreatedAt());
-        return new SessionDetail(sum, now, s.getClosedAt(), ps.stream().map(p -> ParticipantView.from(p, states.get(p.getId()))).toList());
+        return new SessionDetail(sum, now, s.getClosedAt(), ps.stream().map(p -> ParticipantView.from(p, states.get(p.getId()), now)).toList());
     }
 
     /** 시작 전에만 고칠 수 있다 (진행 중에 시각을 바꾸면 응시자마다 조건이 달라진다). 바뀌면 대상자에게 안내 메일 */

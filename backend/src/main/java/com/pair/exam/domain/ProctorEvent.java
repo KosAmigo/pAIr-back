@@ -29,8 +29,8 @@ public class ProctorEvent {
         GAZE_AWAY(Source.PC_CAM), TORSO_SHIFT(Source.PC_CAM), TORSO_TURN(Source.PC_CAM),
         HAND_MISSING(Source.PHONE_CAM), HAND_MOVED(Source.PHONE_CAM), ARM_MOVE(Source.PHONE_CAM), PHONE(Source.PHONE_CAM),
         EXTRA_SCREEN(Source.PHONE_CAM), BOOK(Source.PHONE_CAM), PHONE_DISCONNECTED(Source.PHONE_CAM),
-        /** 서버가 직접 남기는 기록 (연결 끊김·링크 만료). 응시자 화면이 보내는 이벤트로는 받지 않는다 */
-        CONNECTION_LOST(Source.BROWSER), LINK_EXPIRED(Source.BROWSER);
+        /** 서버가 직접 남기는 기록 (연결 끊김·링크 만료·담당자의 링크 복구). 응시자 화면이 보내는 이벤트로는 받지 않는다 */
+        CONNECTION_LOST(Source.BROWSER), LINK_EXPIRED(Source.BROWSER), LINK_RESTORED(Source.BROWSER);
 
         private final Source source;
 
@@ -47,6 +47,9 @@ public class ProctorEvent {
 
     /** 담당자 판정. 감독 이벤트는 자동 탈락이 아니라 사람이 확인하는 기록이다 */
     public enum Review { OK, SUSPECT }
+
+    /** 서버가 사진을 받지 않은 이유 */
+    public enum SnapshotSkipReason { LIMIT_EXCEEDED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -83,6 +86,11 @@ public class ProctorEvent {
     @Column(name = "snapshot_deleted_at")
     private Instant snapshotDeletedAt;
 
+    /** 사진을 받지 않은 서버 쪽 사유 (상한 초과). 사진이 붙으면 비운다 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "snapshot_skip_reason", length = 20)
+    private SnapshotSkipReason snapshotSkipReason;
+
     @Column(name = "received_at", nullable = false)
     private Instant receivedAt;
 
@@ -115,6 +123,11 @@ public class ProctorEvent {
         this.confidence = confidence;
         this.detail = detail;
         this.receivedAt = receivedAt;
+    }
+
+    /** 사진 상한에 막혀 사진을 받지 않았음을 기록한다 */
+    public void skipSnapshot(SnapshotSkipReason reason) {
+        this.snapshotSkipReason = reason;
     }
 
     public void assignClientId(String clientId) {
@@ -150,6 +163,7 @@ public class ProctorEvent {
     public String getSnapshotKey() { return snapshotKey; }
     public int getSnapshotBytes() { return snapshotBytes; }
     public Instant getSnapshotDeletedAt() { return snapshotDeletedAt; }
+    public SnapshotSkipReason getSnapshotSkipReason() { return snapshotSkipReason; }
     public Instant getReceivedAt() { return receivedAt; }
     public String getClientId() { return clientId; }
     public Review getReview() { return review; }

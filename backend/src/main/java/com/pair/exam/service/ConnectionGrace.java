@@ -4,14 +4,17 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.pair.exam.domain.ExamParticipant;
+import com.pair.exam.domain.ExamSession;
 import com.pair.exam.domain.ProctorEvent;
 import com.pair.exam.repository.ExamParticipantRepository;
 import com.pair.exam.repository.ProctorEventRepository;
+import com.pair.exam.web.ExamDtos.ParticipantView;
 
 /**
  * 시험 중 연결 유예. 시작한 응시자의 시험 화면은 10초마다 신호를 보낸다 (heartbeat).
@@ -68,6 +71,30 @@ public class ConnectionGrace {
         p.expireLink(now);
         events.save(new ProctorEvent(p.getId(), ProctorEvent.Type.LINK_EXPIRED, last.plus(GRACE), (int) Duration.between(last, now).toMillis(), null,
                 "{\"graceMinutes\":" + GRACE.toMinutes() + "}", now));
+    }
+
+    /**
+     * 담당자(매니저·감독관·관리자)가 만료된 링크를 되살린다. 응시자는 같은 링크로 다시 들어와 종료 시각까지 이어서 풀 수 있다.
+     * 종료 시각은 그대로이고, 끊긴 동안 흐른 시간은 돌려주지 않는다. 만료 기록(LINK_EXPIRED)은 두고 복구 기록(LINK_RESTORED)을 따로 남긴다.
+     * 진행 중인 시험의 아직 제출하지 않은 응시자만 되살릴 수 있다. 같은 행을 잠가 응시자의 신호·입장과 줄을 선다.
+     */
+    @Transactional
+    public ParticipantView restore(Long sessionId, Long participantId, Long restoredBy) {
+        Instant now = clock.instant();
+        ExamParticipant p = participants.lockById(participantId)
+                .filter(x -> x.getSession().getId().equals(sessionId))
+                .orElseThrow(() -> new NoSuchElementException("없는 대상자입니다."));
+        if (p.getSession().phase(now) != ExamSession.Phase.LIVE) throw new IllegalStateException("진행 중인 시험에서만 링크를 되살릴 수 있습니다.");
+        Instant expiredAt = p.getLinkExpiredAt();
+        if (expiredAt == null) throw new IllegalStateException("만료되지 않은 링크입니다.");
+        ParticipantProgress.Progress pr = progress.of(p);
+        if (pr.finished()) throw new IllegalStateException("이미 제출한 응시자입니다.");
+
+        p.restoreLink(now);
+        int offlineMs = (int) Math.min(Integer.MAX_VALUE, Duration.between(expiredAt, now).toMillis());
+        events.save(new ProctorEvent(p.getId(), ProctorEvent.Type.LINK_RESTORED, now, offlineMs, null,
+                "{\"restoredBy\":" + restoredBy + ",\"expiredAt\":\"" + expiredAt + "\"}", now));
+        return ParticipantView.from(p, pr, now);
     }
 
     /** 주기 점검: 진행 중인 회차에서 마지막 신호가 유예를 넘긴 응시자를 만료시킨다. 돌아오지 않아도 기록이 남게 한다. @return 만료시킨 인원 */

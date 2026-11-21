@@ -33,6 +33,11 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
     @Query("select p from ExamParticipant p join fetch p.session where p.inviteTokenHash = :hash")
     Optional<ExamParticipant> lockByInviteTokenHash(@Param("hash") String hash);
 
+    /** 콘솔에서 링크를 되살릴 때용. 응시자의 입장·신호 요청(위 메서드)과 같은 행을 잠가 서로 줄을 선다 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from ExamParticipant p join fetch p.session where p.id = :id")
+    Optional<ExamParticipant> lockById(@Param("id") Long id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from ExamParticipant p where p.session.id = :sessionId order by p.id")
     List<ExamParticipant> lockBySessionId(@Param("sessionId") Long sessionId);

@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.pair.exam.service.AutoSubmitService;
+import com.pair.exam.service.ConnectionGrace;
 import com.pair.exam.service.EnvScanService;
 import com.pair.exam.service.ExamSessionService;
 import com.pair.exam.service.ExamWorkbooks;
@@ -31,6 +32,7 @@ import com.pair.exam.service.SessionResultService;
 import com.pair.exam.web.ExamDtos.AddParticipantsRequest;
 import com.pair.exam.web.ExamDtos.AddParticipantsResult;
 import com.pair.exam.web.ExamDtos.EnvScanPhotoView;
+import com.pair.exam.web.ExamDtos.ParticipantView;
 import com.pair.exam.web.ExamDtos.ProctorEventView;
 import com.pair.exam.web.ExamDtos.ReviewRequest;
 import com.pair.exam.web.ExamDtos.SessionDetail;
@@ -58,15 +60,17 @@ public class ExamConsoleController {
     private final ProctorService proctor;
     private final AutoSubmitService autoSubmit;
     private final EnvScanService envScan;
+    private final ConnectionGrace grace;
     private final ConsoleAccess access;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
-            AutoSubmitService autoSubmit, EnvScanService envScan, ConsoleAccess access) {
+            AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGrace grace, ConsoleAccess access) {
         this.sessions = sessions;
         this.results = results;
         this.proctor = proctor;
         this.autoSubmit = autoSubmit;
         this.envScan = envScan;
+        this.grace = grace;
         this.access = access;
     }
 
@@ -155,6 +159,16 @@ public class ExamConsoleController {
     public void resendInvite(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         manage(user, sessionId);
         sessions.resendInvite(sessionId, participantId);
+    }
+
+    /**
+     * 연결 유예를 넘겨 만료된 응시자의 입장 링크를 되살린다 (매니저·감독관·관리자). 시험 시간은 연장하지 않는다.
+     * 되살린 사람과 시각은 감독 이벤트(LINK_RESTORED)로 남는다.
+     */
+    @PostMapping("/{sessionId}/participants/{participantId}/restore-link")
+    public ParticipantView restoreLink(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+        access.requireSession(user, sessionId);
+        return grace.restore(sessionId, participantId, user.userId());
     }
 
     /** 회차 전체 감독 이벤트 (시간순) */

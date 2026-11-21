@@ -466,6 +466,82 @@ class ExamFlowIntegrationTest {
                 clock.instant(), 0, null, null, null))).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    @DisplayName("링크 복구: 만료된 응시자를 되살리면 같은 링크로 이어서 들어가고, 복구 기록이 따로 남는다")
+    void restoreExpiredLink() {
+        String token = startedParticipant(122L, "restore@test.dev");
+        Long sessionId = sessionIdOf(token);
+        Long id = participant(sessionId, "restore@test.dev").getId();
+
+        clock.advance(java.time.Duration.ofMinutes(6));
+        assertThatThrownBy(() -> entry.enter(token)).isInstanceOf(LinkExpiredException.class);
+        assertThat(sessions.detail(sessionId).participants()).singleElement().satisfies(v -> assertThat(v.linkExpired()).isTrue());
+
+        clock.advance(java.time.Duration.ofMinutes(1)); // 만료된 채로 1분 뒤 담당자가 되살린다
+        var restored = grace.restore(sessionId, id, 7L);
+
+        assertThat(restored.linkExpired()).isFalse();
+        assertThat(entry.info(token).linkExpired()).isFalse();
+        entry.enter(token);
+        assertThat(entry.heartbeat(token).expired()).isFalse();
+        assertThat(entry.start(token).attempts()).containsOnlyKeys(TASK);
+
+        // 만료 기록은 그대로 두고 복구 기록을 따로 남긴다 (누가 되살렸는지 포함)
+        var events = eventRepo.findByParticipantIdOrderByStartedAtAsc(id);
+        assertThat(events).extracting(ProctorEvent::getType).containsExactly(ProctorEvent.Type.LINK_EXPIRED, ProctorEvent.Type.LINK_RESTORED);
+        assertThat(events.get(1).getDetail()).contains("\"restoredBy\":7");
+        assertThat(events.get(1).getDurationMs()).isEqualTo(60_000); // 만료되어 있던 시간
+    }
+
+    @Test
+    @DisplayName("링크 복구: 되살린 뒤 다시 5분을 넘겨 끊기면 또 만료되고, 다시 되살릴 수 있다")
+    void restoredLinkCanExpireAgain() {
+        String token = startedParticipant(122L, "again@test.dev");
+        Long sessionId = sessionIdOf(token);
+        Long id = participant(sessionId, "again@test.dev").getId();
+
+        clock.advance(java.time.Duration.ofMinutes(6));
+        grace.expireAbsent();
+        grace.restore(sessionId, id, 7L);
+        clock.advance(java.time.Duration.ofMinutes(4)); // 마지막 연결(복구 시각) 기준 유예 안
+        grace.expireAbsent();
+        assertThat(entry.info(token).linkExpired()).isFalse();
+
+        clock.advance(java.time.Duration.ofMinutes(2));
+        grace.expireAbsent();
+        assertThat(entry.info(token).linkExpired()).isTrue();
+        assertThat(grace.restore(sessionId, id, 8L).linkExpired()).isFalse();
+    }
+
+    @Test
+    @DisplayName("링크 복구: 만료되지 않았거나, 끝난 시험이거나, 이미 제출했거나, 다른 회차 대상자면 거절한다")
+    void restoreRejected() {
+        String token = startedParticipant(123L, "norestore@test.dev");
+        Long sessionId = sessionIdOf(token);
+        Long id = participant(sessionId, "norestore@test.dev").getId();
+
+        assertThatThrownBy(() -> grace.restore(sessionId, id, 7L)).isInstanceOf(IllegalStateException.class).hasMessageContaining("만료되지 않은");
+        assertThatThrownBy(() -> grace.restore(sessionId + 999, id, 7L)).isInstanceOf(NoSuchElementException.class);
+
+        clock.advance(java.time.Duration.ofMinutes(6));
+        grace.expireAbsent();
+        entry.submit(token); // 만료된 뒤에도 제출은 막지 않는다. 제출한 사람은 되살릴 필요가 없다
+        assertThatThrownBy(() -> grace.restore(sessionId, id, 7L)).hasMessageContaining("이미 제출");
+
+        clock.set(sessions.detail(sessionId).session().endsAt());
+        assertThatThrownBy(() -> grace.restore(sessionId, id, 7L)).hasMessageContaining("진행 중인 시험");
+        assertThat(eventRepo.findByParticipantIdOrderByStartedAtAsc(id)).extracting(ProctorEvent::getType)
+                .doesNotContain(ProctorEvent.Type.LINK_RESTORED);
+    }
+
+    @Test
+    @DisplayName("복구 기록은 서버만 남긴다: 응시자 화면이 보내는 이벤트로는 받지 않는다")
+    void restoredEventIsServerOnly() {
+        String token = startedParticipant(124L, "forge2@test.dev");
+        assertThatThrownBy(() -> proctor.record(token, new ProctorEventRequest(ProctorEvent.Type.LINK_RESTORED, ProctorEvent.Source.BROWSER,
+                clock.instant(), 0, null, null, null))).isInstanceOf(IllegalArgumentException.class);
+    }
+
     private String startedParticipant(Long company, String email) {
         SessionSummary s = createSession(company, true);
         String token = invite(s.id(), email);
@@ -745,6 +821,45 @@ class ExamFlowIntegrationTest {
                 .hasMessageContaining("브라우저 이벤트");
         assertThatThrownBy(() -> proctor.record(token, camEvent(s.startsAt().minus(Duration.ofHours(1)), null)))
                 .hasMessageContaining("시험 시간 밖");
+    }
+
+    @Test
+    @DisplayName("사진 없는 카메라 이벤트는 사유가 붙고, 사진이 있거나 브라우저 이벤트면 사유가 없다")
+    void missingSnapshotReasonForUploadFailure() {
+        SessionSummary s = createSession(141L, true);
+        String token = startWithConsent(s, "missing@test.dev");
+        Instant at = s.startsAt().plusSeconds(30);
+
+        var noPhoto = proctor.record(token, camEvent(at, null));
+        var withPhoto = proctor.record(token, camEvent(at, Base64.getEncoder().encodeToString(JPEG)));
+        var browser = proctor.record(token, new ProctorEventRequest(ProctorEvent.Type.TAB_HIDDEN,
+                ProctorEvent.Source.BROWSER, at, 0, null, null, null));
+
+        assertThat(noPhoto.snapshotMissing()).isEqualTo("UPLOAD_FAILED");
+        assertThat(withPhoto.snapshotMissing()).isNull();
+        assertThat(browser.snapshotMissing()).isNull();
+    }
+
+    @Test
+    @DisplayName("사진 상한(300장)을 넘은 이벤트는 남기되 사유(LIMIT_EXCEEDED)를 기록한다")
+    void snapshotLimitRecordsReason() {
+        SessionSummary s = createSession(142L, true);
+        String token = startWithConsent(s, "limit@test.dev");
+        Long pid = participant(s.id(), "limit@test.dev").getId();
+        Instant at = s.startsAt().plusSeconds(30);
+        String photo = Base64.getEncoder().encodeToString(JPEG);
+
+        for (int i = 0; i < 300; i++) {
+            var req = new ProctorEventRequest(ProctorEvent.Type.NO_FACE, ProctorEvent.Source.PC_CAM, at, 2100, null, null, photo,
+                    String.format("evt-%04d-limit", i));
+            assertThat(proctor.record(token, req).snapshot()).isEqualTo("ok");
+        }
+        var over = proctor.record(token, new ProctorEventRequest(ProctorEvent.Type.NO_FACE, ProctorEvent.Source.PC_CAM, at, 2100,
+                null, null, photo, "evt-9999-limit"));
+
+        assertThat(over.snapshot()).isNull();
+        assertThat(over.snapshotMissing()).isEqualTo("LIMIT_EXCEEDED");
+        assertThat(proctor.eventsOf(s.id(), pid)).hasSize(301);
     }
 
     @Test
