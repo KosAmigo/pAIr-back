@@ -27,6 +27,12 @@ public final class AuthDtos {
 
     public record RefreshRequest(@NotBlank @Size(max = 4096) String refreshToken) {}
 
+    public record PasswordChangeRequest(
+            @NotBlank @Size(max = 72) String currentPassword,
+            @NotBlank @Size(min = 8, max = 72) String newPassword) {}
+
+    public record WithdrawalRequest(@NotBlank @Size(max = 72) String currentPassword) {}
+
     public record UserView(long id, String email, String name, CurrentUser.Role role, Long companyId) {
         static UserView from(AuthAccount account) {
             return new UserView(account.getId(), account.getEmail(), account.getName(), account.getRole(), account.getCompanyId());

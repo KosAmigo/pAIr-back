@@ -98,6 +98,11 @@ public class EmailVerificationService {
         return ConsumeResult.CONSUMED;
     }
 
+    @Transactional
+    public void removeForEmail(String email) {
+        verifications.deleteById(email);
+    }
+
     enum ConsumeResult {
         CONSUMED(""),
         NOT_FOUND("이메일 인증 코드를 먼저 요청해 주세요."),

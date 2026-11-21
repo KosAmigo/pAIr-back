@@ -24,6 +24,8 @@ public interface ExamSessionRepository extends JpaRepository<ExamSession, Long> 
     @Query("select s.companyId from ExamSession s where s.id = :id")
     Optional<Long> findCompanyIdById(@Param("id") Long id);
 
+    boolean existsByCompanyIdAndCanceledAtIsNullAndEndsAtAfter(Long companyId, Instant now);
+
     /** 종료 시각이 지났는데 아직 자동 제출 처리가 안 된 회차 (취소한 회차는 닫을 것이 없다) */
     List<ExamSession> findByEndsAtLessThanEqualAndClosedAtIsNullAndCanceledAtIsNull(Instant now);
 }

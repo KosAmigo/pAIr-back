@@ -30,6 +30,8 @@ import com.pair.exam.web.ExamDtos.SessionRequest;
 import com.pair.exam.web.ExamDtos.SessionSummary;
 import com.pair.task.TaskCatalog;
 import com.pair.taskconsole.TaskConsoleService;
+import com.pair.web.auth.AuthAccountRepository;
+import com.pair.web.auth.UnauthorizedException;
 
 /** 기업 콘솔: 회차 생성·수정·취소와 대상자 등록. */
 @Service
@@ -51,11 +53,12 @@ public class ExamSessionService {
     private final ParticipantProgress progress;
     private final ExamProperties props;
     private final Clock clock;
+    private final AuthAccountRepository accounts;
 
     public ExamSessionService(ExamSessionRepository sessions, ExamParticipantRepository participants, TaskCatalog tasks,
             ApplicationEventPublisher events, SnapshotStorage storage, TaskConsoleService publications,
             com.pair.exam.repository.ProctorEventRepository proctorEvents, com.pair.attempt.AttemptRecordRepository attemptRecords,
-            ParticipantProgress progress, ExamProperties props, Clock clock) {
+            ParticipantProgress progress, ExamProperties props, Clock clock, AuthAccountRepository accounts) {
         this.sessions = sessions;
         this.participants = participants;
         this.tasks = tasks;
@@ -67,6 +70,7 @@ public class ExamSessionService {
         this.proctorEvents = proctorEvents;
         this.props = props;
         this.clock = clock;
+        this.accounts = accounts;
     }
 
     /** createdBy: 만든 회원 (같은 회사 MANAGER 또는 관리자) */
@@ -75,6 +79,11 @@ public class ExamSessionService {
         Instant now = clock.instant();
         if (req.companyId() == null) throw new IllegalArgumentException("회사를 알 수 없습니다.");
         validateSchedule(req, now);
+        // 탈퇴의 회차 존재 확인과 회차 생성을 같은 회사 회원 잠금으로 직렬화한다.
+        var companyAccounts = accounts.lockByCompanyId(req.companyId());
+        if (companyAccounts.stream().anyMatch(a -> a.getId().equals(createdBy) && !a.isActive())) {
+            throw new UnauthorizedException("로그인이 필요합니다.");
+        }
         List<Long> taskIds = liveTaskIds(req.taskIds()); // 없는 과제면 404, 공개한 실전 과제만
         ExamSession s;
         try {

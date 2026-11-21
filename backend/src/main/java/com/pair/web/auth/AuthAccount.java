@@ -47,6 +47,12 @@ public class AuthAccount {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    @Column(name = "token_version", nullable = false)
+    private long tokenVersion;
+
     protected AuthAccount() {}
 
     public AuthAccount(String email, String name, String passwordHash) {
@@ -65,4 +71,19 @@ public class AuthAccount {
     public CurrentUser.Role getRole() { return role; }
     public Long getCompanyId() { return companyId; }
     public boolean isActive() { return "ACTIVE".equals(memberStatus); }
+    public long getTokenVersion() { return tokenVersion; }
+
+    public void changePassword(String passwordHash) {
+        this.passwordHash = passwordHash;
+        tokenVersion++;
+    }
+
+    public void withdraw(String anonymousEmail, String invalidPasswordHash, Instant now) {
+        email = anonymousEmail;
+        name = "UNKOWN";
+        passwordHash = invalidPasswordHash;
+        memberStatus = "WITHDRAWN";
+        deletedAt = now;
+        tokenVersion++;
+    }
 }

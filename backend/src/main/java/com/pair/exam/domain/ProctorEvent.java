@@ -86,6 +86,10 @@ public class ProctorEvent {
     @Column(name = "received_at", nullable = false)
     private Instant receivedAt;
 
+    /** 브라우저가 만든 이벤트 고유값. 재전송해도 같은 이벤트로 알아보게 한다 (없을 수 있다) */
+    @Column(name = "client_id", length = 36)
+    private String clientId;
+
     @Enumerated(EnumType.STRING)
     @Column(length = 10)
     private Review review;
@@ -111,6 +115,10 @@ public class ProctorEvent {
         this.confidence = confidence;
         this.detail = detail;
         this.receivedAt = receivedAt;
+    }
+
+    public void assignClientId(String clientId) {
+        this.clientId = clientId;
     }
 
     public void attachSnapshot(String key, int bytes) {
@@ -143,6 +151,7 @@ public class ProctorEvent {
     public int getSnapshotBytes() { return snapshotBytes; }
     public Instant getSnapshotDeletedAt() { return snapshotDeletedAt; }
     public Instant getReceivedAt() { return receivedAt; }
+    public String getClientId() { return clientId; }
     public Review getReview() { return review; }
     public String getReviewNote() { return reviewNote; }
     public Long getReviewedBy() { return reviewedBy; }

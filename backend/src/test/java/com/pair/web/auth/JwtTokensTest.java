@@ -15,10 +15,10 @@ class JwtTokensTest {
     @Test
     void verifiesTokenTypeAndExpiry() {
         Instant now = Instant.now();
-        String access = tokens.access(42, now);
+        String access = tokens.access(42, 0, now);
         assertThat(tokens.verify(access, "access")).get().extracting(JwtTokens.VerifiedToken::userId).isEqualTo(42L);
         assertThat(tokens.verify(access, "refresh")).isEmpty();
-        assertThat(tokens.verify(tokens.access(42, now.minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1)), "access"))
+        assertThat(tokens.verify(tokens.access(42, 0, now.minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1)), "access"))
                 .isEmpty();
         assertThat(tokens.verify(access + "x", "access")).isEmpty();
     }
