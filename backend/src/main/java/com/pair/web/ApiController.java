@@ -21,6 +21,7 @@ import com.pair.attempt.AttemptRecord;
 import com.pair.attempt.AttemptRecordRepository;
 import com.pair.attempt.AttemptService;
 import com.pair.attempt.AttemptStore;
+import com.pair.attempt.ChatAttachmentService;
 import com.pair.attempt.ChatTurn;
 import com.pair.run.CodeRunner;
 import com.pair.task.TaskCatalog;
@@ -45,11 +46,13 @@ public class ApiController {
     private final com.pair.attempt.ReplayTreeService replayTree;
     private final com.pair.question.QuestionService questions;
     private final com.pair.attempt.ReplayCompareService replayCompare;
+    private final ChatAttachmentService chatAttachments;
 
     public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.config.PairProperties props,
             AttemptRecordRepository records, TaskCatalog catalog, com.pair.attempt.CheckpointService checkpoints,
             com.pair.attempt.RollbackService rollbacks, com.pair.attempt.ReplayTreeService replayTree,
-            com.pair.question.QuestionService questions, com.pair.attempt.ReplayCompareService replayCompare) {
+            com.pair.question.QuestionService questions, com.pair.attempt.ReplayCompareService replayCompare,
+            ChatAttachmentService chatAttachments) {
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
@@ -61,6 +64,7 @@ public class ApiController {
         this.replayTree = replayTree;
         this.questions = questions;
         this.replayCompare = replayCompare;
+        this.chatAttachments = chatAttachments;
     }
 
     public record CheckpointLabelRequest(String label) {}
@@ -69,11 +73,12 @@ public class ApiController {
 
     public record SaveRequest(String content) {}
 
-    public record ChatRequest(String message) {}
+    public record ChatRequest(String message, List<ChatAttachmentService.Ref> attachments) {}
 
     public record FollowUpRequest(List<String> answers) {}
 
-    public record TurnView(int turn, String role, String time, String text, List<AttemptService.EditView> edits) {}
+    public record TurnView(int turn, String role, String time, String text, List<AttemptService.EditView> edits,
+            List<ChatAttachmentService.View> attachments) {}
 
     public record EditRequest(int turn, int index, String action) {}
 
@@ -155,7 +160,8 @@ public class ApiController {
         m.put("task", tasks.get(a.taskId()));
         m.put("files", store.readFiles(id).keySet());
         var edits = attempts.edits(id);
-        m.put("turns", store.turns(id).stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()))).toList());
+        var attached = chatAttachments.views(Long.parseLong(id));
+        m.put("turns", store.turns(id).stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()), attached)).toList());
         m.put("chatMaxChars", props.assistant().maxInputChars());
         m.put("elapsedSeconds", Duration.between(a.startedAt(), a.submittedAt() != null ? a.submittedAt() : Instant.now()).toSeconds());
         return m;
@@ -188,9 +194,10 @@ public class ApiController {
     public List<TurnView> chat(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
         Attempt a = store.load(id);
-        List<ChatTurn> added = attempts.chat(id, req.message());
+        List<ChatTurn> added = attempts.chat(id, req.message(), req.attachments(), null);
         var edits = attempts.edits(id);
-        return added.stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()))).toList();
+        var attached = chatAttachments.views(Long.parseLong(id));
+        return added.stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()), attached)).toList();
     }
 
     private final java.util.concurrent.ExecutorService streams = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
@@ -206,7 +213,7 @@ public class ApiController {
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(6 * 60 * 1000L);
         streams.submit(() -> {
             try {
-                List<ChatTurn> added = attempts.chat(id, req.message(), delta -> {
+                List<ChatTurn> added = attempts.chat(id, req.message(), req.attachments(), delta -> {
                     try {
                         emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event().name("delta").data(Map.of("t", delta)));
                     } catch (java.io.IOException e) {
@@ -214,8 +221,9 @@ public class ApiController {
                     }
                 });
                 var edits = attempts.edits(id);
+                var attached = chatAttachments.views(Long.parseLong(id));
                 emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event().name("done")
-                        .data(added.stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()))).toList()));
+                        .data(added.stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()), attached)).toList()));
                 emitter.complete();
             } catch (Exception e) {
                 try {
@@ -318,8 +326,10 @@ public class ApiController {
         return org.springframework.http.ResponseEntity.ok().contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(body);
     }
 
-    private static TurnView view(Attempt a, ChatTurn t, List<AttemptService.EditView> edits) {
+    private static TurnView view(Attempt a, ChatTurn t, List<AttemptService.EditView> edits,
+            Map<Integer, List<ChatAttachmentService.View>> attached) {
         long s = Math.max(0, Duration.between(a.startedAt(), t.at()).toSeconds());
-        return new TurnView(t.turn(), t.role(), String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60), t.text(), edits);
+        return new TurnView(t.turn(), t.role(), String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60), t.text(), edits,
+                attached.getOrDefault(t.turn(), List.of()));
     }
 }
