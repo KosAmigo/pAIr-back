@@ -275,4 +275,43 @@ class ChatAttachmentTest {
                         .content("{\"message\":\"쪽 없음\",\"attachments\":[{\"source\":\"TASK_FILE\",\"path\":\"" + PDF + "\"}]}"))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void 첨부_원문은_그_응시의_것만_돌려준다() throws Exception {
+        String content = store.readFiles(devId).get(devFile);
+        attempts.chat(devId, "질문", List.of(file(devFile)), null);
+        long attachmentId = attachmentService.views(Long.parseLong(devId)).get(1).get(0).id();
+
+        mvc.perform(get("/api/attempts/{id}/attachments/{aid}", devId, attachmentId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.path").value(devFile))
+                .andExpect(jsonPath("$.chars").value(content.length()))
+                .andExpect(jsonPath("$.sentText").value(content));
+        // 같은 사용자의 다른 응시 주소로는 못 본다(있는지도 알려 주지 않는다)
+        mvc.perform(get("/api/attempts/{id}/attachments/{aid}", bizId, attachmentId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/attempts/{id}/attachments/{aid}", devId, 999999).header("Authorization", "Bearer " + token))
+                .andExpect(status().isNotFound());
+        // 남의 응시는 기존 소유자 검사에서 막힌다
+        String other = AuthTestSupport.signup(auth, mail, "남", UUID.randomUUID() + "@pair.test").token();
+        mvc.perform(get("/api/attempts/{id}/attachments/{aid}", devId, attachmentId).header("Authorization", "Bearer " + other))
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void 리포트의_대화_기록에는_읽을_때_첨부_정보가_얹힌다() throws Exception {
+        attempts.chat(devId, "질문", List.of(file(devFile)), null);
+        // 채점이 끝난 응시: 리포트의 transcript 는 채점 때 저장한 사본이라 첨부 정보가 없다
+        store.writeReport(devId, Map.of("transcript", List.of(
+                Map.of("turn", 1, "role", "user", "text", "질문"), Map.of("turn", 2, "role", "ai", "text", "답"))));
+        var t = java.time.Instant.now();
+        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+
+        mvc.perform(get("/api/attempts/{id}/report", devId).header("Authorization", "Bearer " + token)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.report.transcript[0].attachments[0].path").value(devFile))
+                .andExpect(jsonPath("$.report.transcript[0].attachments[0].id").isNumber())
+                .andExpect(jsonPath("$.report.transcript[1].attachments").doesNotExist());
+        // 저장된 리포트 자체는 바뀌지 않는다
+        assertThat(store.readReport(devId).get("transcript").get(0).has("attachments")).isFalse();
+    }
 }
