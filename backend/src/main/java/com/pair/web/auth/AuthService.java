@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.pair.exam.service.InviteTokens;
 import com.pair.credit.CreditService;
+import com.pair.exam.repository.ExamSessionRepository;
 
 /** 계정 생성·비밀번호 검증과 JWT 발급, 확인, 재발급 및 폐기를 처리한다. */
 @Service
@@ -25,14 +26,16 @@ public class AuthService {
     private final JwtTokens tokens;
     private final CreditService credits;
     private final EmailVerificationService emailVerification;
+    private final ExamSessionRepository examSessions;
 
     public AuthService(AuthAccountRepository accounts, RefreshSessionRepository sessions, JwtTokens tokens,
-            CreditService credits, EmailVerificationService emailVerification) {
+            CreditService credits, EmailVerificationService emailVerification, ExamSessionRepository examSessions) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.tokens = tokens;
         this.credits = credits;
         this.emailVerification = emailVerification;
+        this.examSessions = examSessions;
     }
 
     public void requestEmailVerification(String email) {
@@ -80,8 +83,8 @@ public class AuthService {
     @Transactional(readOnly = true)
     public Optional<AuthAccount> findAccount(String token) {
         return tokens.verify(token, "access")
-                .flatMap(jwt -> accounts.findById(jwt.userId()))
-                .filter(AuthAccount::isActive);
+                .flatMap(jwt -> accounts.findById(jwt.userId())
+                        .filter(a -> a.isActive() && a.getTokenVersion() == jwt.tokenVersion()));
     }
 
     /** Refresh Token을 원자적으로 교체한다. */
@@ -89,7 +92,7 @@ public class AuthService {
     public AuthDtos.AuthResponse refresh(String refreshToken) {
         JwtTokens.VerifiedToken jwt = tokens.verify(refreshToken, "refresh")
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
-        AuthAccount account = accounts.findById(jwt.userId()).filter(AuthAccount::isActive)
+        AuthAccount account = accounts.lockById(jwt.userId()).filter(AuthAccount::isActive)
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
         Instant now = Instant.now();
         String replacement = tokens.refresh(account.getId(), jwt.sessionId(), now);
@@ -109,6 +112,54 @@ public class AuthService {
         }
     }
 
+    @Transactional
+    public void changePassword(String accessToken, AuthDtos.PasswordChangeRequest request) {
+        JwtTokens.VerifiedToken jwt = requireAccess(accessToken);
+        AuthAccount account = lockCurrentAccount(jwt);
+        requirePassword(account, request.currentPassword());
+        requireBcryptLength(request.newPassword());
+        account.changePassword(PASSWORD_ENCODER.encode(request.newPassword()));
+        sessions.revokeAll(account.getId());
+    }
+
+    @Transactional
+    public void withdraw(String accessToken, AuthDtos.WithdrawalRequest request) {
+        JwtTokens.VerifiedToken jwt = requireAccess(accessToken);
+        accounts.findCompanyIdById(jwt.userId()).ifPresent(accounts::lockByCompanyId);
+        AuthAccount account = lockCurrentAccount(jwt);
+        requirePassword(account, request.currentPassword());
+        if (account.getRole() == CurrentUser.Role.ADMIN) {
+            throw new ForbiddenException("관리자 계정은 탈퇴할 수 없습니다.");
+        }
+        Instant now = Instant.now();
+        if (account.getCompanyId() != null
+                && examSessions.existsByCompanyIdAndCanceledAtIsNullAndEndsAtAfter(account.getCompanyId(), now)) {
+            throw new ConflictException("예정 또는 진행 중인 회사 회차가 있어 탈퇴할 수 없습니다.");
+        }
+        String anonymousEmail = "unkown" + InviteTokens.hash(InviteTokens.next());
+        emailVerification.removeForEmail(account.getEmail());
+        account.withdraw(anonymousEmail, PASSWORD_ENCODER.encode(InviteTokens.next()), now);
+        sessions.revokeAll(account.getId());
+    }
+
+    private JwtTokens.VerifiedToken requireAccess(String accessToken) {
+        return tokens.verify(accessToken, "access")
+                .orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
+    }
+
+    private AuthAccount lockCurrentAccount(JwtTokens.VerifiedToken jwt) {
+        return accounts.lockById(jwt.userId())
+                .filter(a -> a.isActive() && a.getTokenVersion() == jwt.tokenVersion())
+                .orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
+    }
+
+    private void requirePassword(AuthAccount account, String password) {
+        if (password.getBytes(StandardCharsets.UTF_8).length > 72
+                || !PASSWORD_ENCODER.matches(password, account.getPasswordHash())) {
+            throw new UnauthorizedException("현재 비밀번호가 올바르지 않습니다.");
+        }
+    }
+
     private AuthDtos.AuthResponse createSession(AuthAccount account) {
         Instant now = Instant.now();
         sessions.deleteExpired(now);
@@ -120,7 +171,7 @@ public class AuthService {
     }
 
     private AuthDtos.AuthResponse response(AuthAccount account, String refreshToken, Instant now) {
-        return new AuthDtos.AuthResponse(tokens.access(account.getId(), now), refreshToken,
+        return new AuthDtos.AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), now), refreshToken,
                 JwtTokens.ACCESS_LIFETIME.toSeconds(), AuthDtos.UserView.from(account));
     }
 

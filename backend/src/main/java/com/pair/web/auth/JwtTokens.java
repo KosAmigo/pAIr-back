@@ -55,19 +55,20 @@ public class JwtTokens {
         this.decoder = jwtDecoder;
     }
 
-    String access(long userId, Instant now) {
-        return encode(userId, "access", null, now, ACCESS_LIFETIME);
+    String access(long userId, long tokenVersion, Instant now) {
+        return encode(userId, "access", null, tokenVersion, now, ACCESS_LIFETIME);
     }
 
     String refresh(long userId, String sessionId, Instant now) {
-        return encode(userId, "refresh", sessionId, now, REFRESH_LIFETIME);
+        return encode(userId, "refresh", sessionId, null, now, REFRESH_LIFETIME);
     }
 
-    private String encode(long userId, String type, String sessionId, Instant now, Duration lifetime) {
+    private String encode(long userId, String type, String sessionId, Long tokenVersion, Instant now, Duration lifetime) {
         JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
                 .issuer(ISSUER).subject(Long.toString(userId)).issuedAt(now).expiresAt(now.plus(lifetime))
                 .id(UUID.randomUUID().toString()).claim("token_type", type);
         if (sessionId != null) claims.claim("sid", sessionId);
+        if (tokenVersion != null) claims.claim("ver", tokenVersion);
         return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims.build()))
                 .getTokenValue();
     }
@@ -81,14 +82,20 @@ public class JwtTokens {
             if (jwt.getSubject() == null) return Optional.empty();
             long userId = Long.parseLong(jwt.getSubject());
             String sessionId = jwt.getClaimAsString("sid");
+            Object versionClaim = jwt.getClaim("ver");
+            if (versionClaim != null && !(versionClaim instanceof Integer) && !(versionClaim instanceof Long)) {
+                return Optional.empty();
+            }
+            // 버전 도입 전 토큰은 초기 버전의 계정에서만 계속 사용할 수 있다.
+            long tokenVersion = versionClaim == null ? 0 : ((Number) versionClaim).longValue();
             if (userId <= 0 || ("refresh".equals(expectedType) && !InviteTokens.looksValid(sessionId))) {
                 return Optional.empty();
             }
-            return Optional.of(new VerifiedToken(userId, sessionId, jwt.getExpiresAt()));
+            return Optional.of(new VerifiedToken(userId, sessionId, jwt.getExpiresAt(), tokenVersion));
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
         }
     }
 
-    record VerifiedToken(long userId, String sessionId, Instant expiresAt) {}
+    record VerifiedToken(long userId, String sessionId, Instant expiresAt, long tokenVersion) {}
 }

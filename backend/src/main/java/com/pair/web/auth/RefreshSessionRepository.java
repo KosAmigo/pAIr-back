@@ -25,6 +25,10 @@ public interface RefreshSessionRepository extends JpaRepository<RefreshSession, 
             @Param("now") Instant now);
 
     @Modifying
+    @Query("delete from RefreshSession s where s.userId = :userId")
+    int revokeAll(@Param("userId") long userId);
+
+    @Modifying
     @Query("delete from RefreshSession s where s.expiresAt <= :now")
     int deleteExpired(@Param("now") Instant now);
 }
