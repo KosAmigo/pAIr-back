@@ -149,6 +149,90 @@ class JavaDiagnosticsTest {
         assertThat(diagnostics.complete(Map.of("src/app/A.java", src), "src/app/A.java", 99999)).isEmpty();
     }
 
+    // ── 이름 자동 완성 (점 없이) ──
+
+    private static final String SCOPE = "package app;\npublic class A {\n    String title;\n    int count(int key) { return 0; }\n"
+            + "    void run(int amount, String label) {\n        int total = 1;\n        %s\n    }\n}\n";
+
+    private List<JavaDiagnostics.Completion> names(String line, String typed, Map<String, String> extra) {
+        String src = SCOPE.formatted(line);
+        Map<String, String> files = new HashMap<>(extra);
+        files.put("src/app/A.java", src);
+        int offset = src.indexOf(line) + line.indexOf(typed) + typed.length();
+        return diagnostics.complete(files, "src/app/A.java", offset);
+    }
+
+    @Test
+    void completesLocalsParametersMembersAndProjectClassesWithoutADot() {
+        Map<String, String> files = Map.of("src/app/Basket.java", "package app;\npublic class Basket {}\n");
+        var all = names("t;", "t", files);
+        assertThat(all).extracting(JavaDiagnostics.Completion::name).contains("total", "title");
+
+        var locals = names("a;", "a", files);
+        assertThat(locals).filteredOn(c -> c.name().equals("amount")).singleElement()
+                .satisfies(c -> {
+                    assertThat(c.kind()).isEqualTo("variable");
+                    assertThat(c.signature()).isEqualTo(": int");
+                });
+
+        var methods = names("c;", "c", files);
+        assertThat(methods).filteredOn(c -> c.name().equals("count")).singleElement()
+                .satisfies(c -> {
+                    assertThat(c.kind()).isEqualTo("method");
+                    assertThat(c.hasParams()).isTrue();
+                });
+
+        var types = names("B;", "B", files);
+        assertThat(types).filteredOn(c -> c.name().equals("Basket")).singleElement()
+                .satisfies(c -> {
+                    assertThat(c.kind()).isEqualTo("class");
+                    assertThat(c.signature()).isEqualTo(": app.Basket");
+                });
+    }
+
+    @Test
+    void nameCompletionIsCaseInsensitiveAndListsVariablesFirst() {
+        var items = names("T;", "T", Map.of());
+        assertThat(items).extracting(JavaDiagnostics.Completion::name).contains("total", "title");
+        assertThat(items.get(0).kind()).isEqualTo("variable");
+        // 아직 선언되지 않은 이름이나 다른 메서드의 지역 변수는 나오지 않는다
+        assertThat(names("zz;", "zz", Map.of())).isEmpty();
+    }
+
+    @Test
+    void nameCompletionWorksInsideArgumentsAndAssignments() {
+        assertThat(names("int v = am;", "am", Map.of())).extracting(JavaDiagnostics.Completion::name).containsExactly("amount");
+        assertThat(names("count(am);", "am", Map.of())).extracting(JavaDiagnostics.Completion::name).containsExactly("amount");
+    }
+
+    @Test
+    void completesJavaLangAndImportedLibraryClassesButNotUnimportedOnes() {
+        String src = "package app;\nimport java.util.List;\nimport java.util.Map.*;\npublic class A {\n    void run() {\n        %s\n    }\n}\n";
+        java.util.function.BiFunction<String, String, List<String>> complete = (line, typed) -> {
+            String text = src.formatted(line);
+            int offset = text.indexOf(line) + line.indexOf(typed) + typed.length();
+            return diagnostics.complete(Map.of("src/app/A.java", text), "src/app/A.java", offset).stream()
+                    .filter(c -> c.kind().equals("class")).map(JavaDiagnostics.Completion::name).toList();
+        };
+        assertThat(complete.apply("Str;", "Str")).contains("String", "StringBuilder");
+        assertThat(complete.apply("Math;", "Math")).containsExactly("Math");
+        assertThat(complete.apply("Lis;", "Lis")).containsExactly("List");
+        // import 한 적 없는 클래스는 나오지 않는다 (자동 import 는 하지 않는다)
+        assertThat(complete.apply("ArrayL;", "ArrayL")).isEmpty();
+        // 패키지 전체 import (java.util.Map.* → Map 안의 Entry)
+        assertThat(complete.apply("Ent;", "Ent")).contains("Entry");
+        var detail = diagnostics.complete(Map.of("src/app/A.java", src.formatted("Str;")), "src/app/A.java",
+                src.formatted("Str;").indexOf("Str;") + 3).stream().filter(c -> c.name().equals("String")).findFirst().orElseThrow();
+        assertThat(detail.signature()).isEqualTo(": java.lang.String");
+    }
+
+    @Test
+    void completesStaticMembersOfAClassName() {
+        String src = "package app;\npublic class A {\n    void run() {\n        int v = Math.ab;\n    }\n}\n";
+        var items = diagnostics.complete(Map.of("src/app/A.java", src), "src/app/A.java", src.indexOf("Math.ab") + 7);
+        assertThat(items).extracting(JavaDiagnostics.Completion::name).contains("abs");
+    }
+
     // ── 정의로 이동 ──
 
     @Test
@@ -183,5 +267,16 @@ class JavaDiagnosticsTest {
         assertThat(diagnostics.definition(Map.of("src/app/A.java", src), "src/app/A.java", at(src, "names.si"))).isNull();
         assertThat(diagnostics.definition(Map.of("src/app/A.java", src), "src/app/A.java", 0)).isNull();
         assertThat(diagnostics.definition(Map.of("src/app/A.java", src), "src/x.java", 5)).isNull();
+    }
+
+    @Test
+    void definitionStillWorksWhileAnotherStatementIsHalfTyped() {
+        Map<String, String> files = new HashMap<>();
+        files.put("src/app/B.java", "package app;\npublic class B {}\n");
+        String src = "package app;\npublic class A {\n    private final B b;\n    A(B b) {\n        this.b = b;\n        inv\n    }\n}\n";
+        files.put("src/app/A.java", src);
+        var type = diagnostics.definition(files, "src/app/A.java", src.indexOf("A(B b)") + 3);
+        assertThat(type).isNotNull();
+        assertThat(type.file()).isEqualTo("src/app/B.java");
     }
 }

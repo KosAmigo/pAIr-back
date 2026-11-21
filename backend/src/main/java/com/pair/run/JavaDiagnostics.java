@@ -35,6 +35,7 @@ import org.springframework.stereotype.Component;
 import com.pair.run.CodeRunner.CompileDiagnostic;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.JavacTask;
@@ -153,7 +154,9 @@ public class JavaDiagnostics {
     }
 
     /**
-     * 커서 앞이 "식." 또는 "식.앞글자" 일 때 그 식의 타입 멤버(메서드·필드)를 낸다. 그 밖의 자리는 빈 목록이다.
+     * 자동 완성 후보. 커서 앞이 "식." 또는 "식.앞글자" 면 그 식의 타입 멤버(메서드·필드)를,
+     * 점이 없으면 그 자리에서 쓸 수 있는 이름(지역 변수·매개변수·멤버·작업 파일의 클래스)을 낸다.
+     * 앞글자(prefix)로 시작하는 것만 대소문자 구분 없이 낸다.
      *
      * @param offset path 파일 안의 글자 위치(0부터)
      */
@@ -162,16 +165,17 @@ public class JavaDiagnostics {
         if (text == null || offset < 0 || offset > text.length()) return List.of();
         int start = offset;
         while (start > 0 && Character.isJavaIdentifierPart(text.charAt(start - 1))) start--;
-        if (start == 0 || text.charAt(start - 1) != '.') return List.of();
         String prefix = text.substring(start, offset);
+        if (!prefix.isEmpty() && !Character.isJavaIdentifierStart(prefix.charAt(0))) return List.of();
+        boolean member = start > 0 && text.charAt(start - 1) == '.';
         String marker = prefix + "__pairCursor";
-        // "s." 처럼 끊긴 식은 문법 트리에서 빠지므로, 커서 자리를 메서드 호출 "s.표시()" 로 바꿔 올바른 식으로 만든다.
-        // 문장이 끝나는 자리(뒤가 } 나 줄바꿈)면 ; 도 붙인다.
+        // 끊긴 식("s." 또는 "inv")은 문법 트리에서 빠지므로, 커서 자리를 메서드 호출 "표시()" 로 바꿔 올바른 식으로 만든다.
+        // 점 뒤에서 문장이 끝나는 자리(뒤가 } 나 줄바꿈)면 ; 도 붙인다.
         String rest = text.substring(offset);
         String next = rest.stripLeading();
         int newline = rest.indexOf('\n');
         boolean statementEnd = next.isEmpty() || next.charAt(0) == '}' || (newline >= 0 && newline < rest.length() - next.length());
-        String fill = next.startsWith("(") ? "" : statementEnd ? "();" : "()";
+        String fill = next.startsWith("(") ? "" : member && statementEnd ? "();" : "()";
         Map<String, String> patched = new java.util.HashMap<>(sources);
         patched.put(path, text.substring(0, start) + marker + fill + rest);
         return analyzeWith(patched, a -> {
@@ -181,32 +185,127 @@ public class JavaDiagnostics {
             new TreePathScanner<Void, Void>() {
                 @Override
                 public Void visitMemberSelect(MemberSelectTree t, Void v) {
-                    if (t.getIdentifier().contentEquals(marker)) found[0] = getCurrentPath();
+                    if (member && t.getIdentifier().contentEquals(marker)) found[0] = getCurrentPath();
                     return super.visitMemberSelect(t, v);
+                }
+
+                @Override
+                public Void visitIdentifier(IdentifierTree t, Void v) {
+                    if (!member && t.getName().contentEquals(marker)) found[0] = getCurrentPath();
+                    return super.visitIdentifier(t, v);
                 }
             }.scan(unit, null);
             if (found[0] == null) return List.<Completion>of();
-            MemberSelectTree select = (MemberSelectTree) found[0].getLeaf();
-            TypeMirror type = a.trees().getTypeMirror(new TreePath(found[0], select.getExpression()));
-            if (!(type instanceof DeclaredType declared)) return List.<Completion>of();
-            var scope = a.trees().getScope(found[0]);
-            TypeElement owner = (TypeElement) declared.asElement();
             var seen = new LinkedHashSet<Completion>();
-            for (Element e : a.task().getElements().getAllMembers(owner)) {
-                if (e.getKind() != ElementKind.METHOD && e.getKind() != ElementKind.FIELD) continue;
-                if (!e.getSimpleName().toString().startsWith(prefix)) continue;
-                if (e.getEnclosingElement() instanceof TypeElement t && t.getQualifiedName().contentEquals("java.lang.Object")) continue;
-                if (!a.trees().isAccessible(scope, e, declared)) continue;
-                if (e instanceof ExecutableElement m) {
-                    String params = String.join(", ", m.getParameters().stream().map(p -> p.asType() + " " + p.getSimpleName()).toList());
-                    seen.add(new Completion(m.getSimpleName().toString(), "method", "(" + params + ") : " + m.getReturnType(), !m.getParameters().isEmpty()));
-                } else {
-                    seen.add(new Completion(e.getSimpleName().toString(), "field", ": " + e.asType(), false));
+            if (member) addMembers(a, found[0], prefix, seen);
+            else addVisibleNames(a, found[0], prefix, seen);
+            return seen.stream().sorted(Comparator.comparingInt((Completion c) -> rank(c.kind())).thenComparing(Completion::name)
+                    .thenComparing(Completion::signature)).limit(MAX_COMPLETIONS).toList();
+        });
+    }
+
+    private static int rank(String kind) {
+        return switch (kind) {
+            case "variable" -> 0;
+            case "class" -> 2;
+            default -> 1;
+        };
+    }
+
+    private static boolean startsWithIgnoreCase(String name, String prefix) {
+        return name.regionMatches(true, 0, prefix, 0, prefix.length());
+    }
+
+    private static boolean isObjectMember(Element e) {
+        return e.getEnclosingElement() instanceof TypeElement t && t.getQualifiedName().contentEquals("java.lang.Object");
+    }
+
+    private static Completion member(Element e) {
+        if (e instanceof ExecutableElement m) {
+            String params = String.join(", ", m.getParameters().stream().map(p -> p.asType() + " " + p.getSimpleName()).toList());
+            return new Completion(m.getSimpleName().toString(), "method", "(" + params + ") : " + m.getReturnType(), !m.getParameters().isEmpty());
+        }
+        return new Completion(e.getSimpleName().toString(), "field", ": " + e.asType(), false);
+    }
+
+    /** "식." 의 식이 가진 멤버 */
+    private static void addMembers(Analysis a, TreePath select, String prefix, java.util.Set<Completion> out) {
+        MemberSelectTree tree = (MemberSelectTree) select.getLeaf();
+        TypeMirror type = a.trees().getTypeMirror(new TreePath(select, tree.getExpression()));
+        if (!(type instanceof DeclaredType declared)) return;
+        var scope = a.trees().getScope(select);
+        TypeElement owner = (TypeElement) declared.asElement();
+        for (Element e : a.task().getElements().getAllMembers(owner)) {
+            if (e.getKind() != ElementKind.METHOD && e.getKind() != ElementKind.FIELD) continue;
+            if (!startsWithIgnoreCase(e.getSimpleName().toString(), prefix) || isObjectMember(e)) continue;
+            if (!a.trees().isAccessible(scope, e, declared)) continue;
+            out.add(member(e));
+        }
+    }
+
+    /** 점이 없는 자리에서 쓸 수 있는 이름: 지역 변수·매개변수, 둘러싼 클래스의 멤버(상속 포함), 작업 파일의 클래스 */
+    private static void addVisibleNames(Analysis a, TreePath at, String prefix, java.util.Set<Completion> out) {
+        var scope = a.trees().getScope(at);
+        for (var s = scope; s != null; s = s.getEnclosingScope()) {
+            for (Element e : s.getLocalElements()) {
+                ElementKind k = e.getKind();
+                boolean local = k == ElementKind.LOCAL_VARIABLE || k == ElementKind.PARAMETER || k == ElementKind.EXCEPTION_PARAMETER
+                        || k == ElementKind.RESOURCE_VARIABLE;
+                if (local && startsWithIgnoreCase(e.getSimpleName().toString(), prefix)) {
+                    out.add(new Completion(e.getSimpleName().toString(), "variable", ": " + e.asType(), false));
                 }
             }
-            return seen.stream().sorted(Comparator.comparing(Completion::name).thenComparing(Completion::signature))
-                    .limit(MAX_COMPLETIONS).toList();
-        });
+        }
+        for (TypeElement cls = scope.getEnclosingClass(); cls != null;
+             cls = cls.getEnclosingElement() instanceof TypeElement outer ? outer : null) {
+            for (Element e : a.task().getElements().getAllMembers(cls)) {
+                if (e.getKind() != ElementKind.METHOD && e.getKind() != ElementKind.FIELD) continue;
+                if (!startsWithIgnoreCase(e.getSimpleName().toString(), prefix) || isObjectMember(e)) continue;
+                if (!a.trees().isAccessible(scope, e, (DeclaredType) cls.asType())) continue;
+                out.add(member(e));
+            }
+        }
+        for (CompilationUnitTree unit : a.units()) {
+            for (Tree decl : unit.getTypeDecls()) {
+                Element e = a.trees().getElement(new TreePath(new TreePath(unit), decl));
+                if (e instanceof TypeElement t) addType(t, prefix, out);
+            }
+        }
+        // 라이브러리 클래스: 따로 import 하지 않아도 쓰는 java.lang 과, 이 파일이 import 한 클래스
+        var elements = a.task().getElements();
+        addPackageTypes(elements.getPackageElement("java.lang"), prefix, out);
+        for (ImportTree imp : at.getCompilationUnit().getImports()) {
+            if (imp.isStatic()) continue;
+            String name = imp.getQualifiedIdentifier().toString();
+            if (name.endsWith(".*")) {
+                String owner = name.substring(0, name.length() - 2);
+                // "java.util.*" 은 패키지, "java.util.Map.*" 은 클래스 안의 중첩 타입
+                if (elements.getPackageElement(owner) != null) addPackageTypes(elements.getPackageElement(owner), prefix, out);
+                else if (elements.getTypeElement(owner) instanceof TypeElement outer) addMemberTypes(outer, prefix, out);
+            } else if (elements.getTypeElement(name) instanceof TypeElement t) {
+                addType(t, prefix, out);
+            }
+        }
+    }
+
+    private static void addType(TypeElement t, String prefix, java.util.Set<Completion> out) {
+        if (startsWithIgnoreCase(t.getSimpleName().toString(), prefix)) {
+            out.add(new Completion(t.getSimpleName().toString(), "class", ": " + t.getQualifiedName(), false));
+        }
+    }
+
+    private static void addMemberTypes(TypeElement outer, String prefix, java.util.Set<Completion> out) {
+        for (Element e : outer.getEnclosedElements()) {
+            if (e instanceof TypeElement t && t.getModifiers().contains(javax.lang.model.element.Modifier.PUBLIC)) addType(t, prefix, out);
+        }
+    }
+
+    /** 패키지의 공개 타입(클래스·인터페이스·열거형·레코드)들 */
+    private static void addPackageTypes(javax.lang.model.element.PackageElement pkg, String prefix, java.util.Set<Completion> out) {
+        if (pkg == null) return;
+        for (Element e : pkg.getEnclosedElements()) {
+            if (e instanceof TypeElement t && t.getModifiers().contains(javax.lang.model.element.Modifier.PUBLIC)) addType(t, prefix, out);
+        }
     }
 
     /**
