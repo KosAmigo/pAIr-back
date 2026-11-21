@@ -187,13 +187,10 @@ public class ChatAttachmentService {
     /** 응시의 턴 번호별 첨부 정보 (화면용) */
     @Transactional(readOnly = true)
     public Map<Integer, List<View>> views(long attemptId) {
-        Map<Long, Integer> turnNos = new HashMap<>();
-        for (ChatTurnRecord r : turns.findByAttemptIdOrderByTurnNoAsc(attemptId)) turnNos.put(r.getId(), r.getTurnNo());
         Map<Integer, List<View>> out = new LinkedHashMap<>();
-        if (turnNos.isEmpty()) return out;
-        for (ChatAttachmentRecord a : attachments.findByTurnIdInOrderByIdAsc(turnNos.keySet())) {
-            out.computeIfAbsent(turnNos.get(a.getTurnId()), k -> new ArrayList<>())
-                    .add(new View(a.getId(), a.getSourceType(), a.getFileName(), a.getPages(), a.getSentText().length()));
+        for (var a : attachments.summariesByAttempt(attemptId)) {
+            out.computeIfAbsent(a.getTurnNo(), k -> new ArrayList<>())
+                    .add(new View(a.getId(), a.getSourceType(), a.getFileName(), a.getPages(), a.getChars() == null ? 0 : a.getChars()));
         }
         return out;
     }
