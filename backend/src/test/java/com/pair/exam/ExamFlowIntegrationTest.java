@@ -388,6 +388,24 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("시작 시각이 지나도 종료 전이면 처음 입장해 점검·동의 뒤 시작할 수 있다 (입장 마감 없음)")
+    void lateEntryAfterStartIsAllowed() {
+        SessionSummary s = createSession(143L, true);
+        String token = invite(s.id(), "latecomer@test.dev");
+
+        clock.set(s.startsAt().plus(Duration.ofMinutes(25))); // 시작 25분 뒤, 종료 전
+
+        EntryInfo entered = entry.enter(token);
+        assertThat(entered.phase()).isEqualTo(ExamSession.Phase.LIVE);
+        entry.consent(token, consent());
+        EntryInfo started = entry.start(token);
+        assertThat(started.attempts()).containsOnlyKeys(TASK);
+
+        clock.set(s.endsAt()); // 종료 시각이 되면 그때는 막힌다
+        assertThatThrownBy(() -> entry.enter(token)).hasMessageContaining("끝난 시험");
+    }
+
+    @Test
     @DisplayName("연결 유예: 90초 넘게 끊겼다 돌아오면 끊김 기록, 5분 안이면 재입장도 된다")
     void reconnectWithinGrace() {
         String token = startedParticipant(118L, "grace@test.dev");
