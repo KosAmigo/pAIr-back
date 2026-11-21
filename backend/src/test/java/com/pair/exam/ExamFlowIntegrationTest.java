@@ -730,6 +730,56 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("같은 clientId 로 다시 보내면 이벤트를 또 만들지 않고, 사진이 빠졌었다면 같은 이벤트에 연결한다")
+    void resendWithSameClientIdKeepsOneEvent() {
+        SessionSummary s = createSession(140L, true);
+        String token = startWithConsent(s, "resend@test.dev");
+        Long pid = participant(s.id(), "resend@test.dev").getId();
+        Instant at = s.startsAt().plusSeconds(30);
+
+        var noPhoto = new ProctorEventRequest(ProctorEvent.Type.NO_FACE, ProctorEvent.Source.PC_CAM, at, 2100, null, null, null, "evt-0001-aaaa");
+        var withPhoto = new ProctorEventRequest(ProctorEvent.Type.NO_FACE, ProctorEvent.Source.PC_CAM, at, 2100, null, null,
+                Base64.getEncoder().encodeToString(JPEG), "evt-0001-aaaa");
+
+        var first = proctor.record(token, noPhoto);
+        assertThat(first.snapshot()).isNull();
+        var second = proctor.record(token, withPhoto);
+        var third = proctor.record(token, withPhoto); // 사진이 이미 붙었으면 그대로
+
+        assertThat(second.id()).isEqualTo(first.id());
+        assertThat(third.id()).isEqualTo(first.id());
+        assertThat(second.snapshot()).isEqualTo("ok");
+        assertThat(proctor.snapshot(s.id(), first.id())).isEqualTo(JPEG);
+        assertThat(proctor.eventsOf(s.id(), pid)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("PC 시계가 몇 분 어긋난 이벤트는 버리지 않고 시험 시간 안쪽으로 맞춰 저장한다")
+    void skewedEventTimeIsClamped() {
+        SessionSummary s = createSession(141L, true);
+        String token = startWithConsent(s, "skew@test.dev");
+
+        var early = proctor.record(token, camEvent(s.startsAt().minus(Duration.ofMinutes(3)), null));
+        var future = proctor.record(token, camEvent(clock.instant().plus(Duration.ofMinutes(3)), null));
+
+        assertThat(early.startedAt()).isEqualTo(s.startsAt());
+        assertThat(future.startedAt()).isEqualTo(clock.instant());
+    }
+
+    @Test
+    @DisplayName("종료 뒤 30분 안에 늦게 도착한 이벤트는 받고, 그 뒤에는 거절한다")
+    void lateEventWithinGraceIsAccepted() {
+        SessionSummary s = createSession(142L, true);
+        String token = startWithConsent(s, "late@test.dev");
+        Instant at = s.endsAt().minusSeconds(10);
+
+        clock.set(s.endsAt().plus(Duration.ofMinutes(20)));
+        assertThat(proctor.record(token, camEvent(at, null)).id()).isNotNull();
+        clock.set(s.endsAt().plus(Duration.ofMinutes(31)));
+        assertThatThrownBy(() -> proctor.record(token, camEvent(at, null))).hasMessageContaining("끝난 시험");
+    }
+
+    @Test
     @DisplayName("담당자 판정: OK/SUSPECT 를 남기고 메모·판정자·시각을 기록, 지우면 미확인으로 돌아간다")
     void reviewEvent() {
         SessionSummary s = createSession(120L, true);

@@ -15,6 +15,20 @@ public interface ProctorEventRepository extends JpaRepository<ProctorEvent, Long
 
     List<ProctorEvent> findByParticipantIdOrderByStartedAtAsc(Long participantId);
 
+    /** 재전송으로 온 같은 이벤트 찾기 (브라우저가 만든 고유값) */
+    java.util.Optional<ProctorEvent> findByParticipantIdAndClientId(Long participantId, String clientId);
+
+    /** 대상자에게 이미 붙은 사진 수 (사진 상한 확인용) */
+    long countByParticipantIdAndSnapshotKeyIsNotNull(Long participantId);
+
+    /**
+     * 사진 연결만 바꾸는 UPDATE. 업로드가 끝나는 사이 담당자가 판정을 저장해도 다른 컬럼을 덮어쓰지 않는다.
+     * 이미 사진이 붙은 이벤트는 건드리지 않는다 (두 번 불러도 안전).
+     */
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update ProctorEvent e set e.snapshotKey = :key, e.snapshotBytes = :bytes where e.id = :id and e.snapshotKey is null")
+    int attachSnapshot(@Param("id") Long id, @Param("key") String key, @Param("bytes") int bytes);
+
     /** 회차 전체 이벤트 (콘솔 실시간·감독 화면, 대상자마다 따로 부르지 않게 한 번에) */
     @Query("""
             select e from ProctorEvent e, ExamParticipant p
