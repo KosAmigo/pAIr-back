@@ -238,6 +238,12 @@ public class ApiController {
         return emitter;
     }
 
+    /** 질문에 붙였던 첨부의 원문(그때 AI 에게 실제로 보낸 글자). 응시 주인만(복기 화면에서 펼쳐 본다) */
+    @GetMapping("/attempts/{id}/attachments/{attachmentId}")
+    public ChatAttachmentService.Detail attachment(@PathVariable String id, @PathVariable long attachmentId) {
+        return chatAttachments.detail(Long.parseLong(id), attachmentId);
+    }
+
     /** AI 수정 제안 적용(apply) 또는 거절(reject). */
     @PostMapping("/attempts/{id}/edits")
     public AttemptService.EditDecision decideEdit(@PathVariable String id, @RequestBody EditRequest req) {
@@ -304,11 +310,28 @@ public class ApiController {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("status", a.status());
         m.put("error", a.error());
-        JsonNode report = a.status() == Attempt.Status.DONE ? store.readReport(id) : null;
+        JsonNode report = a.status() == Attempt.Status.DONE ? withAttachments(store.readReport(id), Long.parseLong(id)) : null;
         m.put("report", report);
         // 문항(객관식·단답형) 점수는 6개 역량 점수와 따로 보여 준다. 문항이 없으면 null. 정답은 제출 뒤 리포트에서만 나간다.
         m.put("questions", a.status() == Attempt.Status.DONE ? questions.report(Long.parseLong(id)) : null);
         return m;
+    }
+
+    /**
+     * 리포트의 대화 기록(transcript)은 채점 때 저장한 사본이라 첨부 정보가 없다. 복기 화면이 붙였던 파일을 보여 줄 수 있게
+     * 질문 턴마다 첨부 목록(attachments)을 읽을 때 얹는다. 저장된 리포트는 바꾸지 않는다.
+     */
+    private JsonNode withAttachments(JsonNode report, long attemptId) {
+        if (report == null || !report.path("transcript").isArray()) return report;
+        var attached = chatAttachments.views(attemptId);
+        if (attached.isEmpty()) return report;
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        JsonNode copy = report.deepCopy();
+        for (JsonNode t : copy.get("transcript")) {
+            var list = attached.get(t.path("turn").asInt(-1));
+            if (list != null && t instanceof com.fasterxml.jackson.databind.node.ObjectNode o) o.set("attachments", mapper.valueToTree(list));
+        }
+        return copy;
     }
 
     /** 풀이 화면의 문항(객관식·단답형)과 저장한 답. 정답 정보는 내보내지 않는다 */

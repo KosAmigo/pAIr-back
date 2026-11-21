@@ -42,6 +42,9 @@ public class ChatAttachmentService {
     /** 화면에 주는 첨부 정보(글자 본문은 빼고 글자 수만) */
     public record View(Long id, String source, String path, String pages, int chars) {}
 
+    /** 첨부 원문: 그때 AI 에게 실제로 보낸 글자 (복기 화면에서 펼쳐 본다) */
+    public record Detail(Long id, String source, String path, String pages, int chars, String sentText) {}
+
     /** AI 에게 보낼 대화와, 첨부가 하나라도 들어 있는지 */
     public record Built(List<Message> messages, boolean hasAttachments) {}
 
@@ -161,6 +164,16 @@ public class ChatAttachmentService {
         }
         msgs.add(new Message("user", withBlocks(blocksByTurn.get(currentTurn), question)));
         return new Built(msgs, !items.isEmpty());
+    }
+
+    /** 이 응시의 질문 턴에 붙은 첨부 하나의 원문. 다른 응시의 첨부는 있는지도 알려 주지 않는다 */
+    @Transactional(readOnly = true)
+    public Detail detail(long attemptId, long attachmentId) {
+        ChatAttachmentRecord a = attachments.findById(attachmentId)
+                .orElseThrow(() -> new NoSuchElementException("없는 첨부입니다."));
+        ChatTurnRecord turn = turns.findById(a.getTurnId()).filter(t -> t.getAttemptId() == attemptId)
+                .orElseThrow(() -> new NoSuchElementException("없는 첨부입니다."));
+        return new Detail(a.getId(), a.getSourceType(), a.getFileName(), a.getPages(), a.getSentText().length(), a.getSentText());
     }
 
     /** 질문 턴(userTurnId)에 붙인 첨부를 저장한다 (질문·답 저장과 같은 트랜잭션) */
