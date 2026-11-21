@@ -69,6 +69,8 @@ class CheckpointRollbackPostgresTest {
     @Autowired AuthService auth;
     @Autowired CreditService credits;
     @Autowired CreditLedgerRepository ledger;
+    @Autowired ChatAttachmentService attachmentService;
+    @Autowired com.pair.attempt.db.ChatTurnRecordRepository chatRecords;
     @MockitoBean JavaMailSender mail;
 
     @Test
@@ -84,6 +86,9 @@ class CheckpointRollbackPostgresTest {
         String id = String.valueOf(r.getId());
         store.create(attempt(id), files);
         checkpoints.appendQuestion(id, turn(1, "user"), files);
+        // 질문 1 에 작업 파일 첨부 (chat_attachments 제약·엔티티 일치)
+        Long q1 = chatRecords.findByAttemptIdAndTurnNo(r.getId(), 1).orElseThrow().getId();
+        attachmentService.save(q1, List.of(new ChatAttachmentService.Resolved("ATTEMPT_FILE", path, null, "text/plain", null, files.get(path))));
         store.appendTurn(id, turn(2, "ai"));
         Map<String, String> after = new TreeMap<>(files);
         after.put(path, edited);
@@ -107,6 +112,8 @@ class CheckpointRollbackPostgresTest {
         assertThat(store.readFiles(forkId).get(path)).isEqualTo(edited);
         assertThat(store.turns(forkId)).extracting(ChatTurn::turn).containsExactly(1, 2);
         assertThat(store.turns(id)).hasSize(4);
+        // 롤백으로 복사된 앞 턴(1, 2)의 첨부도 새 응시로 복사된다
+        assertThat(attachmentService.views(Long.parseLong(forkId)).get(1)).extracting(ChatAttachmentService.View::path).containsExactly(path);
 
         // 갈라진 응시에서 새 질문 3 → 한 번 더 롤백, 트리
         checkpoints.appendQuestion(forkId, turn(3, "user"), checkpoints.restore(forkId, Integer.MAX_VALUE));

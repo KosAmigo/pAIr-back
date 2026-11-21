@@ -68,6 +68,35 @@ public class TaskMaterialService {
         return pageTexts(contentTaskId(attemptTask(attemptId)), path, pagesParam);
     }
 
+    /** 채팅에 붙일 PDF 쪽 글. pages 는 쪽 번호를 "1-3,5" 처럼 꼭 지정해야 한다(문서 전체를 몰래 보내지 않기 위해) */
+    public record AttachText(long taskFileId, String fileName, String pages, String text) {}
+
+    @Transactional(readOnly = true)
+    public AttachText attachForAttempt(long attemptId, String path, String pagesParam) {
+        if (pagesParam == null || pagesParam.isBlank()) throw new IllegalArgumentException("PDF 는 첨부할 쪽을 지정해 주세요. 예: 1-2");
+        long taskId = contentTaskId(attemptTask(attemptId));
+        TaskFileRecord f = require(taskId, path);
+        List<PageText> texts = pageTexts(taskId, path, pagesParam);
+        StringBuilder text = new StringBuilder();
+        for (PageText p : texts) text.append("--- ").append(p.page()).append("쪽 ---\n").append(p.text()).append('\n');
+        String name = f.getPath().substring(f.getPath().lastIndexOf('/') + 1);
+        return new AttachText(f.getId(), name, compactPages(texts.stream().map(PageText::page).toList()), text.toString().strip());
+    }
+
+    /** [1,2,3,5] → "1-3,5" */
+    static String compactPages(List<Integer> sorted) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < sorted.size(); ) {
+            int j = i;
+            while (j + 1 < sorted.size() && sorted.get(j + 1) == sorted.get(j) + 1) j++;
+            if (sb.length() > 0) sb.append(',');
+            sb.append(sorted.get(i));
+            if (j > i) sb.append('-').append(sorted.get(j));
+            i = j + 1;
+        }
+        return sb.toString();
+    }
+
     /** 관리자 검수용: 과제 code (공개 전 과제도 된다) */
     @Transactional(readOnly = true)
     public List<Material> listForTask(String code) {

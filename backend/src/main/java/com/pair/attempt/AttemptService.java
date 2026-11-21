@@ -19,6 +19,8 @@ import com.pair.attempt.ChatTurn.AssistantRequest;
 import com.pair.attempt.ChatTurn.Message;
 import com.pair.config.PairProperties;
 import com.pair.credit.CreditService;
+import com.pair.attempt.ChatAttachmentService.Ref;
+import com.pair.attempt.ChatAttachmentService.Resolved;
 import com.pair.attempt.db.ChatTurnRecordRepository;
 import com.pair.run.CodeRunner;
 import com.pair.scoring.ScoringService;
@@ -44,11 +46,13 @@ public class AttemptService {
     private final CreditService credits;
     private final ChatTurnRecordRepository chatRecords;
     private final TransactionTemplate transactions;
+    private final ChatAttachmentService attachments;
 
     public AttemptService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
                           TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints, CreditService credits,
-                          ChatTurnRecordRepository chatRecords, TransactionTemplate transactions) {
+                          ChatTurnRecordRepository chatRecords, TransactionTemplate transactions,
+                          ChatAttachmentService attachments) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -61,6 +65,7 @@ public class AttemptService {
         this.credits = credits;
         this.chatRecords = chatRecords;
         this.transactions = transactions;
+        this.attachments = attachments;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -148,8 +153,13 @@ public class AttemptService {
 
     /** onDelta 가 있으면 답변을 스트리밍으로 받으며 글자가 오는 대로 넘긴다. 다 받은 뒤에 대화 기록에 저장한다. */
     public List<ChatTurn> chat(String id, String message, java.util.function.Consumer<String> onDelta) {
+        return chat(id, message, List.of(), onDelta);
+    }
+
+    /** refs: 질문에 붙인 첨부(파일 트리에서 끌어온 작업 파일·과제 PDF 쪽). 없으면 빈 목록 */
+    public List<ChatTurn> chat(String id, String message, List<Ref> refs, java.util.function.Consumer<String> onDelta) {
         synchronized (lock(id)) {
-            return chatLocked(id, message, onDelta);
+            return chatLocked(id, message, refs, onDelta);
         }
     }
 
@@ -157,24 +167,26 @@ public class AttemptService {
      * 질문 하나의 처리는 세 단계다. AI 호출(수 초~수 분)은 트랜잭션 밖에 두어 DB 연결과 회원 행 잠금을 잡지 않는다.
      * 1) 잔액 확인(읽기만)  2) AI 호출  3) 질문·답 저장 + 체크포인트 + 채팅 차감을 짧은 트랜잭션 하나로
      */
-    private List<ChatTurn> chatLocked(String id, String message, java.util.function.Consumer<String> onDelta) {
+    private List<ChatTurn> chatLocked(String id, String message, List<Ref> refs, java.util.function.Consumer<String> onDelta) {
         Attempt a = requireStatus(id, Attempt.Status.SOLVING);
         int limit = props.assistant().maxInputChars();
         if (limit > 0 && message.length() > limit) {
             throw new IllegalArgumentException("질문은 " + limit + "자 이하로 입력하세요. (현재 " + message.length() + "자)");
         }
         AttemptRecord record = registry.find(id).orElseThrow(() -> new java.util.NoSuchElementException("없는 응시입니다: " + id));
-        if (record.getUserId() != null) credits.checkChat(record.getUserId());
+        // 첨부는 AI 를 부르기 전에 검증하고 글자를 읽는다. 틀리면 AI 도 크레딧도 건드리지 않는다
+        Map<String, String> filesAtAsk = store.readFiles(id);
+        List<Resolved> resolved = attachments.resolve(record.getId(), filesAtAsk, refs);
+        if (record.getUserId() != null) credits.checkChat(record.getUserId(), resolved.size());
         List<ChatTurn> history = store.turns(id);
         if (history.size() / 2 >= props.assistant().maxTurns()) {
             throw new IllegalStateException("응시당 AI 질문 한도(" + props.assistant().maxTurns() + "회)에 도달했습니다.");
         }
-        List<Message> msgs = new ArrayList<>();
-        for (ChatTurn t : history) msgs.add(new Message("user".equals(t.role()) ? "user" : "assistant", t.text()));
-        msgs.add(new Message("user", message));
-        // 질문을 보낸 순간의 파일 상태: 체크포인트에 저장한다
-        Map<String, String> filesAtAsk = store.readFiles(id);
-        String system = props.assistant().systemPrompt() + editGuide(new TreeSet<>(filesAtAsk.keySet()));
+        ChatAttachmentService.Built built = attachments.build(record.getId(), history, message, resolved);
+        List<Message> msgs = built.messages();
+        // 질문을 보낸 순간의 파일 상태(위에서 읽은 filesAtAsk)는 체크포인트에 저장한다
+        String system = props.assistant().systemPrompt() + editGuide(new TreeSet<>(filesAtAsk.keySet()))
+                + (built.hasAttachments() ? ChatAttachmentService.systemNote() : "");
         AssistantRequest req = new AssistantRequest(a.model(), props.assistant().maxOutputTokens(),
                 props.assistant().reasoningEffort(), system, List.copyOf(msgs));
         Instant askedAt = Instant.now();
@@ -194,10 +206,13 @@ public class AttemptService {
         transactions.executeWithoutResult(status -> {
             checkpoints.appendQuestion(id, user, filesAtAsk);
             store.appendTurn(id, ai);
+            Long userTurnId = chatRecords.findByAttemptIdAndTurnNo(record.getId(), user.turn())
+                    .orElseThrow(() -> new IllegalStateException("질문 대화 기록을 찾을 수 없습니다.")).getId();
+            attachments.save(userTurnId, resolved);
             if (record.getUserId() != null) {
                 Long turnId = chatRecords.findByAttemptIdAndTurnNo(record.getId(), ai.turn())
                         .orElseThrow(() -> new IllegalStateException("AI 대화 기록을 찾을 수 없습니다.")).getId();
-                credits.chargeChat(record.getUserId(), turnId);
+                credits.chargeChat(record.getUserId(), turnId, resolved.size());
             }
             store.appendEvent(id, "chat", Map.of("turn", ai.turn(), "inputTokens", reply.inputTokens(), "outputTokens", reply.outputTokens()));
         });

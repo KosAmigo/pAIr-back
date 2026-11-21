@@ -28,15 +28,18 @@ public class RollbackService {
     private final AttemptRegistry registry;
     private final AttemptStore store;
     private final CreditService credits;
+    private final ChatAttachmentService attachments;
 
     public RollbackService(CheckpointRecordRepository checkpoints, CheckpointService checkpointService,
-                           AttemptRecordRepository records, AttemptRegistry registry, AttemptStore store, CreditService credits) {
+                           AttemptRecordRepository records, AttemptRegistry registry, AttemptStore store, CreditService credits,
+                           ChatAttachmentService attachments) {
         this.checkpoints = checkpoints;
         this.checkpointService = checkpointService;
         this.records = records;
         this.registry = registry;
         this.store = store;
         this.credits = credits;
+        this.attachments = attachments;
     }
 
     @Transactional
@@ -62,6 +65,8 @@ public class RollbackService {
         for (ChatTurn t : store.turns(sourceId)) {
             if (t.turn() < cp.getTurnNo()) store.appendTurn(forkId, t);
         }
+        // 복사한 질문 턴의 첨부도 함께 복사한다 (크레딧은 다시 차감하지 않는다)
+        attachments.copyForFork(source.getId(), fork.getId(), cp.getTurnNo());
         store.appendEvent(forkId, "start", Map.of("taskId", original.taskId(), "forkedFromCheckpointId", cp.getId()));
         credits.chargeRollback(userId, fork.getId());
         return new Result(forkId);
