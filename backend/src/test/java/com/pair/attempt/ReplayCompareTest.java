@@ -165,12 +165,39 @@ class ReplayCompareTest {
 
         var diffs = compare.files(owner.user().id(), a, b);
 
-        // 같은 파일은 빠지고, 고친 파일과 B 에만 있는 파일만 경로 순으로 나온다
+        // 원본과 두 풀이가 모두 같은 파일은 빠지고, 고친 파일과 B 에만 있는 파일만 경로 순으로 나온다
         assertThat(diffs).extracting(ReplayCompareService.FileDiff::path).containsExactly(javaPath, "src/shop/OnlyInB.java");
+        assertThat(diffs.get(0).base()).isEqualTo(files.get(javaPath));
         assertThat(diffs.get(0).a()).isEqualTo(files.get(javaPath));
         assertThat(diffs.get(0).b()).isEqualTo(files.get(javaPath) + "\n// B 에서 고침");
+        // 풀이에서 새로 만든 파일은 원본(base)도 A 도 없다
+        assertThat(diffs.get(1).base()).isNull();
         assertThat(diffs.get(1).a()).isNull();
         assertThat(diffs.get(1).b()).isEqualTo("class OnlyInB {}");
+    }
+
+    @Test
+    void 두_풀이가_같은_코드를_똑같이_고쳐도_원본과_함께_돌려준다() {
+        Map<String, String> files = store.readFiles(a);
+        String javaPath = files.keySet().stream().filter(k -> k.endsWith(".java")).sorted().findFirst().orElseThrow();
+        String edited = files.get(javaPath) + "\n// 둘 다 같게 고침";
+        store.writeWorkspaceFile(a, javaPath, edited);
+        store.writeWorkspaceFile(b, javaPath, edited);
+
+        var diffs = compare.files(owner.user().id(), a, b);
+
+        // A 와 B 가 같아도 원본과 다르면 나온다: 각 풀이가 원본에서 무엇을 바꿨는지 보여 주기 위해서
+        assertThat(diffs).hasSize(1);
+        assertThat(diffs.get(0).path()).isEqualTo(javaPath);
+        assertThat(diffs.get(0).base()).isEqualTo(files.get(javaPath));
+        assertThat(diffs.get(0).a()).isEqualTo(edited);
+        assertThat(diffs.get(0).b()).isEqualTo(edited);
+    }
+
+    @Test
+    void 다른_과제의_풀이끼리는_비교할_수_없다() {
+        String biz = attempts.startSelf(TestTasks.SELF_BIZ, owner.user().id()).id();
+        assertThatThrownBy(() -> compare.files(owner.user().id(), a, biz)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -188,6 +215,7 @@ class ReplayCompareTest {
         mvc.perform(get("/api/attempts/{id}/compare/files", a).param("with", b).header("Authorization", token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].path").value(path))
+                .andExpect(jsonPath("$[0].base").exists())
                 .andExpect(jsonPath("$[0].b").value("// 고침"));
 
         mvc.perform(get("/api/attempts/{id}/compare/files", a).param("with", b)).andExpect(status().isUnauthorized());
