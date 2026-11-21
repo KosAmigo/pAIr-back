@@ -24,6 +24,7 @@ import com.pair.attempt.AttemptStore;
 import com.pair.attempt.ChatAttachmentService;
 import com.pair.attempt.ChatTurn;
 import com.pair.run.CodeRunner;
+import com.pair.run.JavaDiagnostics;
 import com.pair.task.TaskCatalog;
 import com.pair.task.TaskDef;
 import com.pair.web.auth.CurrentUser;
@@ -183,6 +184,31 @@ public class ApiController {
     @PostMapping("/attempts/{id}/build")
     public CodeRunner.BuildResult build(@PathVariable String id) {
         return attempts.build(id);
+    }
+
+    /** 입력 중인 코드의 오류 밑줄. files 는 화면의 저장 전 내용(경로 → 내용), 서버에 저장된 나머지 파일과 합쳐 분석한다. */
+    @PostMapping("/attempts/{id}/diagnostics")
+    public Map<String, List<CodeRunner.CompileDiagnostic>> diagnostics(@PathVariable String id, @RequestBody DiagnosticsRequest req) {
+        return Map.of("diagnostics", attempts.diagnostics(id, req.files()));
+    }
+
+    public record DiagnosticsRequest(Map<String, String> files) {}
+
+    /** 커서 앞 "식." 의 멤버 자동 완성. offset 은 path 파일 안의 글자 위치(0부터). */
+    public record CursorRequest(Map<String, String> files, String path, int offset) {}
+
+    @PostMapping("/attempts/{id}/complete")
+    public Map<String, List<JavaDiagnostics.Completion>> complete(@PathVariable String id, @RequestBody CursorRequest req) {
+        return Map.of("items", attempts.complete(id, req.files(), req.path(), req.offset()));
+    }
+
+    /** 커서 위치 이름의 정의. 작업 파일 안에 없으면 definition 은 null. */
+    @PostMapping("/attempts/{id}/definition")
+    public java.util.Map<String, JavaDiagnostics.Definition> definition(@PathVariable String id, @RequestBody CursorRequest req) {
+        var d = attempts.definition(id, req.files(), req.path(), req.offset());
+        var out = new java.util.HashMap<String, JavaDiagnostics.Definition>();
+        out.put("definition", d);
+        return out;
     }
 
     @PostMapping("/attempts/{id}/run")

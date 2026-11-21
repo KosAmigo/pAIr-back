@@ -23,6 +23,7 @@ import com.pair.attempt.ChatAttachmentService.Ref;
 import com.pair.attempt.ChatAttachmentService.Resolved;
 import com.pair.attempt.db.ChatTurnRecordRepository;
 import com.pair.run.CodeRunner;
+import com.pair.run.JavaDiagnostics;
 import com.pair.scoring.ScoringService;
 import com.pair.task.TaskCatalog;
 import com.pair.task.TaskDef;
@@ -47,12 +48,13 @@ public class AttemptService {
     private final ChatTurnRecordRepository chatRecords;
     private final TransactionTemplate transactions;
     private final ChatAttachmentService attachments;
+    private final JavaDiagnostics diagnostics;
 
     public AttemptService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
                           TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints, CreditService credits,
                           ChatTurnRecordRepository chatRecords, TransactionTemplate transactions,
-                          ChatAttachmentService attachments) {
+                          ChatAttachmentService attachments, JavaDiagnostics diagnostics) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -66,6 +68,7 @@ public class AttemptService {
         this.chatRecords = chatRecords;
         this.transactions = transactions;
         this.attachments = attachments;
+        this.diagnostics = diagnostics;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -133,11 +136,49 @@ public class AttemptService {
         requireStatus(id, Attempt.Status.SOLVING);
         Map<String, String> sources = new HashMap<>();
         store.readFiles(id).forEach((k, v) -> {
-            if ((k.startsWith("src/") || k.startsWith("test/")) && k.endsWith(".java")) sources.put(k, v);
+            if (isJavaSource(k)) sources.put(k, v);
         });
         CodeRunner.BuildResult r = runner.build(sources);
         store.appendEvent(id, "build", Map.of("compiled", r.compiled(), "diagnostics", r.diagnostics().size(), "millis", r.millis()));
         return r;
+    }
+
+    /**
+     * 입력 중인 코드의 오류 밑줄. 저장된 파일 위에 화면에서 아직 저장하지 않은 내용(overrides)을 덮어 분석한다.
+     * 파일을 저장하거나 기록을 남기지 않는다.
+     */
+    public List<CodeRunner.CompileDiagnostic> diagnostics(String id, Map<String, String> overrides) {
+        return diagnostics.check(editorSources(id, overrides));
+    }
+
+    /** 커서 앞 "식." 의 멤버 자동 완성. offset 은 path 파일 안의 글자 위치. */
+    public List<JavaDiagnostics.Completion> complete(String id, Map<String, String> overrides, String path, int offset) {
+        return diagnostics.complete(editorSources(id, overrides), path, offset);
+    }
+
+    /** 커서 위치 이름의 정의. 작업 파일 안에 없으면 null. */
+    public JavaDiagnostics.Definition definition(String id, Map<String, String> overrides, String path, int offset) {
+        return diagnostics.definition(editorSources(id, overrides), path, offset);
+    }
+
+    /** 편집기 도우미(오류·완성·정의)가 분석할 파일: 저장된 .java 위에 화면의 저장 전 내용을 덮는다. */
+    private Map<String, String> editorSources(String id, Map<String, String> overrides) {
+        requireStatus(id, Attempt.Status.SOLVING);
+        Map<String, String> sources = new HashMap<>();
+        store.readFiles(id).forEach((k, v) -> {
+            if (isJavaSource(k)) sources.put(k, v);
+        });
+        if (overrides != null) {
+            overrides.forEach((k, v) -> {
+                // 새 파일은 받지 않는다: 이미 있는 작업 파일의 수정본만 덮어쓴다
+                if (v != null && sources.containsKey(k)) sources.put(k, v);
+            });
+        }
+        return sources;
+    }
+
+    private static boolean isJavaSource(String path) {
+        return (path.startsWith("src/") || path.startsWith("test/")) && path.endsWith(".java");
     }
 
     /** 응시마다 잠금. 같은 응시의 채팅과 수정 제안 결정은 한 번에 하나씩, 다른 응시끼리는 동시에 처리한다. */
