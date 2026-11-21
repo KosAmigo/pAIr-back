@@ -178,7 +178,9 @@ pair:
 
   # 응시자 코드 테스트 실행
   run:
-    mode: local            # local = 이 서버의 JVM 에서 바로 실행(개발용), docker = 격리 컨테이너(sh docker/sandbox/build.sh 로 이미지 필요)
+    # local(기본) = 이 서버의 JVM 에서 바로 실행. 격리가 없어 개발용으로만 쓴다
+    # docker = 실행마다 격리 컨테이너(sh docker/sandbox/build.sh 로 pair-sandbox 이미지 필요). 배포는 PAIR_RUN_MODE=docker
+    mode: ${PAIR_RUN_MODE:local}
     timeout-seconds: 30
     docker-bin: docker
     docker-image: pair-sandbox
