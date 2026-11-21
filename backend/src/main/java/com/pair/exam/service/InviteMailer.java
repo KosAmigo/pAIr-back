@@ -135,7 +135,7 @@ public class InviteMailer {
                 이 메일을 다시 받았다면 이전 메일의 링크는 더 이상 쓸 수 없습니다.
                 %s
 
-                시작 시각 10분 전까지 입장해 카메라 점검을 마쳐 주세요.
+                시작 시각 전에 미리 입장해 카메라 점검을 마쳐 주세요.
                 """.formatted(p.getName(), s.getTitle(), when, url);
         String html = MailLayout.html(s.getTitle() + " 시험에 초대되었습니다", p.getName() + "님, 안녕하세요.",
                 List.of("아래 단추로 시험에 입장하세요."),
@@ -143,7 +143,7 @@ public class InviteMailer {
                 new MailLayout.Button("시험 입장하기", url),
                 List.of("입장 링크는 본인에게만 발급되었습니다. 다른 사람과 공유하지 마세요.",
                         "이 메일을 다시 받았다면 이전 메일의 링크는 더 이상 쓸 수 없습니다.",
-                        "시작 시각 10분 전까지 입장해 카메라 점검을 마쳐 주세요."));
+                        "시작 시각 전에 미리 입장해 카메라 점검을 마쳐 주세요."));
         return message(p, "[pAIr] " + s.getTitle() + " 시험 안내", text, html);
     }
 
@@ -185,13 +185,13 @@ public class InviteMailer {
                 시험 시간: %s
 
                 초대 메일의 입장 링크로 들어오세요. 링크를 찾을 수 없으면 시험 담당자에게 다시 보내 달라고 요청하세요.
-                시작 시각 10분 전까지 입장해 카메라 점검을 마쳐 주세요.
+                시작 시각 전에 미리 입장해 카메라 점검을 마쳐 주세요.
                 """.formatted(p.getName(), s.getTitle(), when),
                 MailLayout.html("내일 " + s.getTitle() + " 시험이 있습니다", p.getName() + "님, 안녕하세요.",
                         List.of(s.getTitle() + " 시험이 곧 시작합니다."),
                         List.of(new MailLayout.Fact("시험 시간", when)), null,
                         List.of("초대 메일의 입장 링크로 들어오세요. 링크를 찾을 수 없으면 시험 담당자에게 다시 보내 달라고 요청하세요.",
-                                "시작 시각 10분 전까지 입장해 카메라 점검을 마쳐 주세요.")));
+                                "시작 시각 전에 미리 입장해 카메라 점검을 마쳐 주세요.")));
     }
 
     private Mail message(ExamParticipant p, String subject, String text, String html) {
