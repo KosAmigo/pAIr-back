@@ -157,4 +157,24 @@ public final class ExamDtos {
     public record ReviewRequest(ProctorEvent.Review review, @Size(max = 1000) String note) {}
 
     public record ServerTime(Instant serverNow) {}
+
+    // ── 환경 점검 콘솔 확인 · 안내 메시지 ──
+
+    /** 점검 결과의 출처: LIVE 입장 대기 중 진행 상태, SAVED 동의와 함께 저장된 결과 */
+    public enum EnvCheckSource { LIVE, SAVED }
+
+    public record EnvProgressRequest(@NotNull JsonNode result) {}
+
+    /** 콘솔이 보는 환경 점검 결과. result 는 응시자 브라우저가 올린 점검 항목 JSON 그대로 */
+    public record EnvCheckView(EnvCheckSource source, Instant updatedAt, JsonNode result) {}
+
+    public record NoticeRequest(@NotBlank @Size(max = 500) String message) {}
+
+    /** 안내 메시지. readAt 이 비어 있으면 응시자가 아직 확인하지 않았다 */
+    public record NoticeView(Long id, String message, Instant sentAt, Instant readAt) {
+
+        public static NoticeView from(com.pair.exam.domain.ProctorNotice n) {
+            return new NoticeView(n.getId(), n.getMessage(), n.getSentAt(), n.getReadAt());
+        }
+    }
 }
