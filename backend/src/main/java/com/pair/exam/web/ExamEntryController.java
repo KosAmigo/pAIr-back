@@ -33,9 +33,14 @@ public class ExamEntryController {
     private final ExamEntryService entry;
     private final ProctorService proctor;
     private final EnvScanService envScan;
+    private final com.pair.exam.service.EnvCheckService envCheck;
+    private final com.pair.exam.service.NoticeService notices;
     private final Clock clock;
 
-    public ExamEntryController(ExamEntryService entry, ProctorService proctor, EnvScanService envScan, Clock clock) {
+    public ExamEntryController(ExamEntryService entry, ProctorService proctor, EnvScanService envScan, Clock clock,
+            com.pair.exam.service.EnvCheckService envCheck, com.pair.exam.service.NoticeService notices) {
+        this.envCheck = envCheck;
+        this.notices = notices;
         this.entry = entry;
         this.proctor = proctor;
         this.envScan = envScan;
@@ -91,6 +96,25 @@ public class ExamEntryController {
     @ResponseStatus(HttpStatus.CREATED)
     public EnvScanPhotoView envScan(@PathVariable String token, @Valid @RequestBody EnvScanRequest req) {
         return envScan.upload(token, req);
+    }
+
+    /** 환경 점검 진행 상태 (콘솔이 실시간으로 본다). 입장 대기 중 점검 화면이 올린다 */
+    @PostMapping("/api/entry/{token}/env-progress")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void envProgress(@PathVariable String token, @Valid @RequestBody ExamDtos.EnvProgressRequest req) {
+        envCheck.saveProgress(token, req.result());
+    }
+
+    /** 콘솔이 보낸 안내 메시지 (읽음 여부 포함). 입장 대기 화면과 시험 화면이 주기적으로 가져간다 */
+    @GetMapping("/api/entry/{token}/notices")
+    public java.util.List<ExamDtos.NoticeView> notices(@PathVariable String token) {
+        return notices.forEntry(token);
+    }
+
+    @PostMapping("/api/entry/{token}/notices/{noticeId}/read")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void readNotice(@PathVariable String token, @PathVariable Long noticeId) {
+        notices.markRead(token, noticeId);
     }
 
     @PostMapping("/api/entry/{token}/proctor-events")

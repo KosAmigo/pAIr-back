@@ -60,11 +60,16 @@ public class ExamConsoleController {
     private final ProctorService proctor;
     private final AutoSubmitService autoSubmit;
     private final EnvScanService envScan;
+    private final com.pair.exam.service.EnvCheckService envCheck;
+    private final com.pair.exam.service.NoticeService notices;
     private final ConnectionGrace grace;
     private final ConsoleAccess access;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
-            AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGrace grace, ConsoleAccess access) {
+            AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGrace grace, ConsoleAccess access,
+            com.pair.exam.service.EnvCheckService envCheck, com.pair.exam.service.NoticeService notices) {
+        this.envCheck = envCheck;
+        this.notices = notices;
         this.sessions = sessions;
         this.results = results;
         this.proctor = proctor;
@@ -210,6 +215,30 @@ public class ExamConsoleController {
     public List<EnvScanPhotoView> envScanPhotos(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
         return envScan.photosOf(sessionId, participantId);
+    }
+
+    /** 대상자의 환경 점검 결과 (진행 중이면 실시간, 아니면 저장된 결과). 아직 없으면 204. 감독관도 볼 수 있다 */
+    @GetMapping("/{sessionId}/participants/{participantId}/env-check")
+    public ResponseEntity<ExamDtos.EnvCheckView> envCheck(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+        access.requireSession(user, sessionId);
+        ExamDtos.EnvCheckView view = envCheck.view(sessionId, participantId);
+        return view == null ? ResponseEntity.noContent().build() : ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(view);
+    }
+
+    /** 응시자에게 안내 메시지 보내기 (시험 전·중). 감독관도 보낼 수 있다 */
+    @PostMapping("/{sessionId}/participants/{participantId}/notices")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ExamDtos.NoticeView sendNotice(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId,
+            @Valid @RequestBody ExamDtos.NoticeRequest req) {
+        access.requireSession(user, sessionId);
+        return notices.send(sessionId, participantId, req.message(), user.userId());
+    }
+
+    /** 보낸 안내 메시지와 읽음 여부 */
+    @GetMapping("/{sessionId}/participants/{participantId}/notices")
+    public List<ExamDtos.NoticeView> noticesOf(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+        access.requireSession(user, sessionId);
+        return notices.listOf(sessionId, participantId);
     }
 
     @GetMapping(value = "/{sessionId}/env-scan/{photoId}/image", produces = MediaType.IMAGE_JPEG_VALUE)
