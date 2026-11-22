@@ -106,10 +106,12 @@ public class ApiController {
         List<AttemptRecord> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), AttemptRecord.Mode.SELF);
         Map<Long, String> codes = catalog.codes(rows.stream().map(AttemptRecord::getTaskId).distinct().toList());
         List<Map<String, Object>> out = new java.util.ArrayList<>();
+        // 같은 과제를 여러 번 푼 응시가 많아서 과제 정의는 한 번만 만든다 (응시마다 DB 에서 다시 읽지 않는다)
+        Map<String, TaskDef> definitions = new java.util.HashMap<>();
         for (AttemptRecord r : rows) {
             String id = String.valueOf(r.getId());
             if (r.getStatus() == Attempt.Status.SOLVING && isEmpty(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
-            TaskDef task = catalog.definition(codes.get(r.getTaskId()));
+            TaskDef task = definitions.computeIfAbsent(codes.get(r.getTaskId()), catalog::definition);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", id);
             m.put("taskId", codes.get(r.getTaskId()));
