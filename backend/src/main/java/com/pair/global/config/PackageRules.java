@@ -32,6 +32,18 @@ public final class PackageRules {
     private static final Set<String> INFRA = Set.of("ai", "sandbox", "storage", "payment", "mail");
     private static final Set<String> LAYERS = Set.of("controller", "service", "dto", "repository", "entity", "exception");
 
+    /**
+     * Gradle packageRulesCheck 태스크가 컴파일 직후 부른다(classes 가 이 검사를 거친다).
+     * IntelliJ 의 "Build and run using: Gradle"(기본값)에서는 PairApplication 실행 전에 여기서 멈춘다.
+     */
+    public static void main(String[] args) {
+        List<String> violations = new PackageRules().violations();
+        if (violations.isEmpty()) return;
+        System.err.println("패키지 구조 규칙을 어긴 클래스가 있습니다 (pAIr-docs 설계/백엔드_패키지_구조.md):");
+        violations.forEach(v -> System.err.println("  - " + v));
+        System.exit(1);
+    }
+
     /** 규칙을 어긴 클래스마다 한 줄. 비어 있으면 통과 */
     public List<String> violations() {
         List<String> out = new ArrayList<>();

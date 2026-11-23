@@ -1,72 +1,33 @@
 # Development Rules
 
-## Package Structure and Naming (MUST, team decision 2026-11-23)
-
-Every class you create, move or rename in `backend/src/main/java/com/pair` MUST follow these rules.
-They are enforced in code: `global/config/PackageRules` runs when `PairApplication` starts (also when run directly from IntelliJ), in `./gradlew test`, and before `bootRun`/`bootJar`. A violation stops the app with a list of offending classes.
-Full rationale: pAIr-docs `설계/백엔드_패키지_구조.md`.
-
-### Layout
+## Package structure (MUST)
+Enforced by `global/config/PackageRules`: a violation fails `./gradlew classes`/`build`, so IntelliJ ▶ fails before running (keep IntelliJ's default "Build and run using: Gradle"), and it also stops `PairApplication` at startup. Never weaken the check: don't edit `PackageRules` to pass, and don't set `PACKAGE_RULES_ENABLED=false` (production only). If a class fits no rule, ask the user. Background: pAIr-docs `설계/백엔드_패키지_구조.md`.
 
 ```
 com.pair
-├─ PairApplication            the only class directly in com.pair
-├─ global/                    shared by all features
-│  ├─ config/                 @Configuration, @ConfigurationProperties, web config, PackageRules
-│  ├─ error/                  shared exceptions, ApiExceptionHandler
-│  └─ security/               CurrentUser, argument resolvers, interceptors, JWT
-├─ infra/                     talks to external systems
-│  ├─ ai/  sandbox/  storage/  payment/  mail/
-└─ domain/                    one package per business feature
-   └─ auth, company, credit, task, taskgen, exam, attempt, question, scoring, grader
+├─ PairApplication
+├─ global/   config/ error/ security/
+├─ infra/    ai/ sandbox/ storage/ payment/ mail/
+└─ domain/<feature>/   controller/ service/ dto/ repository/ entity/ exception/
 ```
+- Only these folders. No classes directly in `domain/<feature>/`, no empty folders. A new `domain/<feature>/` is fine; new folders under `global/` or `infra/` need a team decision.
+- Folder name = class suffix:
 
-Inside `domain/<feature>/`, use ONLY these 6 folders, and only the ones you need (no empty folders):
-
-| Folder | Holds | Class name |
-| --- | --- | --- |
-| `controller/` | `@RestController` only | `XxxController` |
-| `service/` | logic only: `@Service`/`@Component` beans, interfaces, abstract classes, static helpers | EVERY class is `XxxService`, no exceptions (Xxx = singular noun for what it does) |
-| `dto/` | API request/response types and data-only classes (records with no logic), one type per file | `XxxRequest`, `XxxResponse`; parts nested inside them and other data-only types → `XxxDto` |
-| `repository/` | Spring Data repositories and hand-written stores | `XxxRepository`, where Xxx is the type it saves/returns |
-| `entity/` | `@Entity`, `@Embeddable`, enums used by entities | plain noun; never `Record`/`Entity` suffix; always `@Table(name = ...)` |
-| `exception/` | exceptions used only by this feature | `XxxException` |
-
-Hard rules:
-- No other folder names inside a feature (`web/`, `db/`, `domain/`, `model/`, `util/`, `common/`, `impl/` are all forbidden).
-- No classes directly in `domain/<feature>/`. (Tests may put multi-layer integration tests there.)
-- Do not add new folders under `global/` or `infra/`, or new top-level packages, on your own. That is a team decision, and it requires updating the doc, `PackageRules` and this file together.
-- A new feature is fine: add `domain/<lowercase-word>/` (e.g. `notification`).
-
-### Where does it go? (quick lookup)
-
-| Thing | Location |
+| Folder | Class name |
 | --- | --- |
-| Logic used by only one feature (even mail text, PDF building, schedulers, WebSocket handlers) | that feature's `service/` as `XxxService` (e.g. `InviteMailService`, `PdfService`, `ProctorRelayService`) |
-| Data-only class (record/value object with no logic) | that feature's `dto/` as `XxxDto` (e.g. `AttemptStateDto`, `TaskDefDto`) |
-| Exception shared by several features (401/403/409 etc.) | `global/error/` |
-| Exception used by one feature | `domain/<feature>/exception/` |
-| Failure of an external call (AI, payment) | the matching `infra/` folder |
-| Interceptor, argument resolver, auth check, even if feature-specific | `global/security/` |
-| `@ConfigurationProperties`, `@Configuration`, even if feature-specific | `global/config/` (`XxxConfig`, `XxxProperties`) |
-| HTTP client to an outside API | `infra/<area>/XxxClient` |
-| File storage (S3/local) | `infra/storage/XxxStorage` |
-| Doesn't fit anything above | `service/` of the feature that uses it, named `XxxService` |
+| `controller/` | `XxxController` |
+| `service/` | `XxxService`, every class with no exceptions (interfaces, helpers, schedulers too) |
+| `dto/` | `XxxRequest` / `XxxResponse` for API, `XxxDto` for other data |
+| `repository/` | `XxxRepository` (Xxx = what it stores, without `Dto`) |
+| `entity/` | plain noun (no `Record`/`Entity`), always `@Table(name = ...)`; entity enums too |
+| `exception/` | `XxxException` |
+| `global/config/` | `XxxConfig` / `XxxProperties` |
 
-### Naming details
-- `service/` has no exceptions: a parser is `CalcParserService`, a mailer is `InviteMailService`, an interface is `RelayAuthService`. Use a singular noun (`TaskCatalogService`, not `TaskCatalogsService`). Data-only types go to `dto/` as `XxxDto`, never to `service/`.
-- Repository name = the type it handles. The JPA repository for entity `Attempt` is `AttemptRepository`. A hand-written store for `AttemptStateDto` is `AttemptStateRepository` (with implementations `DbAttemptStateRepository`, `FileAttemptStateRepository`). Never use vague names like `XxxStoreRepository` or `XxxDao`.
-- If a non-entity class would clash with an entity name, the entity keeps the plain name and the other class gets a role suffix (`Attempt` entity vs `AttemptStateDto`, `ChatTurn` vs `ChatTurnStateDto`).
-- No bundle files like `XxxDtos` or `XxxResponses`. One request/response type per file.
-- Renaming an entity class must not change its table: keep `@Table(name = ...)`, and keep JSON field names when renaming DTOs.
-- UpperCamelCase, and treat acronyms as words: `JwtTokens`, `S3Client`, not `JWTTokens`.
-- Tests mirror the main package: `domain/exam/service/ExamSessionService` → `domain/exam/service/ExamSessionServiceTest`. Multi-layer tests: `XxxIntegrationTest`.
-
-### When the structure check fails
-- Read the message. It names the class and the rule. Move or rename the class to fit.
-- NEVER weaken or bypass the check: do not edit `PackageRules`, do not add exceptions to it, do not set `PACKAGE_RULES_ENABLED=false` locally, and do not skip `ArchitectureTest`. `PACKAGE_RULES_ENABLED=false` exists only for the production server.
-- If a class truly fits no rule, stop and ask the user. The rule change is a team decision.
-- Quick check without starting the server: `./gradlew archTest` (in `backend/`).
+- Has logic → `service/`. Data only → `dto/`. One type per file.
+- Used by one feature → that feature's folder. Shared exceptions → `global/error/`. External-call failures → `infra/<area>/`. Interceptors/resolvers → `global/security/`. Config/properties → `global/config/`.
+- Name = singular noun + suffix (`EditProposalService`, not `EditProposals`). An entity keeps the plain name; clashing data gets `Dto` (`Attempt` vs `AttemptStateDto`).
+- Renames must not change `@Table` names or JSON field names.
+- Tests mirror the main package. Name: `<TargetClass or scenario>Test`; multi-layer: `XxxIntegrationTest`.
 
 ## Backend
 - Use Java 21 and Spring Boot.
@@ -77,7 +38,7 @@ Hard rules:
 ## Testing
 - Write tests for important business logic.
 - Run relevant tests after modifications.
-- Run build (or at least `./gradlew archTest`) before completing tasks.
+- Run `./gradlew build` before completing tasks.
 
 ## Token Efficiency
 - Inspect only files relevant to the task.
