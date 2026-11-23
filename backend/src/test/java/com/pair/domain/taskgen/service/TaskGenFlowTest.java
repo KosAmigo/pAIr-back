@@ -188,6 +188,78 @@ class TaskGenFlowTest {
         assertThat(ai.users.get(0)).contains("제한 시간: 20분").doesNotContain("직군", "난이도");
     }
 
+    private static DevDraftDto withCompetencies(DevDraftDto g, List<String> competencies) {
+        return new DevDraftDto(g.title(), g.summary(), g.code(), g.category(), g.description(), g.requirements(), g.answer(),
+                g.files(), g.hiddenTests(), g.solution(), null, competencies);
+    }
+
+    private String settingsOf(String code) {
+        return records.findByCode(code).orElseThrow().getSettings();
+    }
+
+    @Test
+    @DisplayName("요청에 역량이 있으면 settings 와 확인 결과 form 에 그대로 저장하고, Draft 값은 쓰지 않는다")
+    void requestCompetenciesSaved() throws Exception {
+        ai.script.add(withCompetencies(good("flow-comp-req"), List.of("usage")));
+        generator.generate(TaskGenFixtures.form().withCompetencies(List.of("control", "delegation")), 1L, steps::add);
+
+        var settings = json.readTree(settingsOf("flow-comp-req"));
+        assertThat(settings.get("competencies")).extracting(n -> n.asText()).containsExactly("control", "delegation");
+        assertThat(settings.get("openFile").asText()).isEqualTo("src/shop/Cart.java"); // 기존 키는 그대로
+        assertThat(settings.has("d4Minutes")).isTrue();
+        var report = json.readTree(writer.report("flow-comp-req"));
+        assertThat(report.get("form").get("competencies")).extracting(n -> n.asText()).containsExactly("control", "delegation");
+    }
+
+    @Test
+    @DisplayName("요청 역량이 비면 Draft 의 역량을 저장한다. 잘못된 key 는 버리고 2개까지만")
+    void draftCompetenciesSaved() throws Exception {
+        ai.script.add(withCompetencies(good("flow-comp-draft"), List.of("Potential", "nope", "potential", "usage", "control")));
+        generator.generate(TaskGenFixtures.form(), 1L, steps::add);
+        assertThat(json.readTree(settingsOf("flow-comp-draft")).get("competencies")).extracting(n -> n.asText())
+                .containsExactly("potential", "usage");
+        assertThat(ai.users.get(0)).doesNotContain("competencies");
+
+        ai.script.add(withCompetencies(good("flow-comp-none"), List.of("nope")));
+        generator.generate(TaskGenFixtures.form(), 1L, steps::add);
+        assertThat(json.readTree(settingsOf("flow-comp-none")).get("competencies")).isEmpty();
+
+        ai.script.add(good("flow-comp-null")); // 모델이 역량을 안 준 경우
+        generator.generate(TaskGenFixtures.form(), 1L, steps::add);
+        assertThat(json.readTree(settingsOf("flow-comp-null")).get("competencies")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("과제 콘솔 목록에 competencies 가 나온다 (손으로 만든 과제는 [])")
+    void consoleListCompetencies() throws Exception {
+        ai.script.add(withCompetencies(good("flow-comp-list"), List.of("decomposition")));
+        generator.generate(TaskGenFixtures.form(), 1L, steps::add);
+        String body = mvc.perform(as(get("/api/console/tasks"), "ADMIN")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        for (var n : json.readTree(body)) {
+            if (n.get("id").asText().equals("flow-comp-list")) assertThat(n.get("competencies")).extracting(c -> c.asText()).containsExactly("decomposition");
+            else assertThat(n.get("competencies").isArray()).isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("요청 역량 검사: 정상은 통과(대소문자·중복 정리), 모르는 key 나 3개 이상은 400")
+    void competenciesValidation() throws Exception {
+        assertThat(TaskGenFixtures.form().validated().competencies()).isEmpty();
+        assertThat(TaskGenFixtures.form().withCompetencies(List.of("Usage", "usage", "potential")).validated().competencies())
+                .containsExactly("usage", "potential");
+        assertThatThrownBy(() -> TaskGenFixtures.form().withCompetencies(List.of("nope")).validated())
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> TaskGenFixtures.form().withCompetencies(List.of("usage", "control", "delivery")).validated())
+                .isInstanceOf(IllegalArgumentException.class);
+
+        mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
+                .content(FORM.replace("}", ",\"competencies\":[\"nope\"]}"))).andExpect(status().isBadRequest());
+        mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
+                .content(FORM.replace("}", ",\"competencies\":[\"usage\",\"control\",\"delivery\"]}"))).andExpect(status().isBadRequest());
+        mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
+                .content(FORM.replace("}", ",\"competencies\":[\"usage\",\"control\"]}"))).andExpect(status().isAccepted());
+    }
+
     @Test
     @DisplayName("저장한 과제를 TaskDefRepository 로 다시 읽으면 Draft 와 같다 (숨은 테스트는 test/ 를 뗀 경로)")
     void roundTrip() {
