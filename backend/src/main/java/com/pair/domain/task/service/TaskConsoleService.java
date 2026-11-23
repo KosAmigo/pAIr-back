@@ -76,7 +76,8 @@ public class TaskConsoleService {
         try {
             JsonNode checks = json.readTree(content).get("checks");
             if (checks == null || !checks.isArray() || checks.isEmpty()) return null;
-            for (JsonNode c : checks) if (!c.path("ok").asBoolean(false)) return false;
+            // 경고(level warn)는 실패로 세지 않는다. level 이 없는 예전 결과는 실패로 본다
+            for (JsonNode c : checks) if (!c.path("ok").asBoolean(false) && !"warn".equals(c.path("level").asText())) return false;
             return true;
         } catch (Exception e) {
             return null;
