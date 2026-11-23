@@ -65,6 +65,10 @@ spring:
         speech: none
         transcription: none
 
+# 서버 시작 때 패키지 구조·이름 규칙 검사 (global/config/PackageRules). 운영 서버에서는 PACKAGE_RULES_ENABLED=false
+package-rules:
+  enabled: ${PACKAGE_RULES_ENABLED:true}
+
 pair:
   toss:
     # 테스트 키만 허용한다. 클라이언트 키는 프론트에서 별도로 설정한다.
