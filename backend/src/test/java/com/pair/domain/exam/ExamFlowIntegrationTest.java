@@ -797,9 +797,83 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("삭제");
     }
 
+    @Test
+    @DisplayName("종료된 회차만 보관을 연장할 수 있다 (진행 중·시작 전·취소는 거절)")
+    void retentionOnlyForEndedSessions() {
+        Long sid = sessionWithPhoto();
+        Instant end = sessions.detail(sid).session().endsAt();
+        clock.set(end.minusSeconds(60)); // 아직 진행 중
+        assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("종료된 회차만 보관을 연장할 수 있습니다.");
+
+        SessionSummaryResponse notStarted = createSession(141L, true);
+        clock.set(notStarted.startsAt().minusSeconds(60));
+        assertThatThrownBy(() -> retention.extend(notStarted.id(), 9L)).hasMessageContaining("종료된 회차만 보관을 연장할 수 있습니다.");
+        sessions.cancel(notStarted.id());
+        clock.set(notStarted.endsAt().plus(Duration.ofDays(6)));
+        assertThatThrownBy(() -> retention.extend(notStarted.id(), 9L)).hasMessageContaining("종료된 회차만 보관을 연장할 수 있습니다.");
+    }
+
     // ── 증거 구간 (이벤트 앞 8초·뒤 4초, 최대 24장) ──
 
     @Autowired com.pair.domain.exam.service.EvidenceClipService clips;
+
+    private static String jpegB64Sized(int bytes) {
+        byte[] b = new byte[bytes];
+        b[0] = (byte) 0xFF;
+        b[1] = (byte) 0xD8;
+        b[2] = (byte) 0xFF;
+        return "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(b);
+    }
+
+    @Test
+    @DisplayName("증거 구간: 채널(웹캠·휴대폰)마다 최대 12장, 같은 채널은 1초 이상 간격, 사진 한 장은 100KB 이하")
+    void clipChannelRules() {
+        SessionSummaryResponse s = createSession(153L, true);
+        String token = startWithConsent(s, "clip4@test.dev");
+        proctor.record(token, eventWithId(s, "clip-evt-0004"));
+
+        List<com.pair.domain.exam.dto.ClipFrameRequest> thirteen = new java.util.ArrayList<>();
+        for (int i = 0; i < 13; i++) thirteen.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 1000));
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(thirteen)))
+                .hasMessageContaining("12");
+
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, 0), frame(ProctorEvent.Source.PC_CAM, 500))))).hasMessageContaining("1초");
+
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PC_CAM, 0, jpegB64Sized(100_001))))))
+                .hasMessageContaining("100KB");
+
+        // 이미 저장된 사진과 1초보다 가까운 새 사진도 거절한다
+        clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(List.of(frame(ProctorEvent.Source.PC_CAM, 0))));
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, 500))))).hasMessageContaining("1초");
+
+        // 12 + 12 = 24장은 받는다 (이미 저장된 0ms 사진은 건너뛴다)
+        List<com.pair.domain.exam.dto.ClipFrameRequest> full = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            full.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 1000));
+            full.add(frame(ProctorEvent.Source.PHONE_CAM, -8000 + i * 1000));
+        }
+        clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(full));
+        assertThat(clips.countsOfSession(s.id()).values()).containsExactly(24L);
+    }
+
+    @Test
+    @DisplayName("증거 구간 업로드 본문은 2MB 를 넘으면 거절한다")
+    void clipBodyLimit() {
+        SessionSummaryResponse s = createSession(154L, true);
+        String token = startWithConsent(s, "clip5@test.dev");
+        proctor.record(token, eventWithId(s, "clip-evt-0005"));
+        // 100KB 이하 사진이라도 합이 2MB 를 넘는 요청은 받지 않는다 (24장 x 99KB = 약 3.1MB base64)
+        List<com.pair.domain.exam.dto.ClipFrameRequest> frames = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            frames.add(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PC_CAM, -8000 + i * 1000, jpegB64Sized(99_000)));
+            frames.add(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PHONE_CAM, -8000 + i * 1000, jpegB64Sized(99_000)));
+        }
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0005", new com.pair.domain.exam.dto.ClipUploadRequest(frames)))
+                .hasMessageContaining("2MB");
+    }
 
     private com.pair.domain.exam.dto.ClipFrameRequest frame(ProctorEvent.Source src, int offsetMs) {
         return new com.pair.domain.exam.dto.ClipFrameRequest(src, offsetMs, jpegB64());
