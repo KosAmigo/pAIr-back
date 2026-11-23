@@ -26,5 +26,7 @@ pair:
     mode: header
     jwt:
       secret: dGVzdC1vbmx5LXNpZ25pbmcta2V5LTMyaXRlbXMtbG9uZw==
+    withdrawn-email:
+      secret: dGVzdC1vbmx5LXNpZ25pbmcta2V5LTMyaXRlbXMtbG9uZw==
   exam:
     scheduler-enabled: false

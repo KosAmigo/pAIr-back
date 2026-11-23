@@ -248,24 +248,28 @@ class AuthIntegrationTest {
     }
 
     @Test
-    void withdrawalAnonymizesAccountPreservesLedgerAndAllowsSignupBonusAgain() throws Exception {
+    void withdrawalAndRejoinRestoreAccountWithoutAnotherSignupBonus() throws Exception {
         String email = "withdraw@example.com";
         JsonNode first = signupAccount(email);
         JsonNode second = login(email, "secure-pass-123");
         long userId = first.path("user").path("id").asLong();
         String token = first.path("token").asText();
+        jdbc.update("update users set role = 'MANAGER', company_id = ? where user_id = ?", 41006L, userId);
+        jdbc.update("insert into credit_ledger (user_id, amount, balance_after, reason, created_at) values (?, ?, ?, ?, ?)",
+                userId, 25, 225, "REFUND", Instant.now());
 
         mvc.perform(withdrawal(token, "wrong-password")).andExpect(status().isUnauthorized());
         mvc.perform(withdrawal(token, "secure-pass-123")).andExpect(status().isNoContent());
         var row = jdbc.queryForMap("select email, name, password_hash, member_status, deleted_at from users where user_id = ?", userId);
-        assertThat(row.get("email").toString()).matches("unkown[0-9a-f]{64}");
+        String hashedEmail = row.get("email").toString();
+        assertThat(hashedEmail).matches("withdrawn:[0-9a-f]{64}").doesNotContain(email);
         assertThat(row.get("name")).isEqualTo("UNKOWN");
         assertThat(row.get("member_status")).isEqualTo("WITHDRAWN");
         assertThat(row.get("deleted_at")).isNotNull();
         assertThat(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
                 .matches("secure-pass-123", row.get("password_hash").toString())).isFalse();
         assertThat(jdbc.queryForObject("select count(*) from credit_ledger where user_id = ?", Integer.class, userId))
-                .isEqualTo(1);
+                .isEqualTo(2);
         assertThat(jdbc.queryForObject("select count(*) from email_verifications where email = ?", Integer.class, email))
                 .isZero();
         for (JsonNode session : new JsonNode[] { first, second }) {
@@ -275,11 +279,61 @@ class AuthIntegrationTest {
                     .andExpect(status().isUnauthorized());
         }
         mvc.perform(withdrawal(token, "secure-pass-123")).andExpect(status().isUnauthorized());
-        JsonNode rejoined = signupAccount(email);
-        long newId = rejoined.path("user").path("id").asLong();
-        assertThat(newId).isNotEqualTo(userId);
-        assertThat(jdbc.queryForObject("select balance_after from credit_ledger where user_id = ?", Integer.class, newId))
-                .isEqualTo(200);
+        mvc.perform(signup("새 이름", email, "new-secure-pass", "123456")).andExpect(status().isBadRequest());
+        String code = requestVerificationCode("WITHDRAW@example.com");
+        MvcResult result = mvc.perform(signup("새 이름", "WITHDRAW@example.com", "new-secure-pass", code))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.user.id").value(userId))
+                .andExpect(jsonPath("$.user.email").value(email))
+                .andExpect(jsonPath("$.user.name").value("새 이름"))
+                .andExpect(jsonPath("$.user.role").value("USER"))
+                .andExpect(jsonPath("$.user.companyId").doesNotExist())
+                .andReturn();
+        JsonNode rejoined = json.readTree(result.getResponse().getContentAsString());
+        row = jdbc.queryForMap("select email, member_status, deleted_at, role, company_id from users where user_id = ?", userId);
+        assertThat(row.get("email")).isEqualTo(email);
+        assertThat(row.get("member_status")).isEqualTo("ACTIVE");
+        assertThat(row.get("deleted_at")).isNull();
+        assertThat(row.get("role")).isEqualTo("USER");
+        assertThat(row.get("company_id")).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from credit_ledger where user_id = ?", Integer.class, userId))
+                .isEqualTo(2);
+        assertThat(jdbc.queryForObject("select balance_after from credit_ledger where user_id = ? order by ledger_id desc limit 1", Integer.class, userId))
+                .isEqualTo(225);
+        mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new AuthDtos.Credentials(email, "secure-pass-123"))))
+                .andExpect(status().isUnauthorized());
+        login(email, "new-secure-pass");
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(tokenRequest("/api/auth/refresh", first.path("refreshToken").asText()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(withdrawal(rejoined.path("token").asText(), "new-secure-pass")).andExpect(status().isNoContent());
+        assertThat(jdbc.queryForObject("select email from users where user_id = ?", String.class, userId))
+                .isEqualTo(hashedEmail);
+        assertThat(signupAccount(email).path("user").path("id").asLong()).isEqualTo(userId);
+        assertThat(jdbc.queryForObject("select count(*) from credit_ledger where user_id = ? and reason = 'SIGNUP'", Integer.class, userId))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void concurrentRejoinsCannotCreateAnotherAccountOrSignupBonus() throws Exception {
+        String email = "concurrent-rejoin@example.com";
+        JsonNode first = signupAccount(email);
+        long userId = first.path("user").path("id").asLong();
+        mvc.perform(withdrawal(first.path("token").asText(), "secure-pass-123")).andExpect(status().isNoContent());
+        String code = requestVerificationCode(email);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var one = executor.submit(() -> trySignup(email, code, start));
+            var two = executor.submit(() -> trySignup(email, code, start));
+            start.countDown();
+            assertThat(new boolean[] { one.get(20, TimeUnit.SECONDS), two.get(20, TimeUnit.SECONDS) })
+                    .containsExactlyInAnyOrder(true, false);
+        }
+        assertThat(jdbc.queryForObject("select count(*) from users where email = ?", Integer.class, email)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from credit_ledger where user_id = ? and reason = 'SIGNUP'", Integer.class, userId))
+                .isEqualTo(1);
     }
 
     @Test
@@ -389,6 +443,16 @@ class AuthIntegrationTest {
             auth.refresh(token);
             return true;
         } catch (UnauthorizedException e) {
+            return false;
+        }
+    }
+
+    private boolean trySignup(String email, String code, CountDownLatch start) throws InterruptedException {
+        start.await();
+        try {
+            auth.signup(new AuthDtos.SignupRequest("재가입 사용자", email, "secure-pass-123", code));
+            return true;
+        } catch (ConflictException | IllegalArgumentException e) {
             return false;
         }
     }

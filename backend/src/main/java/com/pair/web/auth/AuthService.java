@@ -27,15 +27,18 @@ public class AuthService {
     private final CreditService credits;
     private final EmailVerificationService emailVerification;
     private final ExamSessionRepository examSessions;
+    private final WithdrawnEmailHasher withdrawnEmailHasher;
 
     public AuthService(AuthAccountRepository accounts, RefreshSessionRepository sessions, JwtTokens tokens,
-            CreditService credits, EmailVerificationService emailVerification, ExamSessionRepository examSessions) {
+            CreditService credits, EmailVerificationService emailVerification, ExamSessionRepository examSessions,
+            WithdrawnEmailHasher withdrawnEmailHasher) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.tokens = tokens;
         this.credits = credits;
         this.emailVerification = emailVerification;
         this.examSessions = examSessions;
+        this.withdrawnEmailHasher = withdrawnEmailHasher;
     }
 
     public void requestEmailVerification(String email) {
@@ -55,13 +58,20 @@ public class AuthService {
             throw new IllegalArgumentException(verification.message());
         }
 
-        AuthAccount account;
+        AuthAccount account = accounts.findByEmailIgnoreCase(withdrawnEmailHasher.hash(email)).orElse(null);
+        boolean newAccount = account == null;
+        String passwordHash = PASSWORD_ENCODER.encode(request.password());
+        if (newAccount) {
+            account = new AuthAccount(email, request.name().trim(), passwordHash);
+        } else {
+            account.reactivate(email, request.name().trim(), passwordHash);
+        }
         try {
-            account = accounts.saveAndFlush(new AuthAccount(email, request.name().trim(), PASSWORD_ENCODER.encode(request.password())));
+            account = accounts.saveAndFlush(account);
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException("이미 가입된 이메일입니다.");
         }
-        credits.grantSignup(account.getId());
+        if (newAccount) credits.grantSignup(account.getId());
         return createSession(account);
     }
 
@@ -136,7 +146,7 @@ public class AuthService {
                 && examSessions.existsByCompanyIdAndCanceledAtIsNullAndEndsAtAfter(account.getCompanyId(), now)) {
             throw new ConflictException("예정 또는 진행 중인 회사 회차가 있어 탈퇴할 수 없습니다.");
         }
-        String anonymousEmail = "unkown" + InviteTokens.hash(InviteTokens.next());
+        String anonymousEmail = withdrawnEmailHasher.hash(normalizeEmail(account.getEmail()));
         emailVerification.removeForEmail(account.getEmail());
         account.withdraw(anonymousEmail, PASSWORD_ENCODER.encode(InviteTokens.next()), now);
         sessions.revokeAll(account.getId());

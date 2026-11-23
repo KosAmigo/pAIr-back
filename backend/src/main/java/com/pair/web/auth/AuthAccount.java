@@ -24,7 +24,7 @@ public class AuthAccount {
     @Column(name = "user_id")
     private Long id;
 
-    @Column(nullable = false, length = 255)
+    @Column(nullable = false, unique = true, length = 255)
     private String email;
 
     @Column(nullable = false, length = 50)
@@ -85,5 +85,18 @@ public class AuthAccount {
         memberStatus = "WITHDRAWN";
         deletedAt = now;
         tokenVersion++;
+    }
+
+    public void reactivate(String email, String name, String passwordHash) {
+        if (!"WITHDRAWN".equals(memberStatus)) {
+            throw new IllegalStateException("탈퇴한 회원만 재가입할 수 있습니다.");
+        }
+        this.email = email;
+        this.name = name;
+        this.passwordHash = passwordHash;
+        this.role = CurrentUser.Role.USER;
+        this.companyId = null;
+        this.memberStatus = "ACTIVE";
+        this.deletedAt = null;
     }
 }
