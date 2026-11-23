@@ -10,11 +10,11 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Component;
 
 import com.pair.global.config.AiKeyProperties;
-import com.pair.domain.taskgen.service.TaskGenSolver;
+import com.pair.domain.taskgen.service.TaskGenSolverService;
 
 /** 비개발 과제 풀이 검사용 Claude 호출 (생성 모델과 다른 회사 모델) */
 @Component
-public class AnthropicTaskSolverClient implements TaskGenSolver {
+public class AnthropicTaskSolverClient implements TaskGenSolverService {
 
     private final AiKeyProperties keys;
     private volatile AnthropicChatModel chatModel;

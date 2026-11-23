@@ -1,5 +1,8 @@
 package com.pair.domain.exam.service;
 
+import com.pair.domain.exam.dto.InvitesCreatedDto;
+import com.pair.domain.exam.dto.SessionNoticeDto;
+import com.pair.global.security.InviteTokenService;
 import com.pair.infra.storage.SnapshotStorage;
 import java.time.Clock;
 import java.time.Instant;
@@ -29,7 +32,7 @@ import com.pair.domain.exam.dto.RejectedParticipantDto;
 import com.pair.domain.exam.dto.SessionDetailResponse;
 import com.pair.domain.exam.dto.ExamSessionRequest;
 import com.pair.domain.exam.dto.SessionSummaryResponse;
-import com.pair.domain.task.service.TaskCatalog;
+import com.pair.domain.task.service.TaskCatalogService;
 import com.pair.domain.task.service.TaskConsoleService;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.global.error.UnauthorizedException;
@@ -45,21 +48,21 @@ public class ExamSessionService {
 
     private final ExamSessionRepository sessions;
     private final ExamParticipantRepository participants;
-    private final TaskCatalog tasks;
+    private final TaskCatalogService tasks;
     private final ApplicationEventPublisher events;
     private final SnapshotStorage storage;
     private final TaskConsoleService publications;
     private final com.pair.domain.exam.repository.ProctorEventRepository proctorEvents;
     private final com.pair.domain.attempt.repository.AttemptRepository attemptRecords;
-    private final ParticipantProgress progress;
+    private final ParticipantProgressService progress;
     private final ExamProperties props;
     private final Clock clock;
     private final AuthAccountRepository accounts;
 
-    public ExamSessionService(ExamSessionRepository sessions, ExamParticipantRepository participants, TaskCatalog tasks,
+    public ExamSessionService(ExamSessionRepository sessions, ExamParticipantRepository participants, TaskCatalogService tasks,
             ApplicationEventPublisher events, SnapshotStorage storage, TaskConsoleService publications,
             com.pair.domain.exam.repository.ProctorEventRepository proctorEvents, com.pair.domain.attempt.repository.AttemptRepository attemptRecords,
-            ParticipantProgress progress, ExamProperties props, Clock clock, AuthAccountRepository accounts) {
+            ParticipantProgressService progress, ExamProperties props, Clock clock, AuthAccountRepository accounts) {
         this.sessions = sessions;
         this.participants = participants;
         this.tasks = tasks;
@@ -133,9 +136,9 @@ public class ExamSessionService {
         Instant now = clock.instant();
         ExamSession s = require(sessionId);
         List<ExamParticipant> ps = participants.findBySessionIdOrderByIdAsc(sessionId);
-        Map<Long, ParticipantProgress.Progress> states = progress.of(ps);
+        Map<Long, ParticipantProgressService.Progress> states = progress.of(ps);
         long entered = ps.stream().filter(p -> p.getEnteredAt() != null).count();
-        long submitted = states.values().stream().filter(ParticipantProgress.Progress::finished).count();
+        long submitted = states.values().stream().filter(ParticipantProgressService.Progress::finished).count();
         SessionSummaryResponse sum = new SessionSummaryResponse(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(),
                 s.phase(now), tasks.codesInOrder(s.getTaskIds()), ps.size(), entered, submitted, s.getCanceledAt(), 0, s.getCreatedAt());
         return new SessionDetailResponse(sum, now, s.getClosedAt(), ps.stream().map(p -> ParticipantResponse.from(p, states.get(p.getId()), now)).toList());
@@ -154,7 +157,7 @@ public class ExamSessionService {
         boolean rescheduled = !s.getStartsAt().equals(req.startsAt()) || !s.getEndsAt().equals(req.endsAt());
         s.update(req.title().trim(), req.startsAt(), req.endsAt(), req.proctoring(), taskIds);
         if (rescheduled) reinviteAll(s, now);
-        else if (changed) notifyParticipants(s, SessionNotice.Kind.CHANGED);
+        else if (changed) notifyParticipants(s, SessionNoticeDto.Kind.CHANGED);
         return summary(s, null, now);
     }
 
@@ -164,19 +167,19 @@ public class ExamSessionService {
      */
     private void reinviteAll(ExamSession s, Instant now) {
         List<ExamParticipant> all = participants.findBySessionIdOrderByIdAsc(s.getId());
-        List<InvitesCreated.Invite> invites = new ArrayList<>();
+        List<InvitesCreatedDto.Invite> invites = new ArrayList<>();
         List<Long> entered = new ArrayList<>();
         for (ExamParticipant p : all) {
             if (p.getEnteredAt() != null) {
                 entered.add(p.getId());
                 continue;
             }
-            String token = InviteTokens.next();
-            p.reissueInvite(InviteTokens.hash(token), now);
-            invites.add(new InvitesCreated.Invite(p.getId(), token));
+            String token = InviteTokenService.next();
+            p.reissueInvite(InviteTokenService.hash(token), now);
+            invites.add(new InvitesCreatedDto.Invite(p.getId(), token));
         }
-        if (!invites.isEmpty()) events.publishEvent(new InvitesCreated(invites));
-        if (!entered.isEmpty()) events.publishEvent(new SessionNotice(s.getId(), SessionNotice.Kind.CHANGED, entered));
+        if (!invites.isEmpty()) events.publishEvent(new InvitesCreatedDto(invites));
+        if (!entered.isEmpty()) events.publishEvent(new SessionNoticeDto(s.getId(), SessionNoticeDto.Kind.CHANGED, entered));
     }
 
     /** 시작 전에만 취소한다. 회차는 지우지 않고 canceled_at 을 남기고, 대상자에게 취소 안내 메일을 보낸다 */
@@ -185,7 +188,7 @@ public class ExamSessionService {
         Instant now = clock.instant();
         ExamSession s = requireUpcoming(sessionId, now, "취소할");
         s.cancel(now);
-        notifyParticipants(s, SessionNotice.Kind.CANCELED);
+        notifyParticipants(s, SessionNoticeDto.Kind.CANCELED);
         return summary(s, null, now);
     }
 
@@ -199,15 +202,15 @@ public class ExamSessionService {
         List<ExamParticipant> toSave = new ArrayList<>();
         List<String> tokens = new ArrayList<>();
         for (ParticipantInputDto in : c.valid()) {
-            String token = InviteTokens.next();
+            String token = InviteTokenService.next();
             tokens.add(token);
-            toSave.add(new ExamParticipant(s, in.email(), in.name(), InviteTokens.hash(token), now));
+            toSave.add(new ExamParticipant(s, in.email(), in.name(), InviteTokenService.hash(token), now));
         }
         List<ExamParticipant> saved = participants.saveAll(toSave);
         if (!saved.isEmpty()) {
-            List<InvitesCreated.Invite> invites = new ArrayList<>();
-            for (int i = 0; i < saved.size(); i++) invites.add(new InvitesCreated.Invite(saved.get(i).getId(), tokens.get(i)));
-            events.publishEvent(new InvitesCreated(invites));
+            List<InvitesCreatedDto.Invite> invites = new ArrayList<>();
+            for (int i = 0; i < saved.size(); i++) invites.add(new InvitesCreatedDto.Invite(saved.get(i).getId(), tokens.get(i)));
+            events.publishEvent(new InvitesCreatedDto(invites));
         }
         return new AddParticipantsResponse(saved.size(), c.rejected());
     }
@@ -220,7 +223,7 @@ public class ExamSessionService {
     public AddParticipantsResponse importCsv(Long sessionId, byte[] csv, boolean dryRun) {
         Instant now = clock.instant();
         ExamSession s = requireOpenForParticipants(sessionId, now);
-        List<ParticipantCsvParser.CsvRow> rows = ParticipantCsvParser.parse(csv, props.maxParticipantsPerUpload());
+        List<ParticipantCsvService.CsvRow> rows = ParticipantCsvService.parse(csv, props.maxParticipantsPerUpload());
         if (rows.isEmpty()) throw new IllegalArgumentException("CSV 에 대상자가 없습니다.");
         List<ParticipantInputDto> inputs = rows.stream().map(row -> new ParticipantInputDto(row.name(), row.email())).toList();
 
@@ -264,9 +267,9 @@ public class ExamSessionService {
         if (phase == ExamSession.Phase.ENDED || phase == ExamSession.Phase.CANCELED) {
             throw new IllegalStateException("끝났거나 취소한 회차의 초대 메일은 보낼 수 없습니다.");
         }
-        String token = InviteTokens.next();
-        p.reissueInvite(InviteTokens.hash(token), now);
-        events.publishEvent(new InvitesCreated(List.of(new InvitesCreated.Invite(p.getId(), token))));
+        String token = InviteTokenService.next();
+        p.reissueInvite(InviteTokenService.hash(token), now);
+        events.publishEvent(new InvitesCreatedDto(List.of(new InvitesCreatedDto.Invite(p.getId(), token))));
     }
 
     /** 형식·목록 안 중복·이미 등록된 이메일을 거른다. 저장은 하지 않는다 */
@@ -307,9 +310,9 @@ public class ExamSessionService {
 
     private record Checked(List<ParticipantInputDto> valid, List<RejectedParticipantDto> rejected) {}
 
-    private void notifyParticipants(ExamSession s, SessionNotice.Kind kind) {
+    private void notifyParticipants(ExamSession s, SessionNoticeDto.Kind kind) {
         List<Long> ids = participants.findIdsBySessionId(s.getId());
-        if (!ids.isEmpty()) events.publishEvent(new SessionNotice(s.getId(), kind, ids));
+        if (!ids.isEmpty()) events.publishEvent(new SessionNoticeDto(s.getId(), kind, ids));
     }
 
     private ExamSession requireOpenForParticipants(Long sessionId, Instant now) {

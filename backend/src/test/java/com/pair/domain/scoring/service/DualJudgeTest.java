@@ -25,8 +25,8 @@ class DualJudgeTest {
     }
 
     static final Judge A = new Stub("claude"), B = new Stub("openai");
-    static final Rubric.Check C4 = Rubric.checksFor(true).stream().filter(c -> c.code().equals("C4")).findFirst().orElseThrow();
-    static final Rubric.Check D1 = Rubric.checksFor(false).stream().filter(c -> c.code().equals("D1")).findFirst().orElseThrow();
+    static final RubricService.Check C4 = RubricService.checksFor(true).stream().filter(c -> c.code().equals("C4")).findFirst().orElseThrow();
+    static final RubricService.Check D1 = RubricService.checksFor(false).stream().filter(c -> c.code().equals("D1")).findFirst().orElseThrow();
 
     static CheckVerdict v(String code, boolean violated, int count, String... ev) {
         return new CheckVerdict(code, violated, count, List.of(ev), "이유");
@@ -53,7 +53,7 @@ class DualJudgeTest {
         var r = ScoringService.combine(C4, both(v("C4", true, 0, "#T03"), v("C4", false, 0)));
         assertEquals("SPLIT", r.status());
         assertEquals(1, r.deducted()); // 2점의 절반
-        var odd = Rubric.checksFor(true).stream().filter(c -> c.code().equals("U2")).findFirst().orElseThrow();
+        var odd = RubricService.checksFor(true).stream().filter(c -> c.code().equals("U2")).findFirst().orElseThrow();
         assertEquals(2, ScoringService.combine(odd, both(v("U2", true, 0, "#T01"), v("U2", false, 0))).deducted()); // 5점 → 2 (버림)
     }
 

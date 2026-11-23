@@ -1,7 +1,7 @@
 package com.pair.domain.attempt;
 
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.service.AttemptService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -90,7 +90,7 @@ class ReportQueryCostTest {
         for (int i = 0; i < 3; i++) attempts.chat(devId, "질문 " + i, List.of(new Ref("ATTEMPT_FILE", bigFile, null)), null);
         store.writeReport(devId, Map.of("transcript", List.of(Map.of("turn", 1, "role", "user", "text", "질문"))));
         var t = java.time.Instant.now();
-        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
+        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptStateDto.Status.DONE));
 
         Statistics stats = emf.unwrap(SessionFactory.class).getStatistics();
         stats.clear();
@@ -114,7 +114,7 @@ class ReportQueryCostTest {
             store.writeReport(id, Map.of("version", 2, "total", 80, "items", List.of(Map.of("key", "d1", "score", 10)),
                     "transcript", List.of(Map.of("turn", 1, "role", "user", "text", "질문"))));
             var t = java.time.Instant.now();
-            store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
+            store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptStateDto.Status.DONE));
             ids.add(id);
         }
         Statistics stats = emf.unwrap(SessionFactory.class).getStatistics();

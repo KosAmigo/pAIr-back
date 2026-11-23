@@ -6,7 +6,7 @@ import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskFileRepository;
 import com.pair.domain.task.repository.TaskQuestionRepository;
 import com.pair.domain.task.repository.TaskRepository;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.dto.TaskDefDto;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URISyntaxException;
@@ -76,9 +76,9 @@ public final class TestTasks {
     }
 
     /** 옛 task.json 그대로 읽은 과제 정의 (비교 기준) */
-    public static TaskDef fixture(String code) {
+    public static TaskDefDto fixture(String code) {
         try {
-            return JSON.readValue(dir(code).resolve("task.json").toFile(), TaskDef.class);
+            return JSON.readValue(dir(code).resolve("task.json").toFile(), TaskDefDto.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -100,7 +100,7 @@ public final class TestTasks {
     }
 
     private static void fillContent(Task t, String code) {
-        TaskDef d = fixture(code);
+        TaskDefDto d = fixture(code);
         Map<String, Object> settings = new LinkedHashMap<>();
         settings.put("openFile", d.openFile());
         settings.put("editableFile", d.editableFile());

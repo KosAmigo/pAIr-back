@@ -22,7 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
@@ -128,7 +128,7 @@ public class QuestionService {
     @Transactional
     public AnswerView answer(long attemptId, long questionId, AnswerRequest req) {
         Attempt a = attempt(attemptId);
-        if (a.getStatus() != AttemptState.Status.SOLVING) {
+        if (a.getStatus() != AttemptStateDto.Status.SOLVING) {
             throw new ConflictException("풀이 중일 때만 답을 저장할 수 있습니다. (지금 단계: " + a.getStatus() + ")");
         }
         TaskQuestion q = questions.findById(questionId)
@@ -184,8 +184,8 @@ public class QuestionService {
 
     /** 단답형: 인정 답안 중 하나라도 맞으면 배점 */
     public static Graded gradeShort(int points, String answer, List<String> accepted) {
-        if (answer == null || ShortAnswerMatcher.normalize(answer).isEmpty()) return noAnswer();
-        return verdict(points, ShortAnswerMatcher.matches(answer, accepted), answer.strip(), joinAccepted(accepted));
+        if (answer == null || ShortAnswerMatchService.normalize(answer).isEmpty()) return noAnswer();
+        return verdict(points, ShortAnswerMatchService.matches(answer, accepted), answer.strip(), joinAccepted(accepted));
     }
 
     private static Graded noAnswer() {

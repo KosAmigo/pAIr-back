@@ -1,5 +1,6 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import java.time.Instant;
@@ -35,13 +36,13 @@ public class ReplayTreeService {
      * score 는 채점이 끝난(DONE) 응시만 있고, 아직 채점 전이거나 이전 형식 리포트(다시 채점 필요)면 null.
      */
     public record Node(String attemptId, String parentAttemptId, Integer forkedAtTurn, Long forkedFromCheckpointId,
-                       AttemptState.Status status, Instant startedAt, Score score) {}
+                       AttemptStateDto.Status status, Instant startedAt, Score score) {}
 
     private final AttemptRepository records;
     private final CheckpointRepository checkpoints;
-    private final ReplayReports reports;
+    private final ReplayReportService reports;
 
-    public ReplayTreeService(AttemptRepository records, CheckpointRepository checkpoints, ReplayReports reports) {
+    public ReplayTreeService(AttemptRepository records, CheckpointRepository checkpoints, ReplayReportService reports) {
         this.records = records;
         this.checkpoints = checkpoints;
         this.reports = reports;
@@ -92,7 +93,7 @@ public class ReplayTreeService {
     }
 
     private Attempt find(String attemptId) {
-        Long id = AttemptRegistry.parse(attemptId);
+        Long id = AttemptRegistryService.parse(attemptId);
         return (id == null ? java.util.Optional.<Attempt>empty() : records.findById(id))
                 .orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + attemptId));
     }

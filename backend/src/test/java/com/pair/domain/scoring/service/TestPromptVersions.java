@@ -2,7 +2,7 @@ package com.pair.domain.scoring.service;
 
 import java.time.Instant;
 
-import com.pair.domain.grader.service.PromptVersionState;
+import com.pair.domain.grader.dto.PromptVersionStateDto;
 import com.pair.domain.scoring.entity.PromptVersion;
 import com.pair.domain.scoring.repository.PromptVersionRepository;
 
@@ -11,7 +11,7 @@ public final class TestPromptVersions {
 
     private TestPromptVersions() {}
 
-    public static long ensure(PromptVersionRepository repo, PromptVersionState v) {
+    public static long ensure(PromptVersionRepository repo, PromptVersionStateDto v) {
         return repo.findFirstByNameOrderByIdAsc(v.id()).map(PromptVersion::getId).orElseGet(() ->
                 repo.save(new PromptVersion(v.id(), v.name(), v.note(), null, v.judgeSystem(), false,
                         v.createdAt() == null ? Instant.now() : v.createdAt())).getId());

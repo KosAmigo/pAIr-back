@@ -12,8 +12,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.domain.task.service.TaskMaterialService;
 import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.service.TaskConsoleService.TaskSummary;
@@ -28,14 +28,14 @@ import com.pair.global.error.ForbiddenException;
 @RequestMapping("/api/console/tasks")
 public class TaskConsoleController {
 
-    public record TaskDetail(TaskSummary summary, TaskDef definition) {}
+    public record TaskDetail(TaskSummary summary, TaskDefDto definition) {}
 
     private final TaskConsoleService console;
-    private final TaskCatalog tasks;
+    private final TaskCatalogService tasks;
     private final TaskMaterialService materials;
     private final TaskReviewService review;
 
-    public TaskConsoleController(TaskConsoleService console, TaskCatalog tasks, TaskMaterialService materials,
+    public TaskConsoleController(TaskConsoleService console, TaskCatalogService tasks, TaskMaterialService materials,
             TaskReviewService review) {
         this.console = console;
         this.tasks = tasks;
@@ -105,7 +105,7 @@ public class TaskConsoleController {
     public org.springframework.http.ResponseEntity<byte[]> materialFile(CurrentUser user, @PathVariable String taskId,
             @org.springframework.web.bind.annotation.RequestParam String path) {
         requireAdmin(user);
-        return com.pair.domain.task.service.MaterialResponses.pdf(materials.fileForTask(taskId, path));
+        return com.pair.domain.task.service.MaterialPdfHeaderService.pdf(materials.fileForTask(taskId, path));
     }
 
     @GetMapping("/{taskId}/materials/pages")

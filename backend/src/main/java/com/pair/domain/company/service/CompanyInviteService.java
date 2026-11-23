@@ -16,7 +16,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.exam.service.InviteTokens;
+import com.pair.global.security.InviteTokenService;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.global.error.ConflictException;
@@ -33,13 +33,13 @@ public class CompanyInviteService {
     private final CompanyRepository companies;
     private final AuthAccountRepository accounts;
     private final CorporateAccountService corporateAccounts;
-    private final CompanyAccountMailer mailer;
+    private final CompanyAccountMailService mailer;
     private final EmailVerificationService emailVerification;
     private final AuthService auth;
     private final String inviteBaseUrl;
 
     public CompanyInviteService(CompanyInviteRepository invites, CompanyRepository companies, AuthAccountRepository accounts,
-            CorporateAccountService corporateAccounts, CompanyAccountMailer mailer, EmailVerificationService emailVerification,
+            CorporateAccountService corporateAccounts, CompanyAccountMailService mailer, EmailVerificationService emailVerification,
             AuthService auth, @Value("${pair.company.invite-url:https://localhost:5173/company-invite}") String inviteBaseUrl) {
         this.invites = invites;
         this.companies = companies;
@@ -67,9 +67,9 @@ public class CompanyInviteService {
             }
             old.revoke(now);
         }
-        String token = InviteTokens.next();
+        String token = InviteTokenService.next();
         try {
-            invites.saveAndFlush(new CompanyInvite(company.getId(), email, CurrentUser.Role.PROCTOR, InviteTokens.hash(token),
+            invites.saveAndFlush(new CompanyInvite(company.getId(), email, CurrentUser.Role.PROCTOR, InviteTokenService.hash(token),
                     manager.userId(), now.plus(INVITE_LIFETIME), now));
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException("이 이메일로 이미 초대가 진행 중입니다.");
@@ -106,16 +106,16 @@ public class CompanyInviteService {
     }
 
     private CompanyInvite findUsable(String rawToken) {
-        if (!InviteTokens.looksValid(rawToken)) throw new UnauthorizedException("유효하지 않은 기업 초대입니다.");
-        CompanyInvite invite = invites.findByTokenHash(InviteTokens.hash(rawToken))
+        if (!InviteTokenService.looksValid(rawToken)) throw new UnauthorizedException("유효하지 않은 기업 초대입니다.");
+        CompanyInvite invite = invites.findByTokenHash(InviteTokenService.hash(rawToken))
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 기업 초대입니다."));
         if (!invite.isUsable(Instant.now())) throw new UnauthorizedException("만료되었거나 이미 사용된 기업 초대입니다.");
         return invite;
     }
 
     private CompanyInvite findUsableForUpdate(String rawToken) {
-        if (!InviteTokens.looksValid(rawToken)) throw new UnauthorizedException("유효하지 않은 기업 초대입니다.");
-        CompanyInvite invite = invites.lockByTokenHash(InviteTokens.hash(rawToken))
+        if (!InviteTokenService.looksValid(rawToken)) throw new UnauthorizedException("유효하지 않은 기업 초대입니다.");
+        CompanyInvite invite = invites.lockByTokenHash(InviteTokenService.hash(rawToken))
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 기업 초대입니다."));
         if (!invite.isUsable(Instant.now())) throw new UnauthorizedException("만료되었거나 이미 사용된 기업 초대입니다.");
         return invite;

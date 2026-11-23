@@ -2,9 +2,9 @@ package com.pair.domain.attempt;
 
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.service.AttemptRegistryService;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.RollbackService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,7 +65,7 @@ class CheckpointRestoreBenchTest {
     }
 
     @Autowired AttemptStateRepository store;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired TaskDefRepository tasks;
     @Autowired CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
@@ -132,12 +132,12 @@ class CheckpointRestoreBenchTest {
         return new Row(stored, ms.get(ms.size() / 2), ms.get((int) Math.ceil(ms.size() * 0.95) - 1), ms.get(ms.size() - 1), rollbackMs);
     }
 
-    static ChatTurnState turn(int no, String role) {
-        return new ChatTurnState(no, role, Instant.now(), role + no, null, null, null, null, null, null);
+    static ChatTurnStateDto turn(int no, String role) {
+        return new ChatTurnStateDto(no, role, Instant.now(), role + no, null, null, null, null, null, null);
     }
 
-    static AttemptState attempt(String id) {
-        return new AttemptState(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
-                AttemptState.Status.SOLVING, List.of(), null, null);
+    static AttemptStateDto attempt(String id) {
+        return new AttemptStateDto(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptStateDto.Status.SOLVING, List.of(), null, null);
     }
 }

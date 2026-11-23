@@ -19,7 +19,7 @@ import jakarta.persistence.Table;
 
 /**
  * 회차 대상자. 초대 토큰(입장 링크)으로만 입장한다.
- * 시험 시작·제출은 과제별 응시(ERD attempts, participant_id)에 남는다 → ParticipantProgress
+ * 시험 시작·제출은 과제별 응시(ERD attempts, participant_id)에 남는다 → ParticipantProgressService
  */
 @Entity
 @Table(name = "exam_participants")

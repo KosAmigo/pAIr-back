@@ -8,27 +8,27 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.TaskDefDto;
 
 @RestController
 @RequestMapping("/api")
 public class TaskController {
 
-    private final TaskCatalog catalog;
+    private final TaskCatalogService catalog;
 
-    public TaskController(TaskCatalog catalog) {
+    public TaskController(TaskCatalogService catalog) {
         this.catalog = catalog;
     }
 
     /** 자가진단 과제 목록 (응시자용). track=dev|biz 로 직군을 거를 수 있다 */
     @GetMapping("/tasks")
-    public List<TaskCatalog.Summary> taskList(@RequestParam(required = false) String track) {
+    public List<TaskCatalogService.Summary> taskList(@RequestParam(required = false) String track) {
         return catalog.selfTasks(track);
     }
 
     @GetMapping("/tasks/{taskId}")
-    public TaskDef task(@PathVariable String taskId) {
+    public TaskDefDto task(@PathVariable String taskId) {
         return catalog.publicSelfDefinition(taskId);
     }
 }

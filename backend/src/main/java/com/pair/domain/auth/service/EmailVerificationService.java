@@ -2,7 +2,7 @@ package com.pair.domain.auth.service;
 
 import com.pair.domain.auth.entity.EmailVerification;
 import com.pair.domain.auth.repository.EmailVerificationRepository;
-import com.pair.global.error.MailDeliveryException;
+import com.pair.infra.mail.MailDeliveryException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;

@@ -18,7 +18,7 @@ import java.util.NoSuchElementException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.exam.service.InviteTokens;
+import com.pair.global.security.InviteTokenService;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.global.error.ConflictException;
@@ -105,7 +105,7 @@ public class CompanyMemberService {
         AuthAccount oldManager = activeManagers.isEmpty() ? null : activeManagers.get(0);
         if (oldManager != null) {
             emailVerification.removeForEmail(oldManager.getEmail());
-            oldManager.deactivate("withdrawn+" + InviteTokens.next() + "@invalid.local",
+            oldManager.deactivate("withdrawn+" + InviteTokenService.next() + "@invalid.local",
                     CorporateAccountService.newInvalidPasswordHash(), Instant.now());
             accounts.flush();
             sessions.revokeAll(oldManager.getId());

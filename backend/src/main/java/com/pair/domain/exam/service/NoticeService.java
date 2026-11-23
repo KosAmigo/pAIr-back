@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.global.security.InviteTokenService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -77,8 +78,8 @@ public class NoticeService {
     }
 
     private ExamParticipant byToken(String token) {
-        if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.findByInviteTokenHash(InviteTokens.hash(token))
+        if (!InviteTokenService.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
+        return participants.findByInviteTokenHash(InviteTokenService.hash(token))
                 .orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 }

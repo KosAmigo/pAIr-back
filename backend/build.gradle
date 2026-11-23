@@ -98,6 +98,29 @@ def archTest = tasks.register('archTest', Test) {
     testLogging { exceptionFormat = 'full'; events 'failed' }
 }
 
+// 컴파일 직후 같은 규칙(PackageRules.main)을 돌린다. classes 가 이 태스크를 거치므로
+// IntelliJ 기본 설정(Build and run using: Gradle)에서 PairApplication 을 실행해도 빌드 단계에서 멈춘다.
+// classpath 에 sourceSets.main.output 을 쓰면 classes 에 의존해 순환이 생기므로 컴파일 결과 폴더를 직접 넣는다.
+def packageRulesCheck = tasks.register('packageRulesCheck', JavaExec) {
+    description = '패키지 구조·클래스 이름 규칙 검사 (컴파일 직후)'
+    group = 'verification'
+    dependsOn tasks.named('compileJava'), tasks.named('processResources')
+    mainClass = 'com.pair.global.config.PackageRules'
+    classpath = files(tasks.named('compileJava').map { it.destinationDirectory },
+            tasks.named('processResources').map { it.destinationDir }) + configurations.runtimeClasspath
+    // 한글 메시지가 깨지지 않게 출력은 UTF-8 로
+    jvmArgs '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8'
+    // 코드가 바뀌지 않았으면 다시 돌지 않는다 (통과하면 표시 파일을 남김)
+    def marker = layout.buildDirectory.file('package-rules/passed')
+    inputs.files(classpath)
+    outputs.file(marker)
+    doLast { marker.get().asFile.text = 'ok' }
+}
+
+tasks.named('classes') {
+    dependsOn packageRulesCheck
+}
+
 tasks.named('bootJar') {
     dependsOn archTest
 }

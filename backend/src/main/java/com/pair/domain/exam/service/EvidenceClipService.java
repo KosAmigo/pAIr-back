@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.global.security.InviteTokenService;
 import com.pair.infra.storage.SnapshotStorage;
 import java.time.Clock;
 import java.time.Duration;
@@ -44,12 +45,12 @@ public class EvidenceClipService {
     private final ExamParticipantRepository participants;
     private final ProctorEventRepository events;
     private final ProctorEventFrameRepository frames;
-    private final SnapshotValidator validator;
+    private final SnapshotValidationService validator;
     private final SnapshotStorage storage;
     private final Clock clock;
 
     public EvidenceClipService(ExamParticipantRepository participants, ProctorEventRepository events, ProctorEventFrameRepository frames,
-            SnapshotValidator validator, SnapshotStorage storage, Clock clock) {
+            SnapshotValidationService validator, SnapshotStorage storage, Clock clock) {
         this.participants = participants;
         this.events = events;
         this.frames = frames;
@@ -61,8 +62,8 @@ public class EvidenceClipService {
     /** 응시자 PC 가 이벤트(clientId)에 증거 사진을 올린다. 같은 (출처, 시점)은 한 장만 있고 다시 보내면 건너뛴다 */
     @Transactional
     public void upload(String token, String clientId, ClipUploadRequest req) {
-        if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        ExamParticipant p = participants.findByInviteTokenHash(InviteTokens.hash(token))
+        if (!InviteTokenService.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
+        ExamParticipant p = participants.findByInviteTokenHash(InviteTokenService.hash(token))
                 .orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
         ExamSession s = p.getSession();
         if (!s.isProctoring()) throw new IllegalStateException("감독을 쓰지 않는 회차입니다.");

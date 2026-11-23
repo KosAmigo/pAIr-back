@@ -1,5 +1,7 @@
 package com.pair.domain.grader.service;
 
+import com.pair.domain.grader.dto.PromptVersionStateDto;
+import com.pair.domain.grader.repository.PromptVersionStateRepository;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -27,11 +29,11 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PreDestroy;
 
 import com.pair.infra.ai.BatchClient;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.scoring.service.ScoringService;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.domain.task.repository.TaskDefRepository;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -57,7 +59,7 @@ public class GraderService {
     public static final String MINE = "mine";
 
     private final ScoringService scoring;
-    private final PromptStore prompts;
+    private final PromptVersionStateRepository prompts;
     private final TaskDefRepository tasks;
     private final AttemptStateRepository mine;
     private final AttemptStateRepository samples;
@@ -75,7 +77,7 @@ public class GraderService {
         return t;
     });
 
-    public GraderService(ScoringService scoring, PromptStore prompts, TaskDefRepository tasks, AttemptStateRepository mine,
+    public GraderService(ScoringService scoring, PromptVersionStateRepository prompts, TaskDefRepository tasks, AttemptStateRepository mine,
                          PairProperties props, ObjectMapper json, BatchClient batch) {
         this.batch = batch;
         this.scoring = scoring;
@@ -133,9 +135,9 @@ public class GraderService {
     private AttemptRow row(String source, String id, String label) {
         AttemptStateRepository src = store(source);
         try {
-            AttemptState a = src.load(id);
+            AttemptStateDto a = src.load(id);
             if (a.followupsDoneAt() == null) return null; // 후속 질문까지 끝나야 채점할 수 있다
-            TaskDef t = tasks.get(a.taskId());
+            TaskDefDto t = tasks.get(a.taskId());
             JsonNode rep = src.readReport(id);
             Integer total = rep != null && rep.path("version").asInt() >= 2 ? rep.path("total").asInt() : null;
             return new AttemptRow(source, id, label, t.id(), t.title(), t.type(), a.startedAt(), total, src.turns(id).size());
@@ -313,7 +315,7 @@ public class GraderService {
     public RunMeta start(RunRequest req) {
         req = fixed(req);
         validate(req, true);
-        PromptVersionState version = prompts.get(req.versionId());
+        PromptVersionStateDto version = prompts.get(req.versionId());
         List<AttemptRow> rows = new ArrayList<>();
         for (AttemptRef ref : req.attempts()) {
             AttemptRow r = row(ref.source(), ref.id(), SAMPLE.equals(ref.source()) ? sampleLabels().getOrDefault(ref.id(), ref.id()) : null);
@@ -418,7 +420,7 @@ public class GraderService {
     }
 
     // ── 배치 채점 ─────────────────────
-    // 채점 코드를 그대로 돌리면서 필요한 모델 호출을 배치 요청으로 모은다(BatchCalls).
+    // 채점 코드를 그대로 돌리면서 필요한 모델 호출을 배치 요청으로 모은다(BatchCallService).
     // 단계마다: 요청 모으기 → 배치 보내기 → 20초마다 상태 확인 → 결과 받기 → 다음 단계.
     // 판정(Claude, OpenAI) 요청을 보내고, 결과를 받은 뒤 더 모을 요청이 없으면 리포트를 만든다.
     // 배치 ID 와 받은 결과는 batch.json 에 저장해서 서버를 다시 켜도 이어서 진행한다.
@@ -509,11 +511,11 @@ public class GraderService {
             // 다음 단계 요청 모으기
             setPhase(s, "배치 요청을 만드는 중 (" + (bs.round() + 1) + "단계)");
             ScoringService.Options opt = new ScoringService.Options(prompts.get(s.meta.versionId()), s.meta.judgeRepeat());
-            List<BatchCalls.Pending> pending = new ArrayList<>();
+            List<BatchCallService.Pending> pending = new ArrayList<>();
             for (int i = 0; i < bs.units().size(); i++) {
                 Unit u = bs.units().get(i);
                 try {
-                    scoring.evaluate(store(u.source()), u.id(), opt, new BatchCalls("u" + i, bs.known(), pending, false, batch, scoring));
+                    scoring.evaluate(store(u.source()), u.id(), opt, new BatchCallService("u" + i, bs.known(), pending, false, batch, scoring));
                 } catch (RuntimeException e) {
                     log.warn("배치 요청 만들기 실패: {} {}", u.id(), e.getMessage());
                 }
@@ -526,7 +528,7 @@ public class GraderService {
                 return;
             }
             Map<String, List<BatchClient.Req>> groups = new LinkedHashMap<>();
-            for (BatchCalls.Pending p : pending) {
+            for (BatchCallService.Pending p : pending) {
                 String g = p.kind().equals("claude") ? "claude" : "openai:" + p.model();
                 groups.computeIfAbsent(g, k -> new ArrayList<>()).add(new BatchClient.Req(p.customId(), p.body()));
             }
@@ -560,14 +562,14 @@ public class GraderService {
             Unit u = bs.units().get(i);
             String name = u.source() + "__" + u.id() + "__" + u.n();
             try {
-                BatchCalls calls = new BatchCalls("u" + i, bs.known(), new ArrayList<>(), true, batch, scoring,
+                BatchCallService calls = new BatchCallService("u" + i, bs.known(), new ArrayList<>(), true, batch, scoring,
                         bs.fallback() ? scoring.live() : null);
                 Map<String, Object> report = scoring.evaluate(store(u.source()), u.id(), opt, calls);
                 report.put("graderRun", Map.of("runId", runId, "source", u.source(), "n", u.n(), "mode", "batch", "fallback", bs.fallback()));
                 write(resultsDir(runId).resolve(name + ".json"), report);
                 // 배치로 받은 부분은 절반 가격, 일반 API 로 부른 부분은 정가
                 double liveUsd = 0;
-                for (BatchCalls.Used used : calls.liveUsed()) liveUsd += cost(used.model(), used.input(), used.output());
+                for (BatchCallService.Used used : calls.liveUsed()) liveUsd += cost(used.model(), used.input(), used.output());
                 double usd = (actualCost(report) - liveUsd) * BATCH_DISCOUNT + liveUsd;
                 finishOne(runId, s, usd, null, true);
             } catch (Exception e) {

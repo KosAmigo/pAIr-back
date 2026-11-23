@@ -25,12 +25,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.pair.infra.ai.EmbeddingClient;
 import com.pair.infra.ai.Judge;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.grader.service.PromptVersionState;
+import com.pair.domain.grader.dto.PromptVersionStateDto;
 import com.pair.domain.task.entity.DocumentPage;
 import com.pair.domain.task.repository.DocumentPageRepository;
-import com.pair.domain.task.service.TaskCatalog;
+import com.pair.domain.task.service.TaskCatalogService;
 import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.repository.TaskFileRepository;
 import com.pair.domain.task.entity.TaskQuestion;
@@ -57,20 +57,20 @@ class ScoringReferenceTest {
     @MockitoBean EmbeddingClient embeddings;
 
     @Autowired ScoringService scoring;
-    @Autowired ReferenceDocs referenceDocs;
+    @Autowired ReferenceDocService referenceDocs;
     @Autowired TaskDefRepository tasks;
-    @Autowired TaskCatalog catalog;
+    @Autowired TaskCatalogService catalog;
     @Autowired AttemptStateRepository store;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
     @Autowired DocumentPageRepository pages;
     @Autowired com.pair.domain.task.repository.QuestionSourceRepository sourceRecords;
-    @Autowired com.pair.domain.attempt.service.AttemptRegistry registry;
+    @Autowired com.pair.domain.attempt.service.AttemptRegistryService registry;
 
     static final String BIG = "big-biz";
     final Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    final PromptVersionState version = new PromptVersionState("20261120-1100_ref-test", "ref", null, now, null, "규칙", Map.of());
+    final PromptVersionStateDto version = new PromptVersionStateDto("20261120-1100_ref-test", "ref", null, now, null, "규칙", Map.of());
 
     @BeforeEach
     void setUp() {
@@ -143,11 +143,11 @@ class ScoringReferenceTest {
     @Test
     void auto_기준과_강제_선택() {
         Map<String, String> m = Map.of("자료/a.md", "x".repeat(100));
-        assertThat(ReferenceDocs.useRag(m, "auto", 100)).isFalse(); // 기준 이하
-        assertThat(ReferenceDocs.useRag(m, "auto", 99)).isTrue();   // 초과
-        assertThat(ReferenceDocs.useRag(m, "full", 1)).isFalse();
-        assertThat(ReferenceDocs.useRag(m, "rag", 1_000_000)).isTrue();
-        assertThat(ReferenceDocs.useRag(Map.of(), "rag", 1)).isFalse(); // 자료가 없으면 full
+        assertThat(ReferenceDocService.useRag(m, "auto", 100)).isFalse(); // 기준 이하
+        assertThat(ReferenceDocService.useRag(m, "auto", 99)).isTrue();   // 초과
+        assertThat(ReferenceDocService.useRag(m, "full", 1)).isFalse();
+        assertThat(ReferenceDocService.useRag(m, "rag", 1_000_000)).isTrue();
+        assertThat(ReferenceDocService.useRag(Map.of(), "rag", 1)).isFalse(); // 자료가 없으면 full
     }
 
     // ── 채점 프롬프트 ─────────────
@@ -157,8 +157,8 @@ class ScoringReferenceTest {
     private String newAttempt(String taskCode, long taskId, Map<String, String> files) {
         var r = registry.save(com.pair.domain.attempt.entity.Attempt.self(1L, taskId, "gpt-test", now));
         String id = String.valueOf(r.getId());
-        store.create(new AttemptState(id, taskCode, "openai", "gpt-test", now, null, null, null,
-                AttemptState.Status.SCORING, List.of(), null, null), files);
+        store.create(new AttemptStateDto(id, taskCode, "openai", "gpt-test", now, null, null, null,
+                AttemptStateDto.Status.SCORING, List.of(), null, null), files);
         store.save(store.load(id).withSubmitted(now.plusSeconds(1)));
         return id;
     }
@@ -266,7 +266,7 @@ class ScoringReferenceTest {
             String sub = "# 기획안\n" + c.get(2);
             int full = referenceDocs.build(m, sub, false).chars();
             int rag = referenceDocs.build(m, sub, true).chars();
-            boolean autoRag = ReferenceDocs.useRag(m, "auto", 12000);
+            boolean autoRag = ReferenceDocService.useRag(m, "auto", 12000);
             List<Prompt> seen = Collections.synchronizedList(new ArrayList<>());
             run(newAttempt(code, Long.parseLong(c.get(1)), Map.of("기획안.md", sub)), seen);
             Prompt p = seen.get(0);

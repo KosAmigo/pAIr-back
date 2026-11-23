@@ -5,8 +5,8 @@ import com.pair.domain.task.entity.QuestionSource;
 import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.entity.TaskQuestion;
 import com.pair.domain.task.entity.Task;
-import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.TaskDefDto;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -29,7 +29,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * DB(tasks, task_files, task_questions)에서 과제 내용을 읽는다.
  * 조회할 때마다 DB 를 읽으므로 나중에 새로 들어온 과제(AI 생성 등)도 재시작 없이 보인다.
- * 실전(LIVE) 복사본은 내용 행이 없어 여기서 찾지 못한다. TaskCatalog 가 원본 code 로 바꿔 부른다.
+ * 실전(LIVE) 복사본은 내용 행이 없어 여기서 찾지 못한다. TaskCatalogService 가 원본 code 로 바꿔 부른다.
  */
 @Component
 public class TaskDefRepository {
@@ -67,7 +67,7 @@ public class TaskDefRepository {
 
     /** 내용이 DB 에 있는 모든 과제 (원본만, 번호 순). 관리자 과제 콘솔 목록용 */
     @Transactional(readOnly = true)
-    public List<TaskDef> all() {
+    public List<TaskDefDto> all() {
         return records.findAllByOrderByIdAsc().stream().filter(TaskDefRepository::hasContent).map(this::toDef).toList();
     }
 
@@ -78,7 +78,7 @@ public class TaskDefRepository {
     }
 
     @Transactional(readOnly = true)
-    public TaskDef get(String id) {
+    public TaskDefDto get(String id) {
         return toDef(find(id));
     }
 
@@ -98,7 +98,7 @@ public class TaskDefRepository {
      * 채점에 쓸 제공 자료: 과제 원본의 공개 파일 중 "자료/" 아래 파일 (경로 → 글, 경로 순).
      * 텍스트 파일(CSV, md)은 content 그대로, PDF(content 없음)는 document_pages 를 쪽 순서로 "--- N쪽 ---" 줄과 함께 이어 붙인다.
      * 응시 작업 파일이 아니라 과제 원본에서 읽으므로 응시자가 자료를 고쳐도 채점 근거는 그대로다.
-     * 실전 복사본은 원본 code 로 불러야 한다(TaskCatalog.definitionCode).
+     * 실전 복사본은 원본 code 로 불러야 한다(TaskCatalogService.definitionCode).
      */
     @Transactional(readOnly = true)
     public Map<String, String> materials(String id) {
@@ -193,13 +193,13 @@ public class TaskDefRepository {
         return t.getParentTaskId() == null && t.getSettings() != null;
     }
 
-    private TaskDef toDef(Task t) {
+    private TaskDefDto toDef(Task t) {
         Settings s = readSettings(t);
         List<String> followUps = questions
                 .findByTaskIdAndStageAndActiveTrueOrderBySeqAsc(t.getId(), TaskQuestion.FOLLOWUP).stream()
                 .map(TaskQuestion::getContent).toList();
         boolean dev = "DEV".equalsIgnoreCase(t.getTrack());
-        return new TaskDef(t.getCode(), t.getTrack().toLowerCase(), t.getTitle(), t.getTimeLimitMin(),
+        return new TaskDefDto(t.getCode(), t.getTrack().toLowerCase(), t.getTitle(), t.getTimeLimitMin(),
                 lines(t.getDescription()), lines(t.getRequirements()), dev ? NOTES_DEV : NOTES_BIZ, followUps,
                 s.openFile, s.d4Minutes == null ? List.of() : s.d4Minutes,
                 s.requiredHeadings == null ? List.of() : s.requiredHeadings, s.editableFile);

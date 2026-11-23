@@ -27,11 +27,11 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.grader.service.PromptVersionState;
-import com.pair.domain.scoring.service.ScoringRecords;
+import com.pair.domain.grader.dto.PromptVersionStateDto;
+import com.pair.domain.scoring.repository.ScoringResultRepository;
 import com.pair.domain.scoring.service.ScoringService;
 import com.pair.domain.scoring.service.ScoringTestAccess;
 import com.pair.domain.scoring.service.TestPromptVersions;
@@ -70,7 +70,7 @@ class QuestionApiTest {
     @Autowired TextAnswerRepository textAnswers;
     @Autowired QuestionResultRepository results;
     @Autowired ScoringService scoring;
-    @Autowired ScoringRecords scoringRecords;
+    @Autowired ScoringResultRepository scoringRecords;
     @Autowired PromptVersionRepository promptVersions;
     @Autowired ScoringRepository scorings;
     @MockitoBean JavaMailSender mail;
@@ -249,9 +249,9 @@ class QuestionApiTest {
     // ── 채점 흐름 ─────────────────
 
     private long finishScoring(String attemptId) {
-        PromptVersionState v = new PromptVersionState("20261120-1100_question-test", "q", null, java.time.Instant.now(), null, "규칙", Map.of());
+        PromptVersionStateDto v = new PromptVersionStateDto("20261120-1100_question-test", "q", null, java.time.Instant.now(), null, "규칙", Map.of());
         TestPromptVersions.ensure(promptVersions, v);
-        if (store.load(attemptId).status() == AttemptState.Status.SOLVING) {
+        if (store.load(attemptId).status() == AttemptStateDto.Status.SOLVING) {
             attempts.submit(attemptId); // 제출 → 후속 질문 답 → 채점 중. 채점 모델은 부르지 않는다
             store.save(store.load(attemptId).withFollowUps(List.of("답"), List.of("질문"), java.time.Instant.now()));
         }
@@ -272,7 +272,7 @@ class QuestionApiTest {
         assertThat(rs).hasSize(3).allSatisfy(r -> assertThat(r.getMethod()).isEqualTo("AUTO"));
         assertThat(rs.stream().filter(r -> r.getQuestionId() == multi).findFirst().orElseThrow().getReason())
                 .isEqualTo("오답 (답: 가 / 정답: 가, 다)");
-        assertThat(store.load(id).status()).isEqualTo(AttemptState.Status.DONE);
+        assertThat(store.load(id).status()).isEqualTo(AttemptStateDto.Status.DONE);
 
         JsonNode body = getJson("/api/attempts/{id}/report");
         JsonNode q = body.path("questions");

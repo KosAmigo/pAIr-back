@@ -14,12 +14,12 @@ import org.springframework.ai.openai.api.ResponseFormat;
 import org.springframework.stereotype.Component;
 
 import com.pair.global.config.AiKeyProperties;
-import com.pair.domain.taskgen.service.TaskGenAi;
+import com.pair.domain.taskgen.service.TaskGenAiService;
 import com.pair.global.config.TaskGenProperties;
 
 /** 과제 생성용 OpenAI 호출. OpenAiJudgeClient 와 같은 방식(JSON Schema 구조화 출력)으로 부른다 */
 @Component
-public class OpenAiTaskGenClient implements TaskGenAi {
+public class OpenAiTaskGenClient implements TaskGenAiService {
 
     private final TaskGenProperties cfg;
     private final AiKeyProperties keys;

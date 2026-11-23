@@ -1,5 +1,7 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
@@ -28,13 +30,13 @@ public class RollbackService {
     private final CheckpointRepository checkpoints;
     private final CheckpointService checkpointService;
     private final AttemptRepository records;
-    private final AttemptRegistry registry;
+    private final AttemptRegistryService registry;
     private final AttemptStateRepository store;
     private final CreditService credits;
     private final ChatAttachmentService attachments;
 
     public RollbackService(CheckpointRepository checkpoints, CheckpointService checkpointService,
-                           AttemptRepository records, AttemptRegistry registry, AttemptStateRepository store, CreditService credits,
+                           AttemptRepository records, AttemptRegistryService registry, AttemptStateRepository store, CreditService credits,
                            ChatAttachmentService attachments) {
         this.checkpoints = checkpoints;
         this.checkpointService = checkpointService;
@@ -57,15 +59,15 @@ public class RollbackService {
         }
         credits.checkRollback(userId);
         String sourceId = String.valueOf(source.getId());
-        AttemptState original = store.load(sourceId);
+        AttemptStateDto original = store.load(sourceId);
 
         Attempt fork = registry.save(Attempt.forkedSelf(userId, source.getTaskId(),
                 source.getAssistantModel(), cp.getId(), Instant.now()));
         String forkId = String.valueOf(fork.getId());
-        store.create(new AttemptState(forkId, original.taskId(), source.getProvider(), source.getAssistantModel(),
-                        fork.getStartedAt(), null, null, null, AttemptState.Status.SOLVING, List.of(), null, null),
+        store.create(new AttemptStateDto(forkId, original.taskId(), source.getProvider(), source.getAssistantModel(),
+                        fork.getStartedAt(), null, null, null, AttemptStateDto.Status.SOLVING, List.of(), null, null),
                 checkpointService.restore(sourceId, cp.getTurnNo()));
-        for (ChatTurnState t : store.turns(sourceId)) {
+        for (ChatTurnStateDto t : store.turns(sourceId)) {
             if (t.turn() < cp.getTurnNo()) store.appendTurn(forkId, t);
         }
         // 복사한 질문 턴의 첨부도 함께 복사한다 (크레딧은 다시 차감하지 않는다)

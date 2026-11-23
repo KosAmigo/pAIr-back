@@ -5,7 +5,7 @@ import com.pair.domain.exam.dto.EnvCheckResponse;
 import com.pair.domain.exam.dto.NoticeRequest;
 import com.pair.domain.exam.dto.NoticeResponse;
 import com.pair.domain.exam.dto.RetentionResponse;
-import com.pair.domain.exam.service.ConsoleAccess;
+import com.pair.domain.exam.service.ConsoleAccessService;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -29,10 +29,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.pair.domain.exam.service.AutoSubmitService;
-import com.pair.domain.exam.service.ConnectionGrace;
+import com.pair.domain.exam.service.ConnectionGraceService;
 import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.ExamSessionService;
-import com.pair.domain.exam.service.ExamWorkbooks;
+import com.pair.domain.exam.service.ParticipantWorkbookService;
 import com.pair.domain.exam.service.ProctorService;
 import com.pair.domain.exam.service.SessionResultService;
 import com.pair.domain.exam.dto.AddParticipantsRequest;
@@ -50,7 +50,7 @@ import jakarta.validation.Valid;
 
 /**
  * 기업 콘솔 API: 회차 생성·수정·취소, 대상자(CSV), 진행 현황, 결과, 감독 이벤트·사진·판정.
- * 로그인 사용자(CurrentUser)의 회사 회차만 다룬다 (ConsoleAccess). 관리자는 모든 회사.
+ * 로그인 사용자(CurrentUser)의 회사 회차만 다룬다 (ConsoleAccessService). 관리자는 모든 회사.
  * MANAGER 는 관리·결과까지, PROCTOR 는 보기·감독(이벤트·사진·판정)만.
  */
 @RestController
@@ -68,13 +68,13 @@ public class ExamConsoleController {
     private final EnvScanService envScan;
     private final com.pair.domain.exam.service.EnvCheckService envCheck;
     private final com.pair.domain.exam.service.NoticeService notices;
-    private final ConnectionGrace grace;
-    private final ConsoleAccess access;
+    private final ConnectionGraceService grace;
+    private final ConsoleAccessService access;
     private final com.pair.domain.exam.service.SnapshotRetentionService retention;
     private final com.pair.domain.exam.service.EvidenceClipService clips;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
-            AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGrace grace, ConsoleAccess access,
+            AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGraceService grace, ConsoleAccessService access,
             com.pair.domain.exam.service.EnvCheckService envCheck, com.pair.domain.exam.service.NoticeService notices,
             com.pair.domain.exam.service.SnapshotRetentionService retention, com.pair.domain.exam.service.EvidenceClipService clips) {
         this.retention = retention;
@@ -160,7 +160,7 @@ public class ExamConsoleController {
     /** 꾸민 엑셀 양식 (기본 양식). CSV 양식은 그대로 둔다 */
     @GetMapping("/participants-template.xlsx")
     public ResponseEntity<byte[]> participantsTemplateXlsx() {
-        return xlsx("대상자_양식.xlsx", ExamWorkbooks.participantsTemplate());
+        return xlsx("대상자_양식.xlsx", ParticipantWorkbookService.participantsTemplate());
     }
 
     @org.springframework.web.bind.annotation.DeleteMapping("/{sessionId}/participants/{participantId}")

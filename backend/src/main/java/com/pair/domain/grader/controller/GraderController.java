@@ -15,9 +15,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pair.global.config.PairProperties;
 import com.pair.domain.grader.service.GraderService;
-import com.pair.domain.grader.service.PromptStore;
-import com.pair.domain.grader.service.PromptVersionState;
-import com.pair.domain.scoring.service.Rubric;
+import com.pair.domain.grader.repository.PromptVersionStateRepository;
+import com.pair.domain.grader.dto.PromptVersionStateDto;
+import com.pair.domain.scoring.service.RubricService;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -26,11 +26,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 @RequestMapping("/api/grader")
 public class GraderController {
 
-    private final PromptStore prompts;
+    private final PromptVersionStateRepository prompts;
     private final GraderService grader;
     private final PairProperties props;
 
-    public GraderController(PromptStore prompts, GraderService grader, PairProperties props) {
+    public GraderController(PromptVersionStateRepository prompts, GraderService grader, PairProperties props) {
         this.prompts = prompts;
         this.grader = grader;
         this.props = props;
@@ -42,9 +42,9 @@ public class GraderController {
 
     @GetMapping("/rubric")
     public Map<String, Object> rubric() {
-        List<CheckInfo> checks = Rubric.CHECKS.stream().map(c -> new CheckInfo(Rubric.key(c), c.code(), c.item(), Rubric.item(c.item()).name(),
-                c.track().name().toLowerCase(), c.method().name(), c.label(), c.points(), c.judgeHint(), Rubric.pointsEditable(c))).toList();
-        return Map.of("items", Rubric.ITEMS, "checks", checks,
+        List<CheckInfo> checks = RubricService.CHECKS.stream().map(c -> new CheckInfo(RubricService.key(c), c.code(), c.item(), RubricService.item(c.item()).name(),
+                c.track().name().toLowerCase(), c.method().name(), c.label(), c.points(), c.judgeHint(), RubricService.pointsEditable(c))).toList();
+        return Map.of("items", RubricService.ITEMS, "checks", checks,
                 "defaults", Map.of("judgeRepeat", 1, "parallel", props.grader().parallel()));
     }
 
@@ -58,12 +58,12 @@ public class GraderController {
     }
 
     @GetMapping("/versions/{id}")
-    public PromptVersionState version(@PathVariable String id) {
+    public PromptVersionStateDto version(@PathVariable String id) {
         return prompts.get(id);
     }
 
     @PostMapping("/versions")
-    public PromptVersionState createVersion(@RequestBody PromptVersionState draft) {
+    public PromptVersionStateDto createVersion(@RequestBody PromptVersionStateDto draft) {
         return prompts.create(draft);
     }
 

@@ -2,10 +2,10 @@ package com.pair.domain.attempt;
 
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.AttemptRegistry;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.RollbackService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,7 +64,7 @@ class RollbackRunTest {
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
@@ -91,14 +91,14 @@ class RollbackRunTest {
         edited = original + "\n// 고침";
 
         id = String.valueOf(registry.save(Attempt.self(userId, 1L, "gpt-test", Instant.now())).getId());
-        store.create(new AttemptState(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
-                AttemptState.Status.SOLVING, List.of(), null, null), files);
-        checkpoints.appendQuestion(id, new ChatTurnState(1, "user", Instant.now(), "질문1", null, null, null, null, null, null), files);
-        store.appendTurn(id, new ChatTurnState(2, "ai", Instant.now(), "답1", null, null, null, null, null, null));
+        store.create(new AttemptStateDto(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptStateDto.Status.SOLVING, List.of(), null, null), files);
+        checkpoints.appendQuestion(id, new ChatTurnStateDto(1, "user", Instant.now(), "질문1", null, null, null, null, null, null), files);
+        store.appendTurn(id, new ChatTurnStateDto(2, "ai", Instant.now(), "답1", null, null, null, null, null, null));
         Map<String, String> after = new TreeMap<>(files);
         after.put(javaPath, edited);
         store.writeWorkspaceFile(id, javaPath, edited);
-        checkpoints.appendQuestion(id, new ChatTurnState(3, "user", Instant.now(), "질문3", null, null, null, null, null, null), after);
+        checkpoints.appendQuestion(id, new ChatTurnStateDto(3, "user", Instant.now(), "질문3", null, null, null, null, null, null), after);
 
         when(runner.run(anyMap())).thenReturn(new CodeRunner.RunResult(true, List.of(), 0, 0, List.of(), List.of(), 0));
     }

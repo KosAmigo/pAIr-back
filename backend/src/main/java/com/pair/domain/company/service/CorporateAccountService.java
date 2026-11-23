@@ -10,7 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.exam.service.InviteTokens;
+import com.pair.global.security.InviteTokenService;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.global.error.ConflictException;
@@ -27,10 +27,10 @@ public class CorporateAccountService {
     private final AuthAccountRepository accounts;
     private final RefreshSessionRepository sessions;
     private final EmailVerificationService emailVerification;
-    private final CompanyAccountMailer mailer;
+    private final CompanyAccountMailService mailer;
 
     public CorporateAccountService(AuthAccountRepository accounts, RefreshSessionRepository sessions,
-            EmailVerificationService emailVerification, CompanyAccountMailer mailer) {
+            EmailVerificationService emailVerification, CompanyAccountMailService mailer) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.emailVerification = emailVerification;
@@ -112,6 +112,6 @@ public class CorporateAccountService {
     }
 
     public static String newInvalidPasswordHash() {
-        return PASSWORD_ENCODER.encode(InviteTokens.next());
+        return PASSWORD_ENCODER.encode(InviteTokenService.next());
     }
 }

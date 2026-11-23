@@ -14,7 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
@@ -49,13 +49,13 @@ public class AutoSubmitService {
 
     private final ExamSessionRepository sessions;
     private final ExamParticipantRepository participants;
-    private final AttemptSubmitter attempts;
-    private final com.pair.domain.attempt.service.AttemptRegistry registry;
-    private final ParticipantProgress progress;
+    private final AttemptSubmitService attempts;
+    private final com.pair.domain.attempt.service.AttemptRegistryService registry;
+    private final ParticipantProgressService progress;
     private final Clock clock;
 
     public AutoSubmitService(ExamSessionRepository sessions, ExamParticipantRepository participants,
-            AttemptSubmitter attempts, com.pair.domain.attempt.service.AttemptRegistry registry, ParticipantProgress progress, Clock clock) {
+            AttemptSubmitService attempts, com.pair.domain.attempt.service.AttemptRegistryService registry, ParticipantProgressService progress, Clock clock) {
         this.sessions = sessions;
         this.participants = participants;
         this.attempts = attempts;
@@ -89,7 +89,7 @@ public class AutoSubmitService {
         var states = progress.of(ps);
         List<String> toFinish = new ArrayList<>();
         for (ExamParticipant p : ps) {
-            ParticipantProgress.Progress pr = states.get(p.getId());
+            ParticipantProgressService.Progress pr = states.get(p.getId());
             if (!pr.started()) continue;
             if (!pr.finished()) {
                 ExamEntryService.submitAll(attempts, registry, pr, now);
@@ -133,9 +133,9 @@ public class AutoSubmitService {
         List<ExamParticipant> ps = participants.lockBySessionId(sessionId);
         List<String> pending = new ArrayList<>();
         progress.of(ps).values().stream()
-                .filter(ParticipantProgress.Progress::started)
+                .filter(ParticipantProgressService.Progress::started)
                 .flatMap(pr -> pr.records().stream())
-                .filter(r -> r.getStatus() == AttemptState.Status.SOLVING || r.getStatus() == AttemptState.Status.FOLLOWUP)
+                .filter(r -> r.getStatus() == AttemptStateDto.Status.SOLVING || r.getStatus() == AttemptStateDto.Status.FOLLOWUP)
                 .forEach(r -> pending.add(String.valueOf(r.getId())));
         int failed = attempts.finishAll(pending);
         retries.remove(sessionId);

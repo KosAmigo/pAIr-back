@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.global.security.InviteTokenService;
 import com.pair.infra.storage.SnapshotStorage;
 import java.time.Clock;
 import java.time.Duration;
@@ -35,12 +36,12 @@ public class EnvScanService {
 
     private final ExamParticipantRepository participants;
     private final EnvScanPhotoRepository photos;
-    private final SnapshotValidator validator;
+    private final SnapshotValidationService validator;
     private final SnapshotStorage storage;
     private final ExamProperties props;
     private final Clock clock;
 
-    public EnvScanService(ExamParticipantRepository participants, EnvScanPhotoRepository photos, SnapshotValidator validator,
+    public EnvScanService(ExamParticipantRepository participants, EnvScanPhotoRepository photos, SnapshotValidationService validator,
             SnapshotStorage storage, ExamProperties props, Clock clock) {
         this.participants = participants;
         this.photos = photos;
@@ -110,7 +111,7 @@ public class EnvScanService {
     }
 
     private ExamParticipant findParticipant(String token) {
-        if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.findByInviteTokenHash(InviteTokens.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
+        if (!InviteTokenService.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
+        return participants.findByInviteTokenHash(InviteTokenService.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 }

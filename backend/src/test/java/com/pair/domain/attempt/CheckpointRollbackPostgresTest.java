@@ -3,10 +3,10 @@ package com.pair.domain.attempt;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.AttemptRegistry;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.domain.attempt.service.ChatAttachmentService;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.ReplayTreeService;
 import com.pair.domain.attempt.service.RollbackService;
@@ -67,7 +67,7 @@ class CheckpointRollbackPostgresTest {
     }
 
     @Autowired AttemptStateRepository store;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired AttemptRepository records;
     @Autowired TaskDefRepository tasks;
     @Autowired CheckpointService checkpoints;
@@ -119,7 +119,7 @@ class CheckpointRollbackPostgresTest {
         Attempt fork = records.findById(Long.valueOf(forkId)).orElseThrow();
         assertThat(fork.getForkedFromCheckpointId()).isEqualTo(cp3);
         assertThat(store.readFiles(forkId).get(path)).isEqualTo(edited);
-        assertThat(store.turns(forkId)).extracting(ChatTurnState::turn).containsExactly(1, 2);
+        assertThat(store.turns(forkId)).extracting(ChatTurnStateDto::turn).containsExactly(1, 2);
         assertThat(store.turns(id)).hasSize(4);
         // 롤백으로 복사된 앞 턴(1, 2)의 첨부도 새 응시로 복사된다
         assertThat(attachmentService.views(Long.parseLong(forkId)).get(1)).extracting(ChatAttachmentService.View::path).containsExactly(path);
@@ -138,12 +138,12 @@ class CheckpointRollbackPostgresTest {
         assertThatThrownBy(() -> rollbacks.rollback(other, cp3)).isInstanceOf(NoSuchElementException.class);
     }
 
-    static ChatTurnState turn(int no, String role) {
-        return new ChatTurnState(no, role, Instant.now(), role + no, null, null, null, null, null, null);
+    static ChatTurnStateDto turn(int no, String role) {
+        return new ChatTurnStateDto(no, role, Instant.now(), role + no, null, null, null, null, null, null);
     }
 
-    static AttemptState attempt(String id) {
-        return new AttemptState(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
-                AttemptState.Status.SOLVING, List.of(), null, null);
+    static AttemptStateDto attempt(String id) {
+        return new AttemptStateDto(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptStateDto.Status.SOLVING, List.of(), null, null);
     }
 }

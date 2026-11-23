@@ -21,9 +21,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.RequestBuilder;
 
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.service.AttemptRegistry;
+import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.task.repository.TaskRepository;
@@ -42,7 +42,7 @@ class AttemptOwnerTest {
     @Autowired MockMvc mvc;
     @Autowired AuthService auth;
     @Autowired AttemptService attempts;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired AttemptStateRepository store;
     @Autowired TaskRepository tasks;
     @MockitoBean JavaMailSender mail; // 가입은 이메일 인증 코드가 필요해 메일을 가짜로 받는다
@@ -115,8 +115,8 @@ class AttemptOwnerTest {
     void 실전_응시는_로그인_없이_초대_토큰으로_들어오므로_이_검사를_하지_않는다() throws Exception {
         Instant now = Instant.now();
         String live = registry.save(Attempt.live(1L, 3L, "test", now)).getId().toString();
-        store.create(new AttemptState(live, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
-                AttemptState.Status.SOLVING, List.of(), null, null), Map.of());
+        store.create(new AttemptStateDto(live, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
+                AttemptStateDto.Status.SOLVING, List.of(), null, null), Map.of());
         mvc.perform(get("/api/attempts/{id}", live)).andExpect(status().isOk());
     }
 }

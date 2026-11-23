@@ -2,7 +2,7 @@ package com.pair.domain.company;
 
 import com.pair.domain.company.dto.InviteAcceptRequest;
 import com.pair.domain.company.dto.ReplaceManagerRequest;
-import com.pair.domain.company.service.CompanyAccountMailer;
+import com.pair.domain.company.service.CompanyAccountMailService;
 import com.pair.domain.company.service.CompanyInquiryService;
 import com.pair.domain.company.service.CompanyInviteService;
 import com.pair.domain.company.service.CompanyMemberService;
@@ -54,7 +54,7 @@ class CompanyOnboardingIntegrationTest {
     @Autowired AuthAccountRepository accounts;
     @Autowired AuthService auth;
     @Autowired JdbcTemplate jdbc;
-    @MockitoBean CompanyAccountMailer mailer;
+    @MockitoBean CompanyAccountMailService mailer;
     @MockitoBean JavaMailSender mail;
 
     @Test

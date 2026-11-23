@@ -1,6 +1,6 @@
 package com.pair.domain.task.controller;
 
-import com.pair.domain.task.service.MaterialResponses;
+import com.pair.domain.task.service.MaterialPdfHeaderService;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
@@ -35,7 +35,7 @@ public class MaterialController {
 
     @GetMapping("/file")
     public ResponseEntity<byte[]> file(@PathVariable long id, @RequestParam String path) {
-        return MaterialResponses.pdf(materials.fileForAttempt(id, path));
+        return MaterialPdfHeaderService.pdf(materials.fileForAttempt(id, path));
     }
 
     @GetMapping("/pages")

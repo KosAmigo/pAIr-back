@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,7 +29,7 @@ class TaskGenTimeTest {
     @Test
     @DisplayName("개발 과제 프롬프트에 시간별 깊이가 들어간다")
     void devDepth() {
-        DevTaskGenerator g = new DevTaskGenerator(null, null, null, null);
+        DevTaskGeneratorService g = new DevTaskGeneratorService(null, null, null, null);
         assertThat(g.system(form("DEV", 20))).contains("20분", "파일 2~3개", "버그 1개", "숨은 테스트 1~2개").contains("difficulty");
         assertThat(g.system(form("DEV", 40))).contains("파일 3~5개");
         assertThat(g.system(form("DEV", 60))).contains("파일 4~6개");
@@ -38,7 +39,7 @@ class TaskGenTimeTest {
     @Test
     @DisplayName("비개발 과제 프롬프트에 시간별 깊이가 들어간다")
     void bizDepth() {
-        BizTaskGenerator g = new BizTaskGenerator(null, null, null, null, null);
+        BizTaskGeneratorService g = new BizTaskGeneratorService(null, null, null, null, null);
         assertThat(g.system(form("BIZ", 20))).contains("CSV 1개 + 문서 2개", "각 1~2쪽", "문항 3개", "객관식 2개, 단답형 1개");
         assertThat(g.system(form("BIZ", 40))).contains("CSV 1~2개 + 문서 2개", "문항 4개");
         assertThat(g.system(form("BIZ", 60))).contains("문서 2~3개");
@@ -48,17 +49,17 @@ class TaskGenTimeTest {
     @Test
     @DisplayName("d4Minutes 는 60분 기준 [20,30,40,50] 에 시간 비율을 곱한 정수")
     void d4Proportional() {
-        assertThat(GeneratedTaskWriter.d4Minutes(60)).containsExactly(20, 30, 40, 50);
-        assertThat(GeneratedTaskWriter.d4Minutes(40)).containsExactly(13, 20, 26, 33);
-        assertThat(GeneratedTaskWriter.d4Minutes(20)).containsExactly(6, 10, 13, 16);
+        assertThat(GeneratedTaskRepository.d4Minutes(60)).containsExactly(20, 30, 40, 50);
+        assertThat(GeneratedTaskRepository.d4Minutes(40)).containsExactly(13, 20, 26, 33);
+        assertThat(GeneratedTaskRepository.d4Minutes(20)).containsExactly(6, 10, 13, 16);
     }
 
     @Test
     @DisplayName("AI 가 준 난이도는 초급·중급·고급만 쓰고, 이상하면 중급")
     void difficultyFallback() {
-        assertThat(GeneratedTaskWriter.difficultyOf("초급")).isEqualTo("초급");
-        assertThat(GeneratedTaskWriter.difficultyOf(" 고급 ")).isEqualTo("고급");
-        assertThat(GeneratedTaskWriter.difficultyOf("최상급")).isEqualTo("중급");
-        assertThat(GeneratedTaskWriter.difficultyOf(null)).isEqualTo("중급");
+        assertThat(GeneratedTaskRepository.difficultyOf("초급")).isEqualTo("초급");
+        assertThat(GeneratedTaskRepository.difficultyOf(" 고급 ")).isEqualTo("고급");
+        assertThat(GeneratedTaskRepository.difficultyOf("최상급")).isEqualTo("중급");
+        assertThat(GeneratedTaskRepository.difficultyOf(null)).isEqualTo("중급");
     }
 }

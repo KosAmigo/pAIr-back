@@ -32,6 +32,18 @@ public final class PackageRules {
     private static final Set<String> INFRA = Set.of("ai", "sandbox", "storage", "payment", "mail");
     private static final Set<String> LAYERS = Set.of("controller", "service", "dto", "repository", "entity", "exception");
 
+    /**
+     * Gradle packageRulesCheck 태스크가 컴파일 직후 부른다(classes 가 이 검사를 거친다).
+     * IntelliJ 의 "Build and run using: Gradle"(기본값)에서는 PairApplication 실행 전에 여기서 멈춘다.
+     */
+    public static void main(String[] args) {
+        List<String> violations = new PackageRules().violations();
+        if (violations.isEmpty()) return;
+        System.err.println("패키지 구조 규칙을 어긴 클래스가 있습니다 (pAIr-docs 설계/백엔드_패키지_구조.md):");
+        violations.forEach(v -> System.err.println("  - " + v));
+        System.exit(1);
+    }
+
     /** 규칙을 어긴 클래스마다 한 줄. 비어 있으면 통과 */
     public List<String> violations() {
         List<String> out = new ArrayList<>();
@@ -98,7 +110,7 @@ public final class PackageRules {
         if (throwable && !simple.endsWith("Exception"))
             out.add(c.getName() + ": 예외 이름은 Exception 으로 끝나야 합니다");
         if (service && !simple.endsWith("Service"))
-            out.add(c.getName() + ": @Service 이름은 Service 로 끝나야 합니다 (도우미면 @Component 로 바꿉니다)");
+            out.add(c.getName() + ": @Service 이름은 Service 로 끝나야 합니다");
         if (layer == null) {
             if (top.equals("global") && p[1].equals("config") && !c.equals(PackageRules.class)
                     && !simple.endsWith("Config") && !simple.endsWith("Properties"))
@@ -108,6 +120,11 @@ public final class PackageRules {
         switch (layer) {
             case "controller" -> {
                 if (!simple.endsWith("Controller")) out.add(c.getName() + ": controller/ 에는 XxxController 만 둡니다");
+            }
+            case "service" -> {
+                // 인터페이스·추상 클래스·정적 도우미까지 예외 없이. 데이터만 담는 클래스는 dto/ 의 XxxDto 로 옮긴다
+                if (!simple.endsWith("Service"))
+                    out.add(c.getName() + ": service/ 의 모든 클래스 이름은 Service 로 끝나야 합니다 (데이터만 담는 클래스는 dto/ 에 XxxDto 로)");
             }
             case "dto" -> {
                 if (!(simple.endsWith("Request") || simple.endsWith("Response") || simple.endsWith("Dto")))

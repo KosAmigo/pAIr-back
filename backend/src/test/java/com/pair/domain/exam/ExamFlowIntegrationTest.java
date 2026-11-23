@@ -48,17 +48,17 @@ import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
-import com.pair.domain.exam.service.AttemptSubmitter;
+import com.pair.domain.exam.service.AttemptSubmitService;
 import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.AutoSubmitService;
 import com.pair.domain.exam.service.ExamEntryService;
 import com.pair.domain.exam.exception.LinkExpiredException;
 import com.pair.domain.exam.service.ExamSessionService;
-import com.pair.domain.exam.service.InviteTokens;
-import com.pair.domain.exam.service.InvitesCreated;
+import com.pair.global.security.InviteTokenService;
+import com.pair.domain.exam.dto.InvitesCreatedDto;
 import com.pair.domain.exam.service.ProctorService;
 import com.pair.domain.exam.service.ReminderService;
-import com.pair.domain.exam.service.SessionNotice;
+import com.pair.domain.exam.dto.SessionNoticeDto;
 import com.pair.domain.exam.service.SessionResultService;
 import com.pair.infra.storage.SnapshotStorage;
 import com.pair.domain.exam.dto.AddParticipantsResponse;
@@ -71,7 +71,7 @@ import com.pair.domain.exam.dto.SessionSummaryResponse;
 
 /**
  * 회차 전체 흐름 통합 테스트 (H2 메모리 DB).
- * 응시(attempt) 생성·제출은 팀원 1 영역이라 AttemptSubmitter 를 가짜로 바꾸고, 메일 서버도 가짜로 둔다.
+ * 응시(attempt) 생성·제출은 팀원 1 영역이라 AttemptSubmitService 를 가짜로 바꾸고, 메일 서버도 가짜로 둔다.
  * 서버 시각은 MutableClock 으로 움직인다.
  */
 @SpringBootTest
@@ -110,7 +110,7 @@ class ExamFlowIntegrationTest {
     @Autowired ProctorService proctor;
     @Autowired EnvScanService envScan;
     @Autowired com.pair.domain.exam.repository.ProctorEventRepository eventRepo;
-    @Autowired com.pair.domain.exam.service.ConnectionGrace grace;
+    @Autowired com.pair.domain.exam.service.ConnectionGraceService grace;
     @Autowired SessionResultService results;
     @Autowired ExamParticipantRepository participants;
     @Autowired AttemptStateRepository attemptStore;
@@ -119,7 +119,7 @@ class ExamFlowIntegrationTest {
     @Autowired SnapshotStorage storage;
     @Autowired ApplicationEvents appEvents;
 
-    @MockitoBean AttemptSubmitter attempts;
+    @MockitoBean AttemptSubmitService attempts;
     @MockitoBean JavaMailSender mail;
 
     @Autowired com.pair.domain.task.repository.TaskRepository taskRecords;
@@ -174,8 +174,8 @@ class ExamFlowIntegrationTest {
         assertThat(canceled.phase()).isEqualTo(ExamSession.Phase.CANCELED);
         assertThat(canceled.canceledAt()).isEqualTo(T0);
         assertThat(sessions.list(114L)).singleElement().extracting(SessionSummaryResponse::phase).isEqualTo(ExamSession.Phase.CANCELED);
-        assertThat(appEvents.stream(SessionNotice.class))
-                .anySatisfy(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CANCELED));
+        assertThat(appEvents.stream(SessionNoticeDto.class))
+                .anySatisfy(n -> assertThat(n.kind()).isEqualTo(SessionNoticeDto.Kind.CANCELED));
         verify(mail, timeout(3000).atLeastOnce()).send(org.mockito.ArgumentMatchers.<MimeMessage>argThat(
                 m -> subjectOf(m).contains("취소")));
 
@@ -195,29 +195,29 @@ class ExamFlowIntegrationTest {
         ExamSessionRequest same = new ExamSessionRequest(115L, s.title(), s.startsAt(), s.endsAt(), true, List.of(TASK));
 
         sessions.update(s.id(), same);
-        assertThat(appEvents.stream(SessionNotice.class)).isEmpty();
+        assertThat(appEvents.stream(SessionNoticeDto.class)).isEmpty();
 
         sessions.update(s.id(), new ExamSessionRequest(115L, s.title() + " 수정", s.startsAt(), s.endsAt(), true, List.of(TASK)));
-        assertThat(appEvents.stream(SessionNotice.class)).singleElement()
-                .satisfies(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CHANGED));
+        assertThat(appEvents.stream(SessionNoticeDto.class)).singleElement()
+                .satisfies(n -> assertThat(n.kind()).isEqualTo(SessionNoticeDto.Kind.CHANGED));
 
         sessions.update(s.id(), new ExamSessionRequest(115L, s.title() + " 수정", s.startsAt().plusSeconds(60), s.endsAt(), true, List.of(TASK)));
         String newToken = lastToken(participant(s.id(), "change@test.dev").getId());
         assertThat(newToken).isNotEqualTo(oldToken);
-        assertThat(appEvents.stream(SessionNotice.class)).hasSize(1);
+        assertThat(appEvents.stream(SessionNoticeDto.class)).hasSize(1);
     }
 
     @Test
     @DisplayName("엑셀 양식: 내려받은 양식을 그대로 읽을 수 있고, 결과 엑셀이 만들어진다")
     void xlsxRoundTrip() {
-        byte[] template = com.pair.domain.exam.service.ExamWorkbooks.participantsTemplate();
-        var rows = com.pair.domain.exam.service.ParticipantCsvParser.parse(template, 1000);
+        byte[] template = com.pair.domain.exam.service.ParticipantWorkbookService.participantsTemplate();
+        var rows = com.pair.domain.exam.service.ParticipantCsvService.parse(template, 1000);
         assertThat(rows).as("지우지 않은 예시 행은 등록하지 않는다").isEmpty();
 
         SessionSummaryResponse s = createSession(116L, true);
         invite(s.id(), "x@test.dev");
         byte[] xlsx = results.xlsx(s.id());
-        assertThat(com.pair.domain.exam.service.ExamWorkbooks.isXlsx(xlsx)).isTrue();
+        assertThat(com.pair.domain.exam.service.ParticipantWorkbookService.isXlsx(xlsx)).isTrue();
         // 눈으로 확인하려고 파일로 남긴다 (build/xlsx-samples)
         try {
             java.nio.file.Path dir = java.nio.file.Path.of("build", "xlsx-samples");
@@ -314,7 +314,7 @@ class ExamFlowIntegrationTest {
         SessionSummaryResponse s = createSession(117L, true);
         String first = invite(s.id(), "token@test.dev");
         ExamParticipant p = participant(s.id(), "token@test.dev");
-        assertThat(p.getInviteTokenHash()).hasSize(64).isEqualTo(InviteTokens.hash(first)).isNotEqualTo(first);
+        assertThat(p.getInviteTokenHash()).hasSize(64).isEqualTo(InviteTokenService.hash(first)).isNotEqualTo(first);
 
         clock.advance(Duration.ofMinutes(1));
         sessions.resendInvite(s.id(), p.getId());
@@ -552,7 +552,7 @@ class ExamFlowIntegrationTest {
     }
 
     private Long sessionIdOf(String token) {
-        return participants.findByInviteTokenHash(com.pair.domain.exam.service.InviteTokens.hash(token)).orElseThrow().getSession().getId();
+        return participants.findByInviteTokenHash(com.pair.global.security.InviteTokenService.hash(token)).orElseThrow().getSession().getId();
     }
 
     private java.util.List<ProctorEvent> lostEvents(Long participantId) {
@@ -1125,7 +1125,7 @@ class ExamFlowIntegrationTest {
     }
 
     private String lastToken(Long participantId) {
-        return appEvents.stream(InvitesCreated.class).flatMap(e -> e.invites().stream())
+        return appEvents.stream(InvitesCreatedDto.class).flatMap(e -> e.invites().stream())
                 .filter(i -> i.participantId().equals(participantId))
                 .reduce((a, b) -> b).orElseThrow().token();
     }

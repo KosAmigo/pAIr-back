@@ -1,6 +1,6 @@
 package com.pair.global.config;
 
-import com.pair.domain.exam.service.ProctorRelayHandler;
+import com.pair.domain.exam.service.ProctorRelayService;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -16,9 +16,9 @@ public class RelayWebSocketConfig implements WebSocketConfigurer {
 
     public static final String PATH = "/ws/proctor";
 
-    private final ProctorRelayHandler handler;
+    private final ProctorRelayService handler;
 
-    public RelayWebSocketConfig(ProctorRelayHandler handler) {
+    public RelayWebSocketConfig(ProctorRelayService handler) {
         this.handler = handler;
     }
 

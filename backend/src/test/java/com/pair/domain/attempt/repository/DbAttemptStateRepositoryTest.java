@@ -1,9 +1,9 @@
 package com.pair.domain.attempt.repository;
 
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.service.AttemptRegistryService;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -44,7 +44,7 @@ class DbAttemptStateRepositoryTest {
     }
 
     @Autowired AttemptStateRepository store;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
@@ -58,8 +58,8 @@ class DbAttemptStateRepositoryTest {
         TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         Attempt r = registry.save(Attempt.self(1L, 1L, "gpt-test", start));
         id = String.valueOf(r.getId());
-        store.create(new AttemptState(id, TestTasks.SELF_DEV, "openai", "gpt-test", start, null, null, null,
-                AttemptState.Status.SOLVING, List.of(), null, null), Map.of("src/A.java", "class A {}", "README.md", "# 읽기"));
+        store.create(new AttemptStateDto(id, TestTasks.SELF_DEV, "openai", "gpt-test", start, null, null, null,
+                AttemptStateDto.Status.SOLVING, List.of(), null, null), Map.of("src/A.java", "class A {}", "README.md", "# 읽기"));
     }
 
     @Test
@@ -69,10 +69,10 @@ class DbAttemptStateRepositoryTest {
 
     @Test
     void 응시_상태를_저장하고_읽는다() {
-        AttemptState a = store.load(id);
+        AttemptStateDto a = store.load(id);
         assertThat(a.taskId()).isEqualTo(TestTasks.SELF_DEV);
         assertThat(a.provider()).isEqualTo("openai");
-        assertThat(a.status()).isEqualTo(AttemptState.Status.SOLVING);
+        assertThat(a.status()).isEqualTo(AttemptStateDto.Status.SOLVING);
         assertThat(a.followUpAnswers()).isEmpty();
         assertThat(a.followUpQuestions()).isNull();
 
@@ -80,8 +80,8 @@ class DbAttemptStateRepositoryTest {
         store.save(a.withFirstValid(t).withSubmitted(t.plusSeconds(1)));
         store.save(store.load(id).withFollowUps(List.of("답1", "답2"), List.of("질문1", "질문2"), t.plusSeconds(2)));
 
-        AttemptState b = store.load(id);
-        assertThat(b.status()).isEqualTo(AttemptState.Status.SCORING);
+        AttemptStateDto b = store.load(id);
+        assertThat(b.status()).isEqualTo(AttemptStateDto.Status.SCORING);
         assertThat(b.firstValidAt()).isEqualTo(t);
         assertThat(b.followUpAnswers()).containsExactly("답1", "답2");
         assertThat(b.followUpQuestions()).containsExactly("질문1", "질문2");
@@ -89,7 +89,7 @@ class DbAttemptStateRepositoryTest {
 
         store.save(b.withError("API 키 없음"));
         assertThat(store.load(id).error()).isEqualTo("API 키 없음");
-        assertThat(store.load(id).status()).isEqualTo(AttemptState.Status.ERROR);
+        assertThat(store.load(id).status()).isEqualTo(AttemptStateDto.Status.ERROR);
     }
 
     @Test
@@ -109,14 +109,14 @@ class DbAttemptStateRepositoryTest {
     @Test
     void 대화_턴을_요청_원문까지_저장한다() {
         Instant at = start.plusSeconds(5);
-        var req = new ChatTurnState.AssistantRequest("gpt-test", 1000, "low", "시스템", List.of(new ChatTurnState.Message("user", "안녕")));
-        store.appendTurn(id, new ChatTurnState(1, "user", at, "안녕", null, null, null, null, null, null));
-        store.appendTurn(id, new ChatTurnState(2, "ai", at, "반가워요", "openai", "gpt-test", req, 10L, 20L, 300L));
+        var req = new ChatTurnStateDto.AssistantRequest("gpt-test", 1000, "low", "시스템", List.of(new ChatTurnStateDto.Message("user", "안녕")));
+        store.appendTurn(id, new ChatTurnStateDto(1, "user", at, "안녕", null, null, null, null, null, null));
+        store.appendTurn(id, new ChatTurnStateDto(2, "ai", at, "반가워요", "openai", "gpt-test", req, 10L, 20L, 300L));
 
-        List<ChatTurnState> turns = store.turns(id);
+        List<ChatTurnStateDto> turns = store.turns(id);
         assertThat(turns).hasSize(2);
         assertThat(turns.get(0).role()).isEqualTo("user");
-        ChatTurnState ai = turns.get(1);
+        ChatTurnStateDto ai = turns.get(1);
         assertThat(ai.role()).isEqualTo("ai");
         assertThat(ai.text()).isEqualTo("반가워요");
         assertThat(ai.request()).isEqualTo(req);

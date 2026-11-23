@@ -26,7 +26,6 @@ import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.stereotype.Component;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
-import com.pair.domain.exam.service.InviteTokens;
 
 @Component
 public class JwtTokens {
@@ -88,7 +87,7 @@ public class JwtTokens {
             }
             // 버전 도입 전 토큰은 초기 버전의 계정에서만 계속 사용할 수 있다.
             long tokenVersion = versionClaim == null ? 0 : ((Number) versionClaim).longValue();
-            if (userId <= 0 || ("refresh".equals(expectedType) && !InviteTokens.looksValid(sessionId))) {
+            if (userId <= 0 || ("refresh".equals(expectedType) && !InviteTokenService.looksValid(sessionId))) {
                 return Optional.empty();
             }
             return Optional.of(new VerifiedToken(userId, sessionId, jwt.getExpiresAt(), tokenVersion));

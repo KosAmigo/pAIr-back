@@ -1,7 +1,7 @@
 package com.pair.domain.attempt.repository;
 
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -66,7 +66,7 @@ public class FileAttemptStateRepository implements AttemptStateRepository {
     }
 
     @Override
-    public synchronized void create(AttemptState a, Map<String, String> files) {
+    public synchronized void create(AttemptStateDto a, Map<String, String> files) {
         try {
             Path ws = workspace(a.id());
             Files.createDirectories(ws);
@@ -78,16 +78,16 @@ public class FileAttemptStateRepository implements AttemptStateRepository {
     }
 
     @Override
-    public synchronized void save(AttemptState a) {
+    public synchronized void save(AttemptStateDto a) {
         writeJson(dir(a.id()).resolve("attempt.json"), a);
     }
 
     @Override
-    public AttemptState load(String id) {
+    public AttemptStateDto load(String id) {
         Path p = dir(id).resolve("attempt.json");
         if (!Files.exists(p)) throw new NoSuchElementException("없는 응시입니다: " + id);
         try {
-            return json.readValue(p.toFile(), AttemptState.class);
+            return json.readValue(p.toFile(), AttemptStateDto.class);
         } catch (IOException | RuntimeException e) {
             throw new IllegalStateException("응시 기록을 읽지 못했습니다: " + id, e);
         }
@@ -152,13 +152,13 @@ public class FileAttemptStateRepository implements AttemptStateRepository {
     // ── 대화 턴, 이벤트 ─────────────────
 
     @Override
-    public synchronized void appendTurn(String id, ChatTurnState turn) {
+    public synchronized void appendTurn(String id, ChatTurnStateDto turn) {
         appendLine(dir(id).resolve("turns.jsonl"), toJson(turn));
     }
 
     @Override
-    public List<ChatTurnState> turns(String id) {
-        return readLines(dir(id).resolve("turns.jsonl"), ChatTurnState.class);
+    public List<ChatTurnStateDto> turns(String id) {
+        return readLines(dir(id).resolve("turns.jsonl"), ChatTurnStateDto.class);
     }
 
     @Override

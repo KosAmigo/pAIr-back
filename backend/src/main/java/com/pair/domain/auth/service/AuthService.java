@@ -26,7 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.exam.service.InviteTokens;
+import com.pair.global.security.InviteTokenService;
 import com.pair.domain.credit.service.CreditService;
 import com.pair.domain.exam.repository.ExamSessionRepository;
 
@@ -42,11 +42,11 @@ public class AuthService {
     private final CreditService credits;
     private final EmailVerificationService emailVerification;
     private final ExamSessionRepository examSessions;
-    private final WithdrawnEmailHasher withdrawnEmailHasher;
+    private final WithdrawnEmailHashService withdrawnEmailHasher;
 
     public AuthService(AuthAccountRepository accounts, RefreshSessionRepository sessions, JwtTokens tokens,
             CreditService credits, EmailVerificationService emailVerification, ExamSessionRepository examSessions,
-            WithdrawnEmailHasher withdrawnEmailHasher) {
+            WithdrawnEmailHashService withdrawnEmailHasher) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.tokens = tokens;
@@ -139,8 +139,8 @@ public class AuthService {
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
         Instant now = Instant.now();
         String replacement = tokens.refresh(account.getId(), jwt.sessionId(), now);
-        int updated = sessions.rotate(jwt.sessionId(), account.getId(), InviteTokens.hash(refreshToken),
-                InviteTokens.hash(replacement), now, now.plus(JwtTokens.REFRESH_LIFETIME));
+        int updated = sessions.rotate(jwt.sessionId(), account.getId(), InviteTokenService.hash(refreshToken),
+                InviteTokenService.hash(replacement), now, now.plus(JwtTokens.REFRESH_LIFETIME));
         if (updated != 1) throw new UnauthorizedException("유효하지 않은 리프레시 토큰입니다.");
         return response(account, replacement, now);
     }
@@ -150,7 +150,7 @@ public class AuthService {
     public void logout(String refreshToken) {
         JwtTokens.VerifiedToken jwt = tokens.verify(refreshToken, "refresh")
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
-        if (sessions.revoke(jwt.sessionId(), jwt.userId(), InviteTokens.hash(refreshToken), Instant.now()) != 1) {
+        if (sessions.revoke(jwt.sessionId(), jwt.userId(), InviteTokenService.hash(refreshToken), Instant.now()) != 1) {
             throw new UnauthorizedException("유효하지 않은 리프레시 토큰입니다.");
         }
     }
@@ -184,7 +184,7 @@ public class AuthService {
         }
         String anonymousEmail = withdrawnEmailHasher.hash(normalizeEmail(account.getEmail()));
         emailVerification.removeForEmail(account.getEmail());
-        account.withdraw(anonymousEmail, PASSWORD_ENCODER.encode(InviteTokens.next()), now);
+        account.withdraw(anonymousEmail, PASSWORD_ENCODER.encode(InviteTokenService.next()), now);
         sessions.revokeAll(account.getId());
     }
 
@@ -209,9 +209,9 @@ public class AuthService {
     private AuthResponse createSession(AuthAccount account) {
         Instant now = Instant.now();
         sessions.deleteExpired(now);
-        String sessionId = InviteTokens.next();
+        String sessionId = InviteTokenService.next();
         String refreshToken = tokens.refresh(account.getId(), sessionId, now);
-        sessions.save(new RefreshSession(sessionId, account.getId(), InviteTokens.hash(refreshToken),
+        sessions.save(new RefreshSession(sessionId, account.getId(), InviteTokenService.hash(refreshToken),
                 now, now.plus(JwtTokens.REFRESH_LIFETIME)));
         return response(account, refreshToken, now);
     }
