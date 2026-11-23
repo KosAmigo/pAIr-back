@@ -25,6 +25,6 @@ public record TaskGenProperties(String model, Integer maxConcurrent, String effo
         if (solverModel == null || solverModel.isBlank()) solverModel = "claude-sonnet-5-5";
         if (suggestModel == null || suggestModel.isBlank()) suggestModel = "gpt-6-luna";
         if (suggestMaxTokens == null || suggestMaxTokens < 500) suggestMaxTokens = 2000;
-        if (suggestEffort == null || suggestEffort.isBlank()) suggestEffort = "minimal";
+        if (suggestEffort == null || suggestEffort.isBlank()) suggestEffort = "low"; // luna 는 minimal 을 받지 않는다
     }
 }
