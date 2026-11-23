@@ -65,7 +65,7 @@ spring:
         speech: none
         transcription: none
 
-# 서버 시작 때 패키지 구조·이름 규칙 검사 (global/config/PackageRules). 운영 서버에서는 PACKAGE_RULES_ENABLED=false
+# 서버 시작 때 패키지 구조·이름 규칙 검사 (global/config/PackageRulesConfig). 운영 서버에서는 PACKAGE_RULES_ENABLED=false
 package-rules:
   enabled: ${PACKAGE_RULES_ENABLED:true}
 
