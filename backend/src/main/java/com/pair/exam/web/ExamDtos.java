@@ -138,6 +138,17 @@ public final class ExamDtos {
         public record Entry(int seq, Long extendedBy, Instant extendedAt, int days, Instant expiresBefore, Instant expiresAfter) {}
     }
 
+    // ── 이벤트 증거 구간 (이벤트 앞 8초·뒤 4초) ──
+
+    /** offsetMs: 이벤트 시작 기준 상대 시각(-8000 ~ 4000). image: data:image/jpeg;base64,... 또는 base64 본문 */
+    public record ClipFrameRequest(@NotNull ProctorEvent.Source source, @Min(-8000) @Max(4000) int offsetMs, @NotBlank String image) {}
+
+    public record ClipUploadRequest(@NotEmpty @Size(max = 24) List<@jakarta.validation.Valid ClipFrameRequest> frames) {}
+
+    public record ClipFrameView(Long id, ProctorEvent.Source source, int offsetMs, int sizeBytes, boolean deleted) {}
+
+    public record ClipView(Long eventId, List<ClipFrameView> frames) {}
+
     // ── 응시자: 환경 점검 사진 (방 360도, 책상 위) ──
 
     public record EnvScanRequest(

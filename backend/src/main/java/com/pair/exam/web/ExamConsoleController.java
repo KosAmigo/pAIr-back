@@ -65,12 +65,14 @@ public class ExamConsoleController {
     private final ConnectionGrace grace;
     private final ConsoleAccess access;
     private final com.pair.exam.service.SnapshotRetentionService retention;
+    private final com.pair.exam.service.EvidenceClipService clips;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
             AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGrace grace, ConsoleAccess access,
             com.pair.exam.service.EnvCheckService envCheck, com.pair.exam.service.NoticeService notices,
-            com.pair.exam.service.SnapshotRetentionService retention) {
+            com.pair.exam.service.SnapshotRetentionService retention, com.pair.exam.service.EvidenceClipService clips) {
         this.retention = retention;
+        this.clips = clips;
         this.envCheck = envCheck;
         this.notices = notices;
         this.sessions = sessions;
@@ -204,6 +206,27 @@ public class ExamConsoleController {
     public ResponseEntity<byte[]> snapshot(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId) {
         access.requireSession(user, sessionId);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(proctor.snapshot(sessionId, eventId));
+    }
+
+    /** 이벤트의 증거 구간 (앞 8초·뒤 4초 사진 목록, 시간순). 완료된 회차에서도 볼 수 있다 */
+    @GetMapping("/{sessionId}/events/{eventId}/clip")
+    public ExamDtos.ClipView clip(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId) {
+        access.requireSession(user, sessionId);
+        return clips.clipOf(sessionId, eventId);
+    }
+
+    @GetMapping(value = "/{sessionId}/events/{eventId}/clip/{frameId}/image", produces = MediaType.IMAGE_JPEG_VALUE)
+    public ResponseEntity<byte[]> clipImage(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId,
+            @PathVariable Long frameId) {
+        access.requireSession(user, sessionId);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(clips.frameImage(sessionId, eventId, frameId));
+    }
+
+    /** 회차의 이벤트별 증거 사진 수 ({이벤트 번호: 장수}). 타임라인에서 증거 구간이 있는 이벤트를 표시한다 */
+    @GetMapping("/{sessionId}/clips")
+    public java.util.Map<Long, Long> clipCounts(CurrentUser user, @PathVariable Long sessionId) {
+        access.requireSession(user, sessionId);
+        return clips.countsOfSession(sessionId);
     }
 
     /** 감독 사진 보관 현황 (삭제 예정 시각, 연장 가능 여부, 연장 이력). 감독관도 볼 수 있다 */

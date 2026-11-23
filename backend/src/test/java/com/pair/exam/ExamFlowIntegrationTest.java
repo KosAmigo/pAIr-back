@@ -797,6 +797,79 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("삭제");
     }
 
+    // ── 증거 구간 (이벤트 앞 8초·뒤 4초, 최대 24장) ──
+
+    @Autowired com.pair.exam.service.EvidenceClipService clips;
+
+    private com.pair.exam.web.ExamDtos.ClipFrameRequest frame(ProctorEvent.Source src, int offsetMs) {
+        return new com.pair.exam.web.ExamDtos.ClipFrameRequest(src, offsetMs, jpegB64());
+    }
+
+    private ProctorEventRequest eventWithId(SessionSummary s, String clientId) {
+        return new ProctorEventRequest(ProctorEvent.Type.PHONE, ProctorEvent.Source.PHONE_CAM, s.startsAt().plusSeconds(60), 1500,
+                new BigDecimal("0.800"), null, null, clientId);
+    }
+
+    @Test
+    @DisplayName("증거 구간: 이벤트에 앞뒤 사진을 올리고 콘솔에서 시간순으로 보며, 다시 올려도 중복되지 않는다")
+    void clipUploadAndView() {
+        SessionSummary s = createSession(150L, true);
+        String token = startWithConsent(s, "clip@test.dev");
+        var ev = proctor.record(token, eventWithId(s, "clip-evt-0001"));
+
+        var req = new com.pair.exam.web.ExamDtos.ClipUploadRequest(List.of(
+                frame(ProctorEvent.Source.PC_CAM, 3000), frame(ProctorEvent.Source.PHONE_CAM, -8000), frame(ProctorEvent.Source.PC_CAM, -500)));
+        clips.upload(token, "clip-evt-0001", req);
+        clips.upload(token, "clip-evt-0001", req); // 재전송
+
+        var clip = clips.clipOf(s.id(), ev.id());
+        assertThat(clip.frames()).extracting(f -> f.offsetMs()).containsExactly(-8000, -500, 3000);
+        assertThat(clips.frameImage(s.id(), ev.id(), clip.frames().get(0).id())).isEqualTo(JPEG);
+        assertThat(clips.countsOfSession(s.id())).containsEntry(ev.id(), 3L);
+
+        assertThatThrownBy(() -> clips.clipOf(s.id() + 999, ev.id())).isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    @DisplayName("증거 구간: 구간 밖 시각·24장 초과·브라우저 출처·모르는 이벤트는 거절한다")
+    void clipRejectsBadInput() {
+        SessionSummary s = createSession(151L, true);
+        String token = startWithConsent(s, "clip2@test.dev");
+        proctor.record(token, eventWithId(s, "clip-evt-0002"));
+
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.exam.web.ExamDtos.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, -9000))))).hasMessageContaining("구간");
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.exam.web.ExamDtos.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.BROWSER, 0))))).hasMessageContaining("카메라");
+        List<com.pair.exam.web.ExamDtos.ClipFrameRequest> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 25; i++) many.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 100));
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.exam.web.ExamDtos.ClipUploadRequest(many)))
+                .hasMessageContaining("24");
+        assertThatThrownBy(() -> clips.upload(token, "no-such-event", new com.pair.exam.web.ExamDtos.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, 0))))).isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    @DisplayName("증거 구간 사진도 보관 7일·연장을 따르고, 지나면 파일만 지운다")
+    void clipFollowsRetention() {
+        SessionSummary s = createSession(152L, true);
+        String token = startWithConsent(s, "clip3@test.dev");
+        var ev = proctor.record(token, eventWithId(s, "clip-evt-0003"));
+        clips.upload(token, "clip-evt-0003", new com.pair.exam.web.ExamDtos.ClipUploadRequest(List.of(frame(ProctorEvent.Source.PC_CAM, 0))));
+
+        clock.set(s.endsAt().plus(Duration.ofDays(5)));
+        retention.extend(s.id(), 9L);
+        clock.set(s.endsAt().plus(Duration.ofDays(8)));
+        proctor.purgeExpiredSnapshots();
+        assertThat(clips.clipOf(s.id(), ev.id()).frames()).singleElement().extracting(f -> f.deleted()).isEqualTo(false);
+
+        clock.set(s.endsAt().plus(Duration.ofDays(14)).plusSeconds(1));
+        proctor.purgeExpiredSnapshots();
+        var frame = clips.clipOf(s.id(), ev.id()).frames().get(0);
+        assertThat(frame.deleted()).isTrue();
+        assertThatThrownBy(() -> clips.frameImage(s.id(), ev.id(), frame.id())).hasMessageContaining("삭제된");
+    }
+
     // ── 환경 점검 사진 (방 360도·책상 위) ──
 
     private static String jpegB64() {

@@ -36,9 +36,12 @@ public class ExamEntryController {
     private final com.pair.exam.service.EnvCheckService envCheck;
     private final com.pair.exam.service.NoticeService notices;
     private final Clock clock;
+    private final com.pair.exam.service.EvidenceClipService clips;
 
     public ExamEntryController(ExamEntryService entry, ProctorService proctor, EnvScanService envScan, Clock clock,
-            com.pair.exam.service.EnvCheckService envCheck, com.pair.exam.service.NoticeService notices) {
+            com.pair.exam.service.EnvCheckService envCheck, com.pair.exam.service.NoticeService notices,
+            com.pair.exam.service.EvidenceClipService clips) {
+        this.clips = clips;
         this.envCheck = envCheck;
         this.notices = notices;
         this.entry = entry;
@@ -121,5 +124,12 @@ public class ExamEntryController {
     @ResponseStatus(HttpStatus.CREATED)
     public ProctorEventView proctorEvent(@PathVariable String token, @Valid @RequestBody ProctorEventRequest req) {
         return proctor.record(token, req);
+    }
+
+    /** 이벤트(clientId)의 증거 구간 사진 올리기. 응시자 PC 가 링 버퍼에서 이벤트 앞 8초·뒤 4초를 골라 보낸다 */
+    @PostMapping("/api/entry/{token}/proctor-events/{clientId}/clip")
+    @ResponseStatus(HttpStatus.CREATED)
+    public void proctorClip(@PathVariable String token, @PathVariable String clientId, @Valid @RequestBody ExamDtos.ClipUploadRequest req) {
+        clips.upload(token, clientId, req);
     }
 }

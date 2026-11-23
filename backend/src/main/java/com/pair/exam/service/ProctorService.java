@@ -53,12 +53,15 @@ public class ProctorService {
     private final com.pair.exam.repository.ExamSessionRepository sessions;
     private final com.pair.exam.repository.SnapshotRetentionExtensionRepository extensions;
     private final SnapshotRetentionService retention;
+    private final com.pair.exam.repository.ProctorEventFrameRepository clipFrames;
 
     public ProctorService(ExamParticipantRepository participants, ProctorEventRepository events, SnapshotValidator snapshots,
             SnapshotStorage storage, ObjectMapper json, ExamProperties props, Clock clock,
             com.pair.attempt.AttemptRecordRepository attempts, PlatformTransactionManager txManager,
             com.pair.exam.repository.ExamSessionRepository sessions,
-            com.pair.exam.repository.SnapshotRetentionExtensionRepository extensions, SnapshotRetentionService retention) {
+            com.pair.exam.repository.SnapshotRetentionExtensionRepository extensions, SnapshotRetentionService retention,
+            com.pair.exam.repository.ProctorEventFrameRepository clipFrames) {
+        this.clipFrames = clipFrames;
         this.sessions = sessions;
         this.extensions = extensions;
         this.retention = retention;
@@ -202,7 +205,9 @@ public class ProctorService {
     public int purgeExpiredSnapshots() {
         Instant now = clock.instant();
         Instant baseBefore = now.minus(Duration.ofDays(props.snapshotRetentionDays()));
-        List<Long> endedSessions = events.findSessionIdsWithLiveSnapshots(baseBefore);
+        java.util.Set<Long> candidates = new java.util.LinkedHashSet<>(events.findSessionIdsWithLiveSnapshots(baseBefore));
+        candidates.addAll(clipFrames.allSessionIdsWithLiveFrames()); // 증거 구간 사진도 같은 규칙. 아래에서 회차별 삭제 예정 시각으로 거른다
+        List<Long> endedSessions = List.copyOf(candidates);
         if (endedSessions.isEmpty()) return 0;
         java.util.Map<Long, Long> extended = new java.util.HashMap<>();
         extensions.countBySessionIds(endedSessions).forEach(c -> extended.put(c.getSessionId(), c.getCount()));
@@ -220,6 +225,16 @@ public class ProctorService {
                 events.flush();
                 total += batch.size();
             } while (batch.size() == PURGE_BATCH);
+            List<com.pair.exam.domain.ProctorEventFrame> frameBatch;
+            do {
+                frameBatch = clipFrames.findLiveOfSession(sessionId, PageRequest.of(0, PURGE_BATCH));
+                for (com.pair.exam.domain.ProctorEventFrame f : frameBatch) {
+                    storage.delete(f.getStorageKey());
+                    f.markDeleted(now);
+                }
+                clipFrames.flush();
+                total += frameBatch.size();
+            } while (frameBatch.size() == PURGE_BATCH);
         }
         return total;
     }
