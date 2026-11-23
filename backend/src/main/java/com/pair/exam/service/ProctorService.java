@@ -209,12 +209,10 @@ public class ProctorService {
         candidates.addAll(clipFrames.allSessionIdsWithLiveFrames()); // 증거 구간 사진도 같은 규칙. 아래에서 회차별 삭제 예정 시각으로 거른다
         List<Long> endedSessions = List.copyOf(candidates);
         if (endedSessions.isEmpty()) return 0;
-        java.util.Map<Long, Long> extended = new java.util.HashMap<>();
-        extensions.countBySessionIds(endedSessions).forEach(c -> extended.put(c.getSessionId(), c.getCount()));
         int total = 0;
         for (Long sessionId : endedSessions) {
             Instant endsAt = sessions.findById(sessionId).map(ExamSession::getEndsAt).orElse(null);
-            if (endsAt == null || retention.expiryOf(endsAt, extended.getOrDefault(sessionId, 0L)).isAfter(now)) continue;
+            if (endsAt == null || retention.expiryOf(endsAt, (long) extensions.findBySessionIdOrderBySeqAsc(sessionId).size()).isAfter(now)) continue;
             List<ProctorEvent> batch;
             do {
                 batch = events.findLiveSnapshotsOfSession(sessionId, PageRequest.of(0, PURGE_BATCH));

@@ -29,6 +29,12 @@ final class LatestFrameMailbox {
         return frame;
     }
 
+    /** 전송 시작에 실패했을 때 전송 상태를 되돌린다 */
+    synchronized void reset() {
+        slot = null;
+        draining = false;
+    }
+
     long dropped() {
         return dropped.get();
     }

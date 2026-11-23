@@ -9,5 +9,18 @@ public final class RelayLimits {
     /** PC 와 휴대폰 모두 없는 짝은 이 시간 뒤에 지운다 (PC 새로고침 동안은 같은 짝 코드를 유지) */
     public static final long EMPTY_PAIR_TTL_MS = 10 * 60_000;
 
+    /** 서버 전체 상한 (초과하면 새 연결·짝을 거절). 값은 임시이며 구현 뒤 실측으로 정한다 */
+    public static final int MAX_CONNECTIONS = 1_000;
+    public static final int MAX_PHONES = 300;
+    public static final int MAX_PAIRS = 1_000;
+    public static final int MAX_PRACTICE_PAIRS = 100;
+    /** 휴대폰 한 대가 1초에 보낼 수 있는 프레임 수 (넘는 프레임은 버리고, 초과가 심하면 연결을 끊는다) */
+    public static final int MAX_FRAMES_PER_SEC = 5;
+    public static final int MAX_EXCESS_PER_SEC = 50;
+    /** 연결한 뒤 이 시간 안에 hello 를 보내지 않으면 닫는다 */
+    public static final long HELLO_TIMEOUT_MS = 10_000;
+    /** 사전 테스트(연습) 짝은 이 시간 비어 있으면 지운다 */
+    public static final long EMPTY_PRACTICE_TTL_MS = 60_000;
+
     private RelayLimits() {}
 }

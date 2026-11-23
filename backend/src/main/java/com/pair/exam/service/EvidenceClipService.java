@@ -90,6 +90,14 @@ public class EvidenceClipService {
         }
 
         List<String> written = new ArrayList<>();
+        // 커밋이 실패해 되돌려지면 올린 파일이 고아로 남으므로, 트랜잭션이 롤백으로 끝날 때 치운다
+        org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override
+                    public void afterCompletion(int status) {
+                        if (status != STATUS_COMMITTED) written.forEach(storage::delete);
+                    }
+                });
         try {
             Set<String> done = new HashSet<>();
             for (ClipFrameRequest f : list) {
@@ -103,9 +111,8 @@ public class EvidenceClipService {
                 written.add(key);
                 row.assignKey(key);
             }
-        } catch (RuntimeException e) {
-            written.forEach(storage::delete); // 트랜잭션이 되돌려지므로 올린 파일도 치운다
-            throw e;
+        } catch (org.springframework.dao.DataIntegrityViolationException raced) {
+            throw new IllegalStateException("같은 증거 사진을 다른 요청이 올리는 중입니다. 잠시 뒤 다시 시도해 주세요.");
         }
     }
 
@@ -140,7 +147,7 @@ public class EvidenceClipService {
     /** 다른 회차 번호로는 이벤트의 사진을 볼 수 없다 */
     private void requireEventIn(Long sessionId, Long eventId) {
         ProctorEvent e = events.findById(eventId).orElseThrow(() -> new NoSuchElementException("없는 이벤트입니다."));
-        ExamParticipant p = participants.findById(e.getParticipantId()).orElseThrow();
+        ExamParticipant p = participants.findById(e.getParticipantId()).orElseThrow(() -> new NoSuchElementException("없는 이벤트입니다."));
         if (!p.getSession().getId().equals(sessionId)) throw new NoSuchElementException("없는 이벤트입니다.");
     }
 }
