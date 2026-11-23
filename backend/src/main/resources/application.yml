@@ -66,6 +66,9 @@ spring:
         transcription: none
 
 pair:
+  toss:
+    # 테스트 키만 허용한다. 클라이언트 키는 프론트에서 별도로 설정한다.
+    secret-key: ${PAIR_TOSS_SECRET_KEY:}
   # 신규 회원 지급 및 자가진단 응시·AI 질문·롤백 1회 비용 (실전 시험 제외).
   credit:
     signup: 200

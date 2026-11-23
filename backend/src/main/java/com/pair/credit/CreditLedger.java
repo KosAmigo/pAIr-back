@@ -35,6 +35,9 @@ public class CreditLedger {
     @Column(name = "turn_id")
     private Long turnId;
 
+    @Column(name = "purchase_id")
+    private Long purchaseId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -50,9 +53,18 @@ public class CreditLedger {
         this.createdAt = Instant.now();
     }
 
+    static CreditLedger purchase(Long userId, int amount, int balanceAfter, String reason, Long purchaseId) {
+        CreditLedger entry = new CreditLedger(userId, amount, balanceAfter, reason, null, null);
+        entry.purchaseId = purchaseId;
+        return entry;
+    }
+
+    public Long getId() { return id; }
     public int getBalanceAfter() { return balanceAfter; }
     public int getAmount() { return amount; }
     public String getReason() { return reason; }
     public Long getAttemptId() { return attemptId; }
     public Long getTurnId() { return turnId; }
+    public Long getPurchaseId() { return purchaseId; }
+    public Instant getCreatedAt() { return createdAt; }
 }

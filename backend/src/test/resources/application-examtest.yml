@@ -19,6 +19,8 @@ spring:
       api-key: ""
 
 pair:
+  toss:
+    expiration-enabled: false
   # 기존 콘솔 인가 테스트는 개발용 사용자 헤더를 사용한다.
   auth:
     mode: header

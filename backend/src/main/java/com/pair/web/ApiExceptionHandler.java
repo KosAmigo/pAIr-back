@@ -44,6 +44,17 @@ public class ApiExceptionHandler {
         return body(HttpStatus.PAYMENT_REQUIRED, e.getMessage());
     }
 
+    @ExceptionHandler(com.pair.credit.PaymentUnavailableException.class)
+    ResponseEntity<Map<String, String>> paymentUnavailable(RuntimeException e) {
+        log.warn("결제 상태 확인 실패: {}", e.getMessage());
+        return body(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+    }
+
+    @ExceptionHandler(com.pair.credit.PaymentRejectedException.class)
+    ResponseEntity<Map<String, String>> paymentRejected(RuntimeException e) {
+        return body(HttpStatus.CONFLICT, e.getMessage());
+    }
+
     /** 동시 실행 상한 초과 (AI 과제 생성) */
     @ExceptionHandler(com.pair.taskgen.TooManyJobsException.class)
     ResponseEntity<Map<String, String>> tooManyJobs(RuntimeException e) {

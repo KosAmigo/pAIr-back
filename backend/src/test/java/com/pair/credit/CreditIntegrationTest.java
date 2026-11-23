@@ -103,6 +103,33 @@ class CreditIntegrationTest {
     }
 
     @Test
+    void purchaseAndLedgerEndpointsRequireOwnerAndExposeHistory() throws Exception {
+        var user = signup();
+        var other = signup();
+        mvc.perform(get("/api/credits/products")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/credits/products").header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].credits").value(1000))
+                .andExpect(jsonPath("$[0].amountKrw").value(4990));
+        var response = mvc.perform(post("/api/credits/purchases")
+                        .header("Authorization", "Bearer " + user.token())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"credits\":1000}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("READY"))
+                .andReturn().getResponse().getContentAsString();
+        String orderId = new com.fasterxml.jackson.databind.ObjectMapper().readTree(response).path("orderId").asText();
+        mvc.perform(post("/api/credits/purchases/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + other.token()))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/credits/purchases/{id}/cancel", orderId)
+                        .header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELED"));
+        mvc.perform(get("/api/credits/purchases").header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].orderId").value(orderId));
+        mvc.perform(get("/api/credits/ledger").header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].reason").value("SIGNUP"));
+    }
+
+    @Test
     void failedOrUnauthorizedChatDoesNotCharge() throws Exception {
         var user = signup();
         var other = signup();

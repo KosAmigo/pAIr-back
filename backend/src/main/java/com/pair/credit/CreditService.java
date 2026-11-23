@@ -99,6 +99,19 @@ public class CreditService {
         charge(userId, rollbackCost, "ROLLBACK", attemptId, null);
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void addPurchase(Long userId, int amount, Long purchaseId) {
+        lock(userId);
+        int next = Math.addExact(balance(userId), amount);
+        ledger.save(CreditLedger.purchase(userId, amount, next, "PURCHASE", purchaseId));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void refundPurchase(Long userId, int amount, Long purchaseId) {
+        int current = check(userId, amount);
+        ledger.save(CreditLedger.purchase(userId, -amount, current - amount, "PURCHASE_REFUND", purchaseId));
+    }
+
     private void charge(Long userId, int cost, String reason, Long attemptId, Long turnId) {
         int current = check(userId, cost);
         ledger.save(new CreditLedger(userId, -cost, current - cost, reason, attemptId, turnId));
