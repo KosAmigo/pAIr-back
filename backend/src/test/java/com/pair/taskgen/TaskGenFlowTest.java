@@ -169,6 +169,22 @@ class TaskGenFlowTest {
     }
 
     @Test
+    @DisplayName("20분 과제: 제한 시간 20, d4Minutes 는 비례해서 줄고, AI 가 정한 난이도를 저장한다")
+    void twentyMinutesAndAiDifficulty() {
+        DevDraft g = good("flow-20min");
+        ai.script.add(new DevDraft(g.title(), g.summary(), g.code(), g.category(), g.description(), g.requirements(), g.answer(),
+                g.files(), g.hiddenTests(), g.solution(), "고급"));
+        var form = new TaskGenForm("DEV", "쿠폰 할인 계산", "쿠폰 중복 적용", "SELF", 20);
+        generator.generate(form, 1L, steps::add);
+
+        TaskRecord t = records.findByCode("flow-20min").orElseThrow();
+        assertThat(t.getTimeLimitMin()).isEqualTo(20);
+        assertThat(t.getDifficulty()).isEqualTo("고급");
+        assertThat(tasks.get("flow-20min").d4Minutes()).containsExactly(6, 10, 13, 16);
+        assertThat(ai.users.get(0)).contains("제한 시간: 20분").doesNotContain("직군", "난이도");
+    }
+
+    @Test
     @DisplayName("저장한 과제를 TaskRepository 로 다시 읽으면 Draft 와 같다 (숨은 테스트는 test/ 를 뗀 경로)")
     void roundTrip() {
         DevDraft d = good("flow-roundtrip");
@@ -277,7 +293,7 @@ class TaskGenFlowTest {
     }
 
     private static final String FORM = """
-            {"track":"DEV","jobRole":"백엔드","difficulty":"중급","topic":"쿠폰 할인 계산","trap":"쿠폰 중복 적용"}
+            {"track":"DEV","topic":"쿠폰 할인 계산","trap":"쿠폰 중복 적용"}
             """;
 
     @Test
@@ -300,7 +316,7 @@ class TaskGenFlowTest {
         mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
                 .content(FORM.replace("쿠폰 할인 계산", " "))).andExpect(status().isBadRequest());
         mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
-                .content(FORM.replace("중급", "최상급"))).andExpect(status().isBadRequest());
+                .content(FORM.replace("}", ",\"minutes\":30}"))).andExpect(status().isBadRequest());
         mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)
                 .content(FORM.replace("}", ",\"minutes\":90}"))).andExpect(status().isBadRequest());
         mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON)

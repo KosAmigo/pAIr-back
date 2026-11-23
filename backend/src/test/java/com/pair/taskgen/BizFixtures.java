@@ -23,7 +23,7 @@ final class BizFixtures {
     private BizFixtures() {}
 
     static TaskGenForm form() {
-        return new TaskGenForm("BIZ", "서비스 기획", "중급", "저가 요금제 출시 여부", "설문 의향을 실제 전환율로 보정하지 않음", "SELF", 60);
+        return new TaskGenForm("BIZ", "저가 요금제 출시 여부", "설문 의향을 실제 전환율로 보정하지 않음", "SELF", 60);
     }
 
     /** 가짜 풀이 모델이 맞히는 정상 Draft (정답: 1, 2, 21080, 2000) */

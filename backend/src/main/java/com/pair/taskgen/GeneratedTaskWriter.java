@@ -58,7 +58,18 @@ public class GeneratedTaskWriter {
             "AI가 제안한 내용 중 채택하지 않은 것이 있다면 무엇이고, 이유는 무엇인가요?",
             "동료가 같은 결과를 얻으려면 AI에게 어떤 지시를 어떤 순서로 주면 되나요?");
 
-    private static final List<Integer> D4_MINUTES = List.of(20, 30, 40, 50);
+    /** 60분 기준 d4 시점(분). 시간이 짧으면 비례해서 줄인다 */
+    private static final List<Integer> D4_BASE = List.of(20, 30, 40, 50);
+
+    static List<Integer> d4Minutes(int minutes) {
+        return D4_BASE.stream().map(m -> m * minutes / 60).toList();
+    }
+
+    /** 모델이 정한 난이도. 초급·중급·고급이 아니면 중급 */
+    static String difficultyOf(String v) {
+        String s = v == null ? "" : v.strip();
+        return TaskGenForm.DIFFICULTIES.contains(s) ? s : "중급";
+    }
 
     private final TaskRecordRepository records;
     private final TaskFileRecordRepository files;
@@ -100,8 +111,8 @@ public class GeneratedTaskWriter {
 
         TaskRecord t = new TaskRecord(id, code, cut(d.title(), 200), "DEV", form.minutes(), form.usageValue(),
                 TaskRecord.Status.HIDDEN, null, adminId, now);
-        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), form.difficulty());
-        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), settings(d));
+        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), difficultyOf(d.difficulty()));
+        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), settings(d, form.minutes()));
         records.save(t);
 
         List<TaskFileRecord> rows = new ArrayList<>();
@@ -146,8 +157,8 @@ public class GeneratedTaskWriter {
 
         TaskRecord t = new TaskRecord(id, code, cut(d.title(), 200), "BIZ", form.minutes(), form.usageValue(),
                 TaskRecord.Status.HIDDEN, null, adminId, now);
-        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), form.difficulty());
-        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings());
+        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), difficultyOf(d.difficulty()));
+        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings(form.minutes()));
         records.save(t);
 
         Map<String, Long> fileIds = new LinkedHashMap<>();
@@ -201,12 +212,12 @@ public class GeneratedTaskWriter {
         return code;
     }
 
-    private String bizSettings() {
+    private String bizSettings(int minutes) {
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("openFile", "기획안.md");
         s.put("editableFile", "기획안.md");
         s.put("requiredHeadings", BIZ_HEADINGS);
-        s.put("d4Minutes", D4_MINUTES);
+        s.put("d4Minutes", d4Minutes(minutes));
         return toJson(s);
     }
 
@@ -238,13 +249,13 @@ public class GeneratedTaskWriter {
         return v.length() > 40 ? v.substring(0, 40).replaceAll("-+$", "") : v;
     }
 
-    private String settings(DevDraft d) {
+    private String settings(DevDraft d, int minutes) {
         String open = d.files().stream().map(DevDraft.FileDraft::path).filter(p -> p.startsWith("src/")).findFirst().orElse(null);
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("openFile", open);
         s.put("editableFile", null);
         s.put("requiredHeadings", List.of());
-        s.put("d4Minutes", D4_MINUTES);
+        s.put("d4Minutes", d4Minutes(minutes));
         return toJson(s);
     }
 

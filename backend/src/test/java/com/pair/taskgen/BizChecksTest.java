@@ -129,6 +129,19 @@ class BizChecksTest {
     }
 
     @Test
+    @DisplayName("20분 과제는 객관식 2 + 단답형 1 을 허용하고, 40분·60분은 단답형 2개가 필요하다")
+    void twentyMinuteQuestionCounts() {
+        BizDraft d = BizFixtures.good("c");
+        BizDraft small = edit(d, b -> b.questions(d.questions().subList(0, 3)));
+        assertThat(BizChecks.formatProblem(small, pdf, 20)).isNull();
+        assertThat(BizChecks.formatProblem(small, pdf, 40)).contains("단답형이 2개");
+        assertThat(BizChecks.formatProblem(small, pdf, 60)).contains("단답형이 2개");
+        BizDraft noShort = edit(d, b -> b.questions(d.questions().subList(0, 2)));
+        assertThat(BizChecks.formatProblem(noShort, pdf, 20)).contains("단답형이 1개");
+        assertThat(BizChecks.forDraft(pdf, solver, "m", small, 20).stream().map(c -> c.run(small)).filter(r -> !r.ok()).toList()).isEmpty();
+    }
+
+    @Test
     @DisplayName("객관식 보기·정답 수, 단답형 개수, 후속 질문 수, 체크리스트 '필수 항목' 을 확인한다")
     void formatRules() {
         BizDraft d = BizFixtures.good("c");

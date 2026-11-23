@@ -40,7 +40,7 @@ public abstract class TaskGenerator<D> {
     protected abstract Class<D> draftType();
 
     /** 이 Draft 에 대한 검사 목록 (실행 결과를 검사끼리 나눠 쓰도록 Draft 마다 새로 만든다) */
-    protected abstract List<GenCheck<D>> checks(D draft);
+    protected abstract List<GenCheck<D>> checks(TaskGenForm form, D draft);
 
     /** report.json 에 더 남길 내용 (예: 비개발 함정 정보) */
     protected java.util.Map<String, Object> details(D draft) {
@@ -63,7 +63,7 @@ public abstract class TaskGenerator<D> {
         String retryError = null;
 
         onStep.accept(STEP_CHECKING);
-        List<CheckResult> results = runChecks(draft);
+        List<CheckResult> results = runChecks(form, draft);
         List<CheckResult> failed = results.stream().filter(c -> !c.ok()).toList();
 
         if (!failed.isEmpty()) {
@@ -75,7 +75,7 @@ public abstract class TaskGenerator<D> {
                 attempts = 2;
                 draft = second.value();
                 onStep.accept(STEP_CHECKING);
-                results = runChecks(draft);
+                results = runChecks(form, draft);
             } catch (RuntimeException e) {
                 // 다시 만들기가 실패해도 이미 만든 첫 결과는 버리지 않고 실패 표시와 함께 저장한다
                 retryError = String.valueOf(e.getMessage());
@@ -89,8 +89,8 @@ public abstract class TaskGenerator<D> {
         return new Outcome(code, passed, attempts, results);
     }
 
-    private List<CheckResult> runChecks(D draft) {
-        return checks(draft).stream().map(c -> {
+    private List<CheckResult> runChecks(TaskGenForm form, D draft) {
+        return checks(form, draft).stream().map(c -> {
             try {
                 return c.run(draft);
             } catch (RuntimeException e) {

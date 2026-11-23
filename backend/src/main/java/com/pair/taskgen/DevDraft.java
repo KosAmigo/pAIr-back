@@ -16,7 +16,15 @@ public record DevDraft(
         String answer,
         List<FileDraft> files,
         List<FileDraft> hiddenTests,
-        List<FileDraft> solution) {
+        List<FileDraft> solution,
+        String difficulty) {
+
+    /** 난이도 없이 만든다(테스트·옛 코드용) */
+    public DevDraft(String title, String summary, String code, String category, List<String> description,
+            List<String> requirements, String answer, List<FileDraft> files, List<FileDraft> hiddenTests,
+            List<FileDraft> solution) {
+        this(title, summary, code, category, description, requirements, answer, files, hiddenTests, solution, null);
+    }
 
     public record FileDraft(String path, String content) {}
 }
