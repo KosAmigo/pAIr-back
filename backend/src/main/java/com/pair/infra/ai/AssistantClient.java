@@ -17,7 +17,7 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.stereotype.Component;
 
-import com.pair.domain.attempt.service.ChatTurnState.AssistantRequest;
+import com.pair.domain.attempt.dto.ChatTurnStateDto.AssistantRequest;
 import com.pair.global.config.AiKeyProperties;
 
 /** 응시자가 쓰는 AI 어시스턴트 (Spring AI OpenAI). */
@@ -93,7 +93,7 @@ public class AssistantClient {
     private Prompt prompt(AssistantRequest req, boolean streamUsage) {
         List<Message> messages = new ArrayList<>();
         messages.add(new SystemMessage(req.systemPrompt()));
-        for (com.pair.domain.attempt.service.ChatTurnState.Message m : req.messages()) {
+        for (com.pair.domain.attempt.dto.ChatTurnStateDto.Message m : req.messages()) {
             messages.add("user".equals(m.role()) ? new UserMessage(m.content()) : new AssistantMessage(m.content()));
         }
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
@@ -107,7 +107,7 @@ public class AssistantClient {
     public Reply send(AssistantRequest req) {
         List<Message> messages = new ArrayList<>();
         messages.add(new SystemMessage(req.systemPrompt()));
-        for (com.pair.domain.attempt.service.ChatTurnState.Message m : req.messages()) {
+        for (com.pair.domain.attempt.dto.ChatTurnStateDto.Message m : req.messages()) {
             messages.add("user".equals(m.role()) ? new UserMessage(m.content()) : new AssistantMessage(m.content()));
         }
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()

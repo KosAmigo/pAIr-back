@@ -1,7 +1,7 @@
 package com.pair.infra.storage;
 
 import com.pair.domain.exam.service.SessionResultService;
-import com.pair.domain.exam.service.SnapshotValidator;
+import com.pair.domain.exam.service.SnapshotValidationService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,7 +34,7 @@ class SnapshotStorageTest {
     @Test
     @DisplayName("검증: data URL·base64 모두 받고, JPEG 아님·크기 초과·깨진 base64 는 거절")
     void validator() {
-        SnapshotValidator v = new SnapshotValidator(100);
+        SnapshotValidationService v = new SnapshotValidationService(100);
         String b64 = Base64.getEncoder().encodeToString(JPEG);
 
         assertThat(v.decode(b64)).isEqualTo(JPEG);

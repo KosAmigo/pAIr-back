@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.global.security.InviteTokenService;
 import com.pair.domain.exam.exception.LinkExpiredException;
 import java.time.Clock;
 import java.time.Instant;
@@ -12,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.service.AttemptRegistry;
+import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
@@ -22,7 +23,7 @@ import com.pair.domain.exam.repository.ProctorConsentRepository;
 import com.pair.domain.exam.dto.ConsentRequest;
 import com.pair.domain.exam.dto.EntryInfoResponse;
 import com.pair.domain.exam.dto.TaskStatusDto;
-import com.pair.domain.task.service.TaskCatalog;
+import com.pair.domain.task.service.TaskCatalogService;
 import com.pair.domain.task.entity.Task;
 
 /**
@@ -37,17 +38,17 @@ public class ExamEntryService {
 
     private final ExamParticipantRepository participants;
     private final ProctorConsentRepository consents;
-    private final AttemptSubmitter attempts;
-    private final AttemptRegistry registry;
-    private final ParticipantProgress progress;
-    private final ConnectionGrace grace;
-    private final TaskCatalog catalog;
+    private final AttemptSubmitService attempts;
+    private final AttemptRegistryService registry;
+    private final ParticipantProgressService progress;
+    private final ConnectionGraceService grace;
+    private final TaskCatalogService catalog;
     private final PairProperties props;
     private final ObjectMapper json;
     private final Clock clock;
 
     public ExamEntryService(ExamParticipantRepository participants, ProctorConsentRepository consents,
-            AttemptSubmitter attempts, AttemptRegistry registry, ParticipantProgress progress, ConnectionGrace grace, TaskCatalog catalog,
+            AttemptSubmitService attempts, AttemptRegistryService registry, ParticipantProgressService progress, ConnectionGraceService grace, TaskCatalogService catalog,
             PairProperties props, ObjectMapper json, Clock clock) {
         this.participants = participants;
         this.consents = consents;
@@ -109,7 +110,7 @@ public class ExamEntryService {
             case CANCELED -> throw new IllegalStateException("취소된 시험입니다.");
             case LIVE -> { }
         }
-        ParticipantProgress.Progress pr = progress.of(p);
+        ParticipantProgressService.Progress pr = progress.of(p);
         if (pr.finished()) throw new IllegalStateException("이미 제출했습니다.");
         if (s.isProctoring() && !consents.existsById(p.getId())) {
             throw new IllegalStateException("감독 동의와 환경 점검을 먼저 마쳐 주세요.");
@@ -136,9 +137,9 @@ public class ExamEntryService {
     public Heartbeat heartbeat(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
-        ParticipantProgress.Progress pr = progress.of(p);
+        ParticipantProgressService.Progress pr = progress.of(p);
         ExamSession.Phase phase = p.getSession().phase(now);
-        if (phase != ExamSession.Phase.LIVE || !pr.started() || pr.finished()) return new Heartbeat(ConnectionGrace.isExpired(p, pr.started(), pr.finished(), now));
+        if (phase != ExamSession.Phase.LIVE || !pr.started() || pr.finished()) return new Heartbeat(ConnectionGraceService.isExpired(p, pr.started(), pr.finished(), now));
         try {
             grace.touch(p, now);
             return new Heartbeat(false);
@@ -158,7 +159,7 @@ public class ExamEntryService {
     public EntryInfoResponse submitTask(String token, String taskId) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
-        ParticipantProgress.Progress pr = progress.of(p);
+        ParticipantProgressService.Progress pr = progress.of(p);
         requireSubmittable(p, pr, now);
         String attemptId = pr.attempts().get(taskId);
         if (attemptId == null) throw new NoSuchElementException("이 시험의 과제가 아닙니다.");
@@ -174,7 +175,7 @@ public class ExamEntryService {
     public EntryInfoResponse submit(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
-        ParticipantProgress.Progress pr = progress.of(p);
+        ParticipantProgressService.Progress pr = progress.of(p);
         requireSubmittable(p, pr, now);
         if (pr.finished()) return view(p, now);
         submitAll(attempts, registry, pr, now);
@@ -182,13 +183,13 @@ public class ExamEntryService {
     }
 
     /** 남은 과제를 모두 제출한다 (파일, DB). 직접 제출과 종료 시각 자동 제출이 같이 쓴다 */
-    static void submitAll(AttemptSubmitter attempts, AttemptRegistry registry, ParticipantProgress.Progress pr, Instant now) {
+    static void submitAll(AttemptSubmitService attempts, AttemptRegistryService registry, ParticipantProgressService.Progress pr, Instant now) {
         var open = pr.records().stream().filter(r -> !r.isSubmitted()).map(r -> String.valueOf(r.getId())).toList();
         attempts.submitAll(open);
         open.forEach(id -> registry.markSubmitted(id, now));
     }
 
-    private static void requireSubmittable(ExamParticipant p, ParticipantProgress.Progress pr, Instant now) {
+    private static void requireSubmittable(ExamParticipant p, ParticipantProgressService.Progress pr, Instant now) {
         if (!pr.started()) throw new IllegalStateException("시작하지 않은 시험입니다.");
         if (!pr.finished() && p.getSession().phase(now) == ExamSession.Phase.ENDED) {
             throw new IllegalStateException("종료 시각이 지나 자동 제출을 기다리는 중입니다.");
@@ -196,13 +197,13 @@ public class ExamEntryService {
     }
 
     ExamParticipant find(String token) {
-        if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.findByInviteTokenHash(InviteTokens.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
+        if (!InviteTokenService.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
+        return participants.findByInviteTokenHash(InviteTokenService.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 
     private ExamParticipant lock(String token) {
-        if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.lockByInviteTokenHash(InviteTokens.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
+        if (!InviteTokenService.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
+        return participants.lockByInviteTokenHash(InviteTokenService.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 
     private static void requireNotEnded(ExamSession s, Instant now) {
@@ -212,12 +213,12 @@ public class ExamEntryService {
 
     private EntryInfoResponse view(ExamParticipant p, Instant now) {
         ExamSession s = p.getSession();
-        ParticipantProgress.Progress pr = progress.of(p);
+        ParticipantProgressService.Progress pr = progress.of(p);
         List<String> codes = catalog.codesInOrder(s.getTaskIds());
         List<TaskStatusDto> tasks = codes.stream()
                 .map(code -> new TaskStatusDto(code, pr.attempts().get(code), pr.submitted().getOrDefault(code, false)))
                 .toList();
-        boolean linkExpired = s.phase(now) == ExamSession.Phase.LIVE && ConnectionGrace.isExpired(p, pr.started(), pr.finished(), now);
+        boolean linkExpired = s.phase(now) == ExamSession.Phase.LIVE && ConnectionGraceService.isExpired(p, pr.started(), pr.finished(), now);
         return new EntryInfoResponse(s.getTitle(), null, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
                 consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks, linkExpired);
     }

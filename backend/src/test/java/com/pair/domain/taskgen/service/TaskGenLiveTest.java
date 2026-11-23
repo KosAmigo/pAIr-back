@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -42,9 +43,9 @@ class TaskGenLiveTest {
     }
 
     @MockitoBean JavaMailSender mail;
-    @Autowired DevTaskGenerator generator;
-    @Autowired BizTaskGenerator bizGenerator;
-    @Autowired GeneratedTaskWriter writer;
+    @Autowired DevTaskGeneratorService generator;
+    @Autowired BizTaskGeneratorService bizGenerator;
+    @Autowired GeneratedTaskRepository writer;
     @Autowired TaskRepository records;
     @Autowired ObjectMapper json;
 

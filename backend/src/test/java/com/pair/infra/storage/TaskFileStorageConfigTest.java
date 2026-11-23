@@ -1,10 +1,10 @@
 package com.pair.infra.storage;
 
 import com.pair.domain.taskgen.dto.TaskGenRequest;
-import com.pair.domain.taskgen.service.BizTaskGenerator;
-import com.pair.domain.taskgen.service.DevTaskGenerator;
-import com.pair.domain.taskgen.service.TaskGenJobs;
-import com.pair.domain.taskgen.service.TaskGenerator;
+import com.pair.domain.taskgen.service.BizTaskGeneratorService;
+import com.pair.domain.taskgen.service.DevTaskGeneratorService;
+import com.pair.domain.taskgen.service.TaskGenJobService;
+import com.pair.domain.taskgen.service.TaskGeneratorService;
 import com.pair.global.config.TaskGenProperties;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,8 +57,8 @@ class TaskFileStorageConfigTest {
 
     private static final String REMOTE = "jdbc:postgresql://pair-db.xxxx.ap-northeast-2.rds.amazonaws.com:5432/pair";
 
-    private static TaskGenJobs jobs(String storage, String url, BizTaskGenerator biz, DevTaskGenerator dev) {
-        return new TaskGenJobs(dev, biz, new TaskGenProperties(null, null, null, null, null), new TaskFileStorageGuard(storage, url));
+    private static TaskGenJobService jobs(String storage, String url, BizTaskGeneratorService biz, DevTaskGeneratorService dev) {
+        return new TaskGenJobService(dev, biz, new TaskGenProperties(null, null, null, null, null), new TaskFileStorageGuard(storage, url));
     }
 
     private static TaskGenRequest form(String track) {
@@ -68,10 +68,10 @@ class TaskFileStorageConfigTest {
     @Test
     @DisplayName("안전장치: local + 원격 DB 면 BIZ 는 AI 호출 없이 거절, DEV 는 통과")
     void blocksBizOnRemoteDb() throws Exception {
-        BizTaskGenerator biz = mock(BizTaskGenerator.class);
-        DevTaskGenerator dev = mock(DevTaskGenerator.class);
-        when(dev.generate(any(), org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(new TaskGenerator.Outcome("T-1", true, 1, List.of()));
-        TaskGenJobs j = jobs("local", REMOTE, biz, dev);
+        BizTaskGeneratorService biz = mock(BizTaskGeneratorService.class);
+        DevTaskGeneratorService dev = mock(DevTaskGeneratorService.class);
+        when(dev.generate(any(), org.mockito.ArgumentMatchers.anyLong(), any())).thenReturn(new TaskGeneratorService.Outcome("T-1", true, 1, List.of()));
+        TaskGenJobService j = jobs("local", REMOTE, biz, dev);
 
         assertThatThrownBy(() -> j.start(form("BIZ"), 1L))
                 .isInstanceOf(IllegalStateException.class) // ApiExceptionHandler 가 400 으로 바꾼다

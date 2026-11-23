@@ -29,7 +29,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.service.AttemptService;
@@ -165,7 +165,7 @@ class TaskMaterialApiTest {
     @Test
     void 제출_뒤에도_읽을_수_있다() throws Exception {
         Attempt r = attemptRecords.findById(Long.parseLong(id)).orElseThrow();
-        r.sync(AttemptState.Status.FOLLOWUP, Instant.now(), null);
+        r.sync(AttemptStateDto.Status.FOLLOWUP, Instant.now(), null);
         attemptRecords.save(r);
         call("", owner, null, null).andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(2)));
     }

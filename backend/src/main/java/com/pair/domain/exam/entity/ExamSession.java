@@ -62,7 +62,7 @@ public class ExamSession {
     @Column(name = "participants_csv_key", length = 255)
     private String participantsCsvKey;
 
-    /** 회차 과제 (tasks.task_id 와 순서). 화면에는 TaskCatalog 로 code 를 붙여 보여 준다 */
+    /** 회차 과제 (tasks.task_id 와 순서). 화면에는 TaskCatalogService 로 code 를 붙여 보여 준다 */
     @ElementCollection
     @CollectionTable(name = "exam_session_tasks", joinColumns = @JoinColumn(name = "session_id"))
     private Set<SessionTask> tasks = new HashSet<>();

@@ -185,12 +185,12 @@ class AuthIntegrationTest {
         long userId = body.path("user").path("id").asLong();
         String access = body.path("token").asText();
         String expiredAccess = tokens.access(userId, 0, Instant.now().minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1));
-        String expiredRefresh = tokens.refresh(userId, com.pair.domain.exam.service.InviteTokens.next(),
+        String expiredRefresh = tokens.refresh(userId, com.pair.global.security.InviteTokenService.next(),
                 Instant.now().minus(JwtTokens.REFRESH_LIFETIME).minusSeconds(1));
         String[] parts = access.split("\\.");
         String tampered = parts[0] + "." + parts[1] + "." + (parts[2].startsWith("A") ? "B" : "A") + parts[2].substring(1);
 
-        for (String invalid : new String[] { expiredAccess, tampered, com.pair.domain.exam.service.InviteTokens.next() }) {
+        for (String invalid : new String[] { expiredAccess, tampered, com.pair.global.security.InviteTokenService.next() }) {
             mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + invalid))
                     .andExpect(status().isUnauthorized());
         }

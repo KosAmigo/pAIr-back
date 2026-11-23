@@ -1,5 +1,8 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.dto.BizDraftDto;
+import com.pair.domain.taskgen.dto.GenCheckResultDto;
+import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.infra.storage.TaskFileStorage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -46,7 +49,7 @@ import com.pair.domain.task.repository.QuestionChoiceRepository;
 import com.pair.domain.task.repository.QuestionSourceRepository;
 import com.pair.domain.task.entity.ShortAnswerKey;
 import com.pair.domain.task.repository.ShortAnswerKeyRepository;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.repository.TaskFileRepository;
 import com.pair.domain.task.entity.TaskQuestion;
@@ -71,7 +74,7 @@ class BizFlowTest {
         r.add("pair.taskgen.file-storage", () -> "local");
     }
 
-    static class ScriptedAi implements TaskGenAi {
+    static class ScriptedAi implements TaskGenAiService {
         final Deque<Object> script = new ArrayDeque<>();
         final List<String> users = new ArrayList<>();
 
@@ -105,8 +108,8 @@ class BizFlowTest {
     @MockitoBean JavaMailSender mail;
     @Autowired ScriptedAi ai;
     @Autowired BizFixtures.FakeSolver solver;
-    @Autowired BizTaskGenerator generator;
-    @Autowired GeneratedTaskWriter writer;
+    @Autowired BizTaskGeneratorService generator;
+    @Autowired GeneratedTaskRepository writer;
     @Autowired TaskFileStorage storage;
     @Autowired TaskDefRepository tasks;
     @Autowired TaskRepository records;
@@ -129,13 +132,13 @@ class BizFlowTest {
         solver.reply = "{\"answers\": [\"1\", \"2\", \"21080\", \"2000\"]}";
     }
 
-    private TaskGenerator.Outcome generate() {
+    private TaskGeneratorService.Outcome generate() {
         return generator.generate(BizFixtures.form(), 1L, steps::add);
     }
 
-    private static BizDraft wrongAnswers(String code) {
+    private static BizDraftDto wrongAnswers(String code) {
         // 정답 계산이 인정 답안과 달라 '단답형 검산' 이 실패하는 Draft
-        BizDraft d = BizFixtures.good(code);
+        BizDraftDto d = BizFixtures.good(code);
         var bad = BizFixtures.shortQ("q", "11111", "v(\"자료/매출.csv\", \"월=2026-09;요금제=베이직\", \"가입자 수\")", BizFixtures.CSV + "|", BizFixtures.DOC1 + "|2");
         return BizFixtures.edit(d, b -> b.questions(BizFixtures.replaceQuestion(d, 2, bad)));
     }
@@ -153,7 +156,7 @@ class BizFlowTest {
     @Test
     @DisplayName("통과하면 AI 1번 호출로 검수 전(HIDDEN)에 저장하고, 문항·보기·정답·근거·쪽 글·PDF 가 모두 들어간다")
     void passAndSave() throws Exception {
-        BizDraft d = BizFixtures.good("biz-pass");
+        BizDraftDto d = BizFixtures.good("biz-pass");
         ai.script.add(d);
         var o = generate();
 
@@ -172,7 +175,7 @@ class BizFlowTest {
         assertThat(t.getSettings()).contains("\"openFile\":\"기획안.md\"").contains("\"editableFile\":\"기획안.md\"").contains("## 결론").contains("[20,30,40,50]");
 
         // TaskDefRepository 로 다시 읽기
-        TaskDef def = tasks.get("biz-pass");
+        TaskDefDto def = tasks.get("biz-pass");
         assertThat(def.type()).isEqualTo("biz");
         assertThat(def.description()).containsExactlyElementsOf(d.description());
         assertThat(def.followUps()).containsExactlyElementsOf(d.followUps());
@@ -200,7 +203,7 @@ class BizFlowTest {
         var qs = questions.findByTaskIdAndStageOrderBySeqAsc(id, "TASK");
         assertThat(qs).extracting(TaskQuestion::getQuestionType).containsExactly("SINGLE", "SINGLE", "SHORT", "SHORT");
         assertThat(qs).extracting(TaskQuestion::getPoints).containsExactly(5, 5, 3, 3);
-        assertThat(qs).extracting(TaskQuestion::getContent).containsExactlyElementsOf(d.questions().stream().map(BizDraft.QuestionDraft::content).toList());
+        assertThat(qs).extracting(TaskQuestion::getContent).containsExactlyElementsOf(d.questions().stream().map(BizDraftDto.QuestionDraft::content).toList());
         var c1 = choices.findByQuestionIdOrderByIdAsc(qs.get(0).getId());
         assertThat(c1).extracting(QuestionChoice::getContent).containsExactly("34%", "38%", "41%", "50%");
         assertThat(c1).extracting(QuestionChoice::isCorrect).containsExactly(true, false, false, false);
@@ -233,11 +236,11 @@ class BizFlowTest {
         long before = pdfFilesOnDisk();
         long tasksBefore = records.count();
         // 인정 답안이 칼럼 길이(200)를 넘으면 단답형 정답 저장에서 DB 오류가 난다 (PDF 는 이미 올라간 뒤)
-        BizDraft d = BizFixtures.good("biz-rollback");
+        BizDraftDto d = BizFixtures.good("biz-rollback");
         var q = BizFixtures.shortQ("긴 답", "21080", "1", BizFixtures.CSV + "|", BizFixtures.DOC1 + "|2");
-        var tooLong = new BizDraft.QuestionDraft(q.type(), q.content(), q.choices(), List.of("21080", "9".repeat(300)), q.calc(), q.sources());
-        BizDraft broken = BizFixtures.edit(d, b -> b.questions(BizFixtures.replaceQuestion(d, 2, tooLong)));
-        var report = new TaskGenerator.GenReport("m", 1, 1, 1, 1, true, BizFixtures.form(), List.of(), null, Map.of());
+        var tooLong = new BizDraftDto.QuestionDraft(q.type(), q.content(), q.choices(), List.of("21080", "9".repeat(300)), q.calc(), q.sources());
+        BizDraftDto broken = BizFixtures.edit(d, b -> b.questions(BizFixtures.replaceQuestion(d, 2, tooLong)));
+        var report = new TaskGeneratorService.GenReport("m", 1, 1, 1, 1, true, BizFixtures.form(), List.of(), null, Map.of());
 
         assertThatThrownBy(() -> writer.saveBiz(BizFixtures.form(), broken, report, 1L)).isInstanceOf(RuntimeException.class);
 
@@ -271,7 +274,7 @@ class BizFlowTest {
         assertThat(o.passed()).isTrue();
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(o.taskCode()).isEqualTo("biz-retry-2");
-        assertThat(ai.users.get(1)).contains(BizChecks.CALC).contains("11111");
+        assertThat(ai.users.get(1)).contains(BizCheckService.CALC).contains("11111");
         assertThat(steps).containsExactly("생성 중", "확인 중", "다시 생성 중", "확인 중", "저장 중");
         assertThat(records.findByCode("biz-retry-1")).isEmpty();
     }
@@ -286,7 +289,7 @@ class BizFlowTest {
         assertThat(o.passed()).isFalse();
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(ai.users).hasSize(2);
-        assertThat(o.checks().stream().filter(c -> !c.ok()).map(GenCheckResult::name)).contains(BizChecks.CALC);
+        assertThat(o.checks().stream().filter(c -> !c.ok()).map(GenCheckResultDto::name)).contains(BizCheckService.CALC);
         assertThat(records.findByCode("biz-fail-2").orElseThrow().getStatus()).isEqualTo(Task.Status.HIDDEN);
         assertThat(json.readTree(writer.report("biz-fail-2")).get("passed").asBoolean()).isFalse();
     }
@@ -297,7 +300,7 @@ class BizFlowTest {
         solver.error = new AiUnavailableException("Claude 요청 한도 (429)");
         ai.script.add(BizFixtures.good("biz-solver-err"));
         var o = generate();
-        assertThat(o.checks().stream().filter(c -> !c.ok()).map(GenCheckResult::name)).containsExactly(BizChecks.SOLVE);
+        assertThat(o.checks().stream().filter(c -> !c.ok()).map(GenCheckResultDto::name)).containsExactly(BizCheckService.SOLVE);
 
         long before = records.count();
         ai.script.clear();

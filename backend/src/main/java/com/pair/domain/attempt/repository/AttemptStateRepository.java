@@ -1,7 +1,7 @@
 package com.pair.domain.attempt.repository;
 
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import java.util.List;
 import java.util.Map;
 
@@ -14,12 +14,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 public interface AttemptStateRepository {
 
     /** 응시를 만들고 과제 원본 파일을 작업 파일로 넣는다 */
-    void create(AttemptState a, Map<String, String> files);
+    void create(AttemptStateDto a, Map<String, String> files);
 
-    void save(AttemptState a);
+    void save(AttemptStateDto a);
 
     /** 없는 응시면 NoSuchElementException */
-    AttemptState load(String id);
+    AttemptStateDto load(String id);
 
     /** 채점 툴이 고를 수 있는 응시 ID 목록 */
     List<String> ids();
@@ -40,9 +40,9 @@ public interface AttemptStateRepository {
 
     // ── 대화, 작업 기록 ─────────────────
 
-    void appendTurn(String id, ChatTurnState turn);
+    void appendTurn(String id, ChatTurnStateDto turn);
 
-    List<ChatTurnState> turns(String id);
+    List<ChatTurnStateDto> turns(String id);
 
     /** type 은 start, save, build, run, chat, chatEmpty, aiEdit, submit, followups, firstValid */
     void appendEvent(String id, String type, Map<String, Object> data);

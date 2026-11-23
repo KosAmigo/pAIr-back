@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.global.security.InviteTokenService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.NoSuchElementException;
@@ -47,8 +48,8 @@ public class EnvCheckService {
     @Transactional
     public void saveProgress(String token, JsonNode result) {
         Instant now = clock.instant();
-        if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        ExamParticipant p = participants.findByInviteTokenHash(InviteTokens.hash(token))
+        if (!InviteTokenService.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
+        ExamParticipant p = participants.findByInviteTokenHash(InviteTokenService.hash(token))
                 .orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
         ExamSession s = p.getSession();
         if (!s.isProctoring()) throw new IllegalStateException("감독을 쓰지 않는 회차입니다.");

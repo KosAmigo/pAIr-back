@@ -2,7 +2,7 @@ package com.pair.domain.attempt;
 
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.service.EditProposals;
+import com.pair.domain.attempt.service.EditProposalService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -115,11 +115,11 @@ class AttemptGuardsTest {
         String firstLine = before.lines().findFirst().orElseThrow();
         // 실제로 적용 가능한 제안(로그 첫 줄 바꾸기)이어야 읽기 전용 검사가 막는지 확인할 수 있다
         String reply = "로그를 고쳐 보세요.\n```edit path=logs/app.log\n<<<<<<< SEARCH\n" + firstLine + "\n=======\n지운 로그\n>>>>>>> REPLACE\n```";
-        assertThat(EditProposals.apply(EditProposals.parse(reply).get(0), before)).isPresent();
+        assertThat(EditProposalService.apply(EditProposalService.parse(reply).get(0), before)).isPresent();
         when(assistant.send(any())).thenReturn(new AssistantClient.Reply(reply, "test", 10, 20, 0, "stop", 1));
         attempts.chat(devId, "로그 정리해 줘", List.of(), null);
         int aiTurn = store.turns(devId).stream().filter(t -> "ai".equals(t.role())).findFirst().orElseThrow().turn();
-        int index = EditProposals.parse(reply).get(0).index();
+        int index = EditProposalService.parse(reply).get(0).index();
 
         assertThatThrownBy(() -> attempts.decideEdit(devId, aiTurn, index, true)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("읽기 전용");

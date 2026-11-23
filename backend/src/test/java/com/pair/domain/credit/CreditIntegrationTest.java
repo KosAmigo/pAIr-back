@@ -43,9 +43,9 @@ import com.pair.infra.ai.AiUnavailableException;
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.service.AttemptRegistry;
+import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
@@ -63,7 +63,7 @@ class CreditIntegrationTest {
     @Autowired CreditService credits;
     @Autowired CreditLedgerRepository ledger;
     @Autowired AttemptService attempts;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired AttemptStateRepository store;
     @Autowired CheckpointService checkpoints;
     @Autowired TaskRepository tasks;
@@ -204,8 +204,8 @@ class CreditIntegrationTest {
         Instant now = Instant.now();
         Attempt record = registry.save(Attempt.live(1L, 3L, "test", now));
         String id = record.getId().toString();
-        store.create(new AttemptState(id, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
-                AttemptState.Status.SOLVING, List.of(), null, null), Map.of());
+        store.create(new AttemptStateDto(id, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
+                AttemptStateDto.Status.SOLVING, List.of(), null, null), Map.of());
         when(assistant.send(any())).thenReturn(new AssistantClient.Reply("answer", "test", 10, 20, 0, "stop", 1));
         long before = ledger.count();
         attempts.chat(id, "hello");

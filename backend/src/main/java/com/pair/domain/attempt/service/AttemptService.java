@@ -1,5 +1,7 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import java.time.Instant;
@@ -17,8 +19,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.infra.ai.AiUnavailableException;
 import com.pair.infra.ai.AssistantClient;
-import com.pair.domain.attempt.service.ChatTurnState.AssistantRequest;
-import com.pair.domain.attempt.service.ChatTurnState.Message;
+import com.pair.domain.attempt.dto.ChatTurnStateDto.AssistantRequest;
+import com.pair.domain.attempt.dto.ChatTurnStateDto.Message;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.credit.service.CreditService;
 import com.pair.domain.attempt.service.ChatAttachmentService.Ref;
@@ -28,8 +30,8 @@ import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.JavaDiagnostics;
 import com.pair.domain.task.service.TaskMaterialService;
 import com.pair.domain.scoring.service.ScoringService;
-import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskDefRepository;
 
@@ -44,8 +46,8 @@ public class AttemptService {
     private final AssistantClient assistant;
     private final ScoringService scoring;
     private final PairProperties props;
-    private final TaskCatalog catalog;
-    private final AttemptRegistry registry;
+    private final TaskCatalogService catalog;
+    private final AttemptRegistryService registry;
     private final CheckpointService checkpoints;
     private final CreditService credits;
     private final ChatTurnRepository chatRecords;
@@ -56,7 +58,7 @@ public class AttemptService {
 
     public AttemptService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
-                          TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints, CreditService credits,
+                          TaskCatalogService catalog, AttemptRegistryService registry, CheckpointService checkpoints, CreditService credits,
                           ChatTurnRepository chatRecords, TransactionTemplate transactions,
                           ChatAttachmentService attachments, JavaDiagnostics diagnostics,
                           TaskMaterialService materials) {
@@ -79,7 +81,7 @@ public class AttemptService {
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
     @Transactional
-    public AttemptState startSelf(String taskCode, Long userId) {
+    public AttemptStateDto startSelf(String taskCode, Long userId) {
         Task t = catalog.require(taskCode);
         if (t.getUsage() != Task.Usage.SELF) throw new IllegalArgumentException("자가진단 과제가 아닙니다: " + taskCode);
         if (t.getStatus() != Task.Status.OPEN) throw new IllegalStateException("지금은 응시할 수 없는 과제입니다.");
@@ -91,11 +93,11 @@ public class AttemptService {
     }
 
     /** 실전 회차: 이미 만든 응시 행(DB)에 작업 파일을 만든다 */
-    public AttemptState createFiles(Attempt r, String definitionCode) {
-        TaskDef task = tasks.get(definitionCode);
+    public AttemptStateDto createFiles(Attempt r, String definitionCode) {
+        TaskDefDto task = tasks.get(definitionCode);
         String id = String.valueOf(r.getId());
-        AttemptState a = new AttemptState(id, task.id(), props.assistant().provider(), r.getAssistantModel(),
-                r.getStartedAt(), null, null, null, AttemptState.Status.SOLVING, List.of(), null, null);
+        AttemptStateDto a = new AttemptStateDto(id, task.id(), props.assistant().provider(), r.getAssistantModel(),
+                r.getStartedAt(), null, null, null, AttemptStateDto.Status.SOLVING, List.of(), null, null);
         store.create(a, tasks.visibleFiles(task.id()));
         store.appendEvent(id, "start", Map.of("taskId", task.id()));
         return a;
@@ -107,12 +109,12 @@ public class AttemptService {
     }
 
     public void saveFile(String id, String path, String content) {
-        AttemptState a = requireStatus(id, AttemptState.Status.SOLVING);
+        AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.SOLVING);
         requireWritable(id, path);
         store.writeWorkspaceFile(id, path, content);
         // 저장할 때마다 내용을 함께 남긴다 (예전 snapshots/, D3·R2 분석용)
         store.appendEvent(id, "save", Map.of("path", path, "length", content.length(), "content", content));
-        TaskDef task = tasks.get(a.taskId());
+        TaskDefDto task = tasks.get(a.taskId());
         if (!task.isDev() && path.equals(task.editableFile()) && content.length() >= 300
                 && task.requiredHeadings().stream().allMatch(content::contains)
                 && sectionsFilled(content, task.requiredHeadings())) {
@@ -121,7 +123,7 @@ public class AttemptService {
     }
 
     public CodeRunner.RunResult run(String id) {
-        AttemptState a = requireStatus(id, AttemptState.Status.SOLVING);
+        AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.SOLVING);
         Map<String, String> sources = new HashMap<>();
         store.readFiles(id).forEach((k, v) -> {
             if ((k.startsWith("src/") || k.startsWith("test/")) && k.endsWith(".java")) sources.put(k, v);
@@ -140,7 +142,7 @@ public class AttemptService {
 
     /** 빌드 버튼: 응시자 코드를 컴파일만 한다. */
     public CodeRunner.BuildResult build(String id) {
-        requireStatus(id, AttemptState.Status.SOLVING);
+        requireStatus(id, AttemptStateDto.Status.SOLVING);
         Map<String, String> sources = new HashMap<>();
         store.readFiles(id).forEach((k, v) -> {
             if (isJavaSource(k)) sources.put(k, v);
@@ -170,7 +172,7 @@ public class AttemptService {
 
     /** 편집기 도우미(오류·완성·정의)가 분석할 파일: 저장된 .java 위에 화면의 저장 전 내용을 덮는다. */
     private Map<String, String> editorSources(String id, Map<String, String> overrides) {
-        requireStatus(id, AttemptState.Status.SOLVING);
+        requireStatus(id, AttemptStateDto.Status.SOLVING);
         Map<String, String> sources = new HashMap<>();
         store.readFiles(id).forEach((k, v) -> {
             if (isJavaSource(k)) sources.put(k, v);
@@ -195,17 +197,17 @@ public class AttemptService {
         return locks.computeIfAbsent(id, k -> new Object());
     }
 
-    public List<ChatTurnState> chat(String id, String message) {
+    public List<ChatTurnStateDto> chat(String id, String message) {
         return chat(id, message, null);
     }
 
     /** onDelta 가 있으면 답변을 스트리밍으로 받으며 글자가 오는 대로 넘긴다. 다 받은 뒤에 대화 기록에 저장한다. */
-    public List<ChatTurnState> chat(String id, String message, java.util.function.Consumer<String> onDelta) {
+    public List<ChatTurnStateDto> chat(String id, String message, java.util.function.Consumer<String> onDelta) {
         return chat(id, message, List.of(), onDelta);
     }
 
     /** refs: 질문에 붙인 첨부(파일 트리에서 끌어온 작업 파일·과제 PDF 쪽). 없으면 빈 목록 */
-    public List<ChatTurnState> chat(String id, String message, List<Ref> refs, java.util.function.Consumer<String> onDelta) {
+    public List<ChatTurnStateDto> chat(String id, String message, List<Ref> refs, java.util.function.Consumer<String> onDelta) {
         synchronized (lock(id)) {
             return chatLocked(id, message, refs, onDelta);
         }
@@ -215,8 +217,8 @@ public class AttemptService {
      * 질문 하나의 처리는 세 단계다. AI 호출(수 초~수 분)은 트랜잭션 밖에 두어 DB 연결과 회원 행 잠금을 잡지 않는다.
      * 1) 잔액 확인(읽기만)  2) AI 호출  3) 질문·답 저장 + 체크포인트 + 채팅 차감을 짧은 트랜잭션 하나로
      */
-    private List<ChatTurnState> chatLocked(String id, String message, List<Ref> refs, java.util.function.Consumer<String> onDelta) {
-        AttemptState a = requireStatus(id, AttemptState.Status.SOLVING);
+    private List<ChatTurnStateDto> chatLocked(String id, String message, List<Ref> refs, java.util.function.Consumer<String> onDelta) {
+        AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.SOLVING);
         int limit = props.assistant().maxInputChars();
         if (limit > 0 && message.length() > limit) {
             throw new IllegalArgumentException("질문은 " + limit + "자 이하로 입력하세요. (현재 " + message.length() + "자)");
@@ -226,7 +228,7 @@ public class AttemptService {
         Map<String, String> filesAtAsk = store.readFiles(id);
         List<Resolved> resolved = attachments.resolve(record.getId(), filesAtAsk, refs);
         if (record.getUserId() != null) credits.checkChat(record.getUserId(), resolved.size());
-        List<ChatTurnState> history = store.turns(id);
+        List<ChatTurnStateDto> history = store.turns(id);
         if (history.size() / 2 >= props.assistant().maxTurns()) {
             throw new IllegalStateException("응시당 AI 질문 한도(" + props.assistant().maxTurns() + "회)에 도달했습니다.");
         }
@@ -247,8 +249,8 @@ public class AttemptService {
                     + "). 질문을 조금 나누거나 범위를 좁혀 다시 보내 주세요. 이 실패는 채점에 반영되지 않습니다.");
         }
         int n = history.size();
-        ChatTurnState user = new ChatTurnState(n + 1, "user", askedAt, message, null, null, null, null, null, null);
-        ChatTurnState ai = new ChatTurnState(n + 2, "ai", Instant.now(), reply.text(), a.provider(), reply.model(), req,
+        ChatTurnStateDto user = new ChatTurnStateDto(n + 1, "user", askedAt, message, null, null, null, null, null, null);
+        ChatTurnStateDto ai = new ChatTurnStateDto(n + 2, "ai", Instant.now(), reply.text(), a.provider(), reply.model(), req,
                 reply.inputTokens(), reply.outputTokens(), reply.latencyMs());
         // 하나라도 실패하면(예: AI 호출 중 잔액이 바닥남) 질문·답·체크포인트·차감이 모두 취소된다
         transactions.executeWithoutResult(status -> {
@@ -288,19 +290,19 @@ public class AttemptService {
             - 코드를 보여 주기만 할 때는 일반 코드 블록을 씁니다.""";
 
     /** 화면에 보여 줄 수정 제안. status: PENDING(결정 전), APPLIED(적용), REJECTED(거절). applicable: 지금 파일에 적용할 수 있는지. */
-    public record EditView(int index, String path, List<EditProposals.Hunk> hunks, boolean newFile, String status, boolean applicable) {}
+    public record EditView(int index, String path, List<EditProposalService.Hunk> hunks, boolean newFile, String status, boolean applicable) {}
 
     /** 턴 번호별 수정 제안 목록. */
     public Map<Integer, List<EditView>> edits(String id) {
         Map<String, String> files = store.readFiles(id);
         Map<String, String> decided = decisions(store.events(id));
         Map<Integer, List<EditView>> out = new LinkedHashMap<>();
-        for (ChatTurnState t : store.turns(id)) {
+        for (ChatTurnStateDto t : store.turns(id)) {
             if (!"ai".equals(t.role())) continue;
             List<EditView> list = new ArrayList<>();
-            for (EditProposals.Proposal p : EditProposals.parse(t.text())) {
+            for (EditProposalService.Proposal p : EditProposalService.parse(t.text())) {
                 String status = decided.getOrDefault(t.turn() + ":" + p.index(), "PENDING");
-                boolean ok = !status.equals("APPLIED") && EditProposals.apply(p, files.get(p.path())).isPresent();
+                boolean ok = !status.equals("APPLIED") && EditProposalService.apply(p, files.get(p.path())).isPresent();
                 list.add(new EditView(p.index(), p.path(), p.hunks(), p.newFile(), status, ok));
             }
             if (!list.isEmpty()) out.put(t.turn(), list);
@@ -318,10 +320,10 @@ public class AttemptService {
     }
 
     private EditDecision decideEditLocked(String id, int turn, int index, boolean apply) {
-        requireStatus(id, AttemptState.Status.SOLVING);
-        ChatTurnState t = store.turns(id).stream().filter(x -> x.turn() == turn && "ai".equals(x.role())).findFirst()
+        requireStatus(id, AttemptStateDto.Status.SOLVING);
+        ChatTurnStateDto t = store.turns(id).stream().filter(x -> x.turn() == turn && "ai".equals(x.role())).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("AI 답변 #T" + turn + " 이 없습니다."));
-        EditProposals.Proposal p = EditProposals.parse(t.text()).stream().filter(x -> x.index() == index).findFirst()
+        EditProposalService.Proposal p = EditProposalService.parse(t.text()).stream().filter(x -> x.index() == index).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("수정 제안을 찾을 수 없습니다."));
         String key = turn + ":" + index;
         String prev = decisions(store.events(id)).get(key);
@@ -333,7 +335,7 @@ public class AttemptService {
         // 적용 기록을 남기기 전에 막는다 (기록이 먼저 남으면 거부됐는데도 "적용함"으로 보인다)
         requireWritable(id, p.path());
         Map<String, String> files = store.readFiles(id);
-        Optional<String> next = EditProposals.apply(p, files.get(p.path()));
+        Optional<String> next = EditProposalService.apply(p, files.get(p.path()));
         if (next.isEmpty()) {
             throw new IllegalStateException("지금 파일에서 바꿀 부분을 찾지 못해 적용할 수 없습니다. 코드 보기로 내용을 확인하고 직접 고쳐 주세요.");
         }
@@ -356,17 +358,17 @@ public class AttemptService {
         return m;
     }
 
-    public AttemptState submit(String id) {
-        AttemptState a = requireStatus(id, AttemptState.Status.SOLVING);
-        AttemptState next = a.withSubmitted(Instant.now());
+    public AttemptStateDto submit(String id) {
+        AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.SOLVING);
+        AttemptStateDto next = a.withSubmitted(Instant.now());
         store.save(next);
         store.appendEvent(id, "submit", Map.of());
         return next;
     }
 
-    public AttemptState followUps(String id, List<String> answers) {
-        AttemptState a = requireStatus(id, AttemptState.Status.FOLLOWUP);
-        AttemptState next = a.withFollowUps(answers == null ? List.of() : List.copyOf(answers), tasks.get(a.taskId()).followUps(), Instant.now());
+    public AttemptStateDto followUps(String id, List<String> answers) {
+        AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.FOLLOWUP);
+        AttemptStateDto next = a.withFollowUps(answers == null ? List.of() : List.copyOf(answers), tasks.get(a.taskId()).followUps(), Instant.now());
         store.save(next);
         store.appendEvent(id, "followups", Map.of("count", next.followUpAnswers().size()));
         scoring.scoreAsync(id);
@@ -374,16 +376,16 @@ public class AttemptService {
     }
 
     /** 채점 실패(예: API 키 없음) 뒤 다시 채점. */
-    public AttemptState rescore(String id) {
-        AttemptState a = store.load(id);
+    public AttemptStateDto rescore(String id) {
+        AttemptStateDto a = store.load(id);
         if (a.followupsDoneAt() == null) throw new IllegalStateException("후속 질문까지 끝난 응시만 다시 채점할 수 있습니다.");
-        AttemptState next = a.withStatus(AttemptState.Status.SCORING);
+        AttemptStateDto next = a.withStatus(AttemptStateDto.Status.SCORING);
         store.save(next);
         scoring.scoreAsync(id);
         return next;
     }
 
-    private void markFirstValid(AttemptState a) {
+    private void markFirstValid(AttemptStateDto a) {
         if (a.firstValidAt() != null) return;
         store.save(a.withFirstValid(Instant.now()));
         store.appendEvent(a.id(), "firstValid", Map.of());
@@ -397,8 +399,8 @@ public class AttemptService {
         }
     }
 
-    private AttemptState requireStatus(String id, AttemptState.Status status) {
-        AttemptState a = store.load(id);
+    private AttemptStateDto requireStatus(String id, AttemptStateDto.Status status) {
+        AttemptStateDto a = store.load(id);
         if (a.status() != status) {
             throw new IllegalStateException("지금 단계(" + a.status() + ")에서는 할 수 없는 요청입니다.");
         }

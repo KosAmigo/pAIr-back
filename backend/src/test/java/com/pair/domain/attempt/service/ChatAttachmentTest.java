@@ -1,5 +1,7 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,7 +37,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.ChatAttachmentService.Ref;
-import com.pair.domain.attempt.service.ChatTurnState.AssistantRequest;
+import com.pair.domain.attempt.dto.ChatTurnStateDto.AssistantRequest;
 import com.pair.domain.attempt.entity.ChatAttachment;
 import com.pair.domain.attempt.repository.ChatAttachmentRepository;
 import com.pair.domain.attempt.repository.CheckpointRepository;
@@ -70,7 +72,7 @@ class ChatAttachmentTest {
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired AuthService auth;
     @Autowired CreditService credits;
     @Autowired RollbackService rollbacks;
@@ -243,7 +245,7 @@ class ChatAttachmentTest {
 
         // 질문 2 시점으로 갈라지면 앞 턴(질문 1·답 1)만 복사되고 그 첨부도 따라온다
         assertThat(before - credits.balance(userId)).isEqualTo(10);
-        assertThat(store.turns(forkId)).extracting(ChatTurnState::turn).containsExactly(1, 2);
+        assertThat(store.turns(forkId)).extracting(ChatTurnStateDto::turn).containsExactly(1, 2);
         var views = attachmentService.views(Long.parseLong(forkId));
         assertThat(views.get(1)).extracting(ChatAttachmentService.View::path).containsExactly(devFile);
         assertThat(attachmentService.views(Long.parseLong(devId)).get(1)).hasSize(1);
@@ -306,7 +308,7 @@ class ChatAttachmentTest {
         store.writeReport(devId, Map.of("transcript", List.of(
                 Map.of("turn", 1, "role", "user", "text", "질문"), Map.of("turn", 2, "role", "ai", "text", "답"))));
         var t = java.time.Instant.now();
-        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
+        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptStateDto.Status.DONE));
 
         mvc.perform(get("/api/attempts/{id}/report", devId).header("Authorization", "Bearer " + token)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.report.transcript[0].attachments[0].path").value(devFile))

@@ -37,14 +37,14 @@ public class TaskReviewService {
     public record QuestionView(long id, int seq, String type, String content, Integer points,
             List<ChoiceView> choices, List<String> answers, List<SourceView> sources) {}
 
-    private final TaskCatalog catalog;
+    private final TaskCatalogService catalog;
     private final TaskFileRepository files;
     private final TaskQuestionRepository questions;
     private final QuestionChoiceRepository choices;
     private final ShortAnswerKeyRepository keys;
     private final QuestionSourceRepository sources;
 
-    public TaskReviewService(TaskCatalog catalog, TaskFileRepository files, TaskQuestionRepository questions,
+    public TaskReviewService(TaskCatalogService catalog, TaskFileRepository files, TaskQuestionRepository questions,
             QuestionChoiceRepository choices, ShortAnswerKeyRepository keys, QuestionSourceRepository sources) {
         this.catalog = catalog;
         this.files = files;

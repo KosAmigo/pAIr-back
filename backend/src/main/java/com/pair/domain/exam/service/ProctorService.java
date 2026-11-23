@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.global.security.InviteTokenService;
 import com.pair.infra.storage.SnapshotStorage;
 import java.time.Clock;
 import java.time.Duration;
@@ -44,7 +45,7 @@ public class ProctorService {
 
     private final ExamParticipantRepository participants;
     private final ProctorEventRepository events;
-    private final SnapshotValidator snapshots;
+    private final SnapshotValidationService snapshots;
     private final SnapshotStorage storage;
     private final ObjectMapper json;
     private final ExamProperties props;
@@ -56,7 +57,7 @@ public class ProctorService {
     private final SnapshotRetentionService retention;
     private final com.pair.domain.exam.repository.ProctorEventFrameRepository clipFrames;
 
-    public ProctorService(ExamParticipantRepository participants, ProctorEventRepository events, SnapshotValidator snapshots,
+    public ProctorService(ExamParticipantRepository participants, ProctorEventRepository events, SnapshotValidationService snapshots,
             SnapshotStorage storage, ObjectMapper json, ExamProperties props, Clock clock,
             com.pair.domain.attempt.repository.AttemptRepository attempts, PlatformTransactionManager txManager,
             com.pair.domain.exam.repository.ExamSessionRepository sessions,
@@ -247,8 +248,8 @@ public class ProctorService {
     }
 
     private ExamParticipant findParticipant(String token) {
-        if (!InviteTokens.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
-        return participants.findByInviteTokenHash(InviteTokens.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
+        if (!InviteTokenService.looksValid(token)) throw new NoSuchElementException("입장 링크가 올바르지 않습니다.");
+        return participants.findByInviteTokenHash(InviteTokenService.hash(token)).orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
     }
 
     private String detail(ProctorEventRequest req) {

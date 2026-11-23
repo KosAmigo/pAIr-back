@@ -1,5 +1,6 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -14,7 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.attempt.service.ChatTurnState.Message;
+import com.pair.domain.attempt.dto.ChatTurnStateDto.Message;
 import com.pair.domain.attempt.entity.ChatAttachment;
 import com.pair.domain.attempt.repository.ChatAttachmentRepository;
 import com.pair.domain.attempt.entity.ChatTurn;
@@ -113,7 +114,7 @@ public class ChatAttachmentService {
      * 앞 턴에는 한 줄 표지만 남긴다. 본문 합계가 한도를 넘으면 오래된 첨부부터 표지로 줄인다(질문이 막히지 않게).
      */
     @Transactional(readOnly = true)
-    public Built build(long attemptId, List<ChatTurnState> history, String question, List<Resolved> current) {
+    public Built build(long attemptId, List<ChatTurnStateDto> history, String question, List<Resolved> current) {
         Map<Integer, Long> turnIds = new HashMap<>();
         for (ChatTurn r : turns.findByAttemptIdOrderByTurnNoAsc(attemptId)) turnIds.put(r.getTurnNo(), r.getId());
         Map<Long, List<ChatAttachment>> byTurn = new HashMap<>();
@@ -125,7 +126,7 @@ public class ChatAttachmentService {
         // 턴 순서대로 첨부를 펼치고, 같은 파일이 나중에 또 붙었으면 앞의 것은 표지로 줄인다
         record Item(int turnNo, String key, String path, String pages, String text, boolean full) {}
         List<Item> items = new ArrayList<>();
-        for (ChatTurnState t : history) {
+        for (ChatTurnStateDto t : history) {
             if (!"user".equals(t.role())) continue;
             for (ChatAttachment a : byTurn.getOrDefault(turnIds.get(t.turn()), List.of())) {
                 String key = a.getSourceType() + "|" + a.getFileName() + "|" + (a.getPages() == null ? "" : a.getPages());
@@ -158,7 +159,7 @@ public class ChatAttachmentService {
             blocksByTurn.computeIfAbsent(it.turnNo(), k -> new ArrayList<>()).add(block);
         }
         List<Message> msgs = new ArrayList<>();
-        for (ChatTurnState t : history) {
+        for (ChatTurnStateDto t : history) {
             boolean user = "user".equals(t.role());
             msgs.add(new Message(user ? "user" : "assistant", user ? withBlocks(blocksByTurn.get(t.turn()), t.text()) : t.text()));
         }

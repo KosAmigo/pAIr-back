@@ -65,11 +65,11 @@ public class SessionResultService {
     private final ExamParticipantRepository participants;
     private final ProctorEventRepository events;
     private final AttemptStateRepository attempts;
-    private final ParticipantProgress progress;
+    private final ParticipantProgressService progress;
     private final Clock clock;
 
     public SessionResultService(ExamSessionService sessions, ExamParticipantRepository participants,
-            ProctorEventRepository events, AttemptStateRepository attempts, ParticipantProgress progress, Clock clock) {
+            ProctorEventRepository events, AttemptStateRepository attempts, ParticipantProgressService progress, Clock clock) {
         this.sessions = sessions;
         this.participants = participants;
         this.events = events;
@@ -85,11 +85,11 @@ public class SessionResultService {
         List<ExamParticipant> ps = participants.findBySessionIdOrderByIdAsc(sessionId);
         List<Long> ids = ps.stream().map(ExamParticipant::getId).toList();
         Map<Long, Map<ProctorEvent.Type, Long>> eventCounts = eventCounts(ids);
-        Map<Long, ParticipantProgress.Progress> states = progress.of(ps);
+        Map<Long, ParticipantProgressService.Progress> states = progress.of(ps);
 
         List<Row> rows = new ArrayList<>();
         for (ExamParticipant p : ps) {
-            ParticipantProgress.Progress pr = states.get(p.getId());
+            ParticipantProgressService.Progress pr = states.get(p.getId());
             Score sc = score(pr);
             rows.add(new Row(0, p.getId(), p.getName(), p.getEmail(), state(p, pr), p.getEnteredAt(), pr.startedAt(),
                     pr.submittedAt(), sc.total, sc.max, sc.items, eventCounts.getOrDefault(p.getId(), Map.of())));
@@ -101,9 +101,9 @@ public class SessionResultService {
         Map<ProctorEvent.Type, Long> totals = new EnumMap<>(ProctorEvent.Type.class);
         eventCounts.values().forEach(m -> m.forEach((t, c) -> totals.merge(t, c, Long::sum)));
 
-        int started = (int) states.values().stream().filter(ParticipantProgress.Progress::started).count();
+        int started = (int) states.values().stream().filter(ParticipantProgressService.Progress::started).count();
         return new Result(s.getId(), s.getTitle(), s.phase(now), ps.size(), started,
-                (int) states.values().stream().filter(ParticipantProgress.Progress::finished).count(), scored.size(), average(scored),
+                (int) states.values().stream().filter(ParticipantProgressService.Progress::finished).count(), scored.size(), average(scored),
                 distribution(scored), itemAverages(scored), itemAverages(scored.subList(0, topN)),
                 itemAverages(scored.subList(scored.size() - topN, scored.size())), totals,
                 metrics(s, ps, ids, started), rows);
@@ -134,7 +134,7 @@ public class SessionResultService {
     /** 꾸민 엑셀(.xlsx) 결과표 */
     @Transactional(readOnly = true)
     public byte[] xlsx(Long sessionId) {
-        return ExamWorkbooks.results(result(sessionId));
+        return ParticipantWorkbookService.results(result(sessionId));
     }
 
     public static String cell(String v) {
@@ -160,7 +160,7 @@ public class SessionResultService {
     private record Score(Integer total, Integer max, Map<String, Integer> items) {}
 
     /** 과제가 여러 개면 합산. 한 과제라도 채점이 안 끝났으면 점수 없음 */
-    private Score score(ParticipantProgress.Progress pr) {
+    private Score score(ParticipantProgressService.Progress pr) {
         Map<String, String> as = pr.attempts();
         if (as.isEmpty()) return new Score(null, null, Map.of());
         int total = 0;
@@ -185,7 +185,7 @@ public class SessionResultService {
     }
 
     /** 응시 화면에서 과제를 직접 제출해도 응시 행(attempts)의 제출 시각이 채워지므로 같은 기준으로 본다 */
-    private static State state(ExamParticipant p, ParticipantProgress.Progress pr) {
+    private static State state(ExamParticipant p, ParticipantProgressService.Progress pr) {
         if (pr.finished()) return State.SUBMITTED;
         if (pr.started()) return State.SOLVING;
         return p.getEnteredAt() != null ? State.WAITING : State.NOT_ENTERED;

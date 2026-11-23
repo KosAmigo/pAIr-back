@@ -1,5 +1,6 @@
 package com.pair.domain.scoring.service;
 
+import com.pair.domain.scoring.repository.ScoringResultRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -19,11 +20,11 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.service.AttemptRegistry;
+import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.grader.service.PromptVersionState;
+import com.pair.domain.grader.dto.PromptVersionStateDto;
 import com.pair.domain.scoring.service.ScoringService.CheckOutcome;
 import com.pair.domain.scoring.service.ScoringService.ItemResult;
 import com.pair.domain.scoring.service.ScoringService.JudgeUsage;
@@ -46,16 +47,16 @@ class ScoringSaveOrderTest {
     }
 
     @Autowired ScoringService scoring;
-    @Autowired ScoringRecords records;
+    @Autowired ScoringResultRepository records;
     @Autowired AttemptStateRepository store;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired TaskRepository taskRecords;
     @Autowired com.pair.domain.scoring.repository.PromptVersionRepository promptVersions;
     @Autowired ScoringRepository scorings;
     @Autowired CheckResultRepository results;
 
     final Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    final PromptVersionState version = new PromptVersionState("20261120-1000_order-test", "order", null, now, null, "규칙", Map.of());
+    final PromptVersionStateDto version = new PromptVersionStateDto("20261120-1000_order-test", "order", null, now, null, "규칙", Map.of());
     String id;
 
     @BeforeEach
@@ -64,8 +65,8 @@ class ScoringSaveOrderTest {
         TestPromptVersions.ensure(promptVersions, version);
         Attempt r = registry.save(Attempt.self(1L, 1L, "gpt-test", now));
         id = String.valueOf(r.getId());
-        store.create(new AttemptState(id, TestTasks.SELF_DEV, "openai", "gpt-test", now, null, null, null,
-                AttemptState.Status.SCORING, List.of(), null, null), Map.of("src/A.java", "class A {}"));
+        store.create(new AttemptStateDto(id, TestTasks.SELF_DEV, "openai", "gpt-test", now, null, null, null,
+                AttemptStateDto.Status.SCORING, List.of(), null, null), Map.of("src/A.java", "class A {}"));
         store.save(store.load(id).withSubmitted(now.plusSeconds(1)));
         store.save(store.load(id).withFollowUps(List.of("답"), List.of("질문"), now.plusSeconds(2))); // 채점 중(SCORING)
     }
@@ -89,7 +90,7 @@ class ScoringSaveOrderTest {
 
         assertThat(scorings.findById(sid).orElseThrow().getStatus()).isEqualTo("ERROR");
         assertThat(results.findByScoringId(sid)).isEmpty();
-        assertThat(store.load(id).status()).isNotEqualTo(AttemptState.Status.DONE);
+        assertThat(store.load(id).status()).isNotEqualTo(AttemptStateDto.Status.DONE);
     }
 
     @Test
@@ -99,6 +100,6 @@ class ScoringSaveOrderTest {
 
         assertThat(scorings.findById(sid).orElseThrow().getStatus()).isEqualTo("DONE");
         assertThat(results.findByScoringId(sid)).hasSize(1);
-        assertThat(store.load(id).status()).isEqualTo(AttemptState.Status.DONE);
+        assertThat(store.load(id).status()).isEqualTo(AttemptStateDto.Status.DONE);
     }
 }

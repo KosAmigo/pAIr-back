@@ -1,7 +1,7 @@
 package com.pair.domain.question;
 
 import com.pair.domain.question.service.QuestionService;
-import com.pair.domain.question.service.ShortAnswerMatcher;
+import com.pair.domain.question.service.ShortAnswerMatchService;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class QuestionGradingTest {
 
     private static boolean ok(String answer, String... accepted) {
-        return ShortAnswerMatcher.matches(answer, List.of(accepted));
+        return ShortAnswerMatchService.matches(answer, List.of(accepted));
     }
 
     @Test

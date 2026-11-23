@@ -1,5 +1,6 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.auth.dto.AuthResponse;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -88,7 +89,7 @@ class ReplayCompareTest {
 
     private void finish(String id, Map<String, Object> report) {
         Instant t = Instant.now();
-        store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
+        store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptStateDto.Status.DONE));
         store.writeReport(id, report);
     }
 

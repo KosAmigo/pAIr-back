@@ -25,17 +25,17 @@ import com.pair.domain.attempt.dto.TurnResponse;
 import com.pair.domain.attempt.dto.EditDecisionRequest;
 import com.pair.domain.attempt.dto.DiagnosticsRequest;
 import com.pair.domain.attempt.dto.CursorRequest;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.ChatAttachmentService;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.JavaDiagnostics;
-import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.global.security.CurrentUser;
 import com.pair.domain.task.repository.TaskDefRepository;
 
@@ -50,7 +50,7 @@ public class AttemptController {
     private final AttemptStateRepository store;
     private final com.pair.global.config.PairProperties props;
     private final AttemptRepository records;
-    private final TaskCatalog catalog;
+    private final TaskCatalogService catalog;
     private final com.pair.domain.question.service.QuestionService questions;
     private final com.pair.domain.attempt.service.CheckpointService checkpoints;
     private final com.pair.domain.attempt.service.RollbackService rollbacks;
@@ -59,7 +59,7 @@ public class AttemptController {
     private final ChatAttachmentService chatAttachments;
 
     public AttemptController(TaskDefRepository tasks, AttemptService attempts, AttemptStateRepository store, com.pair.global.config.PairProperties props,
-            AttemptRepository records, TaskCatalog catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
+            AttemptRepository records, TaskCatalogService catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
             com.pair.domain.attempt.service.RollbackService rollbacks, com.pair.domain.attempt.service.ReplayTreeService replayTree,
             com.pair.domain.question.service.QuestionService questions, com.pair.domain.attempt.service.ReplayCompareService replayCompare,
             ChatAttachmentService chatAttachments) {
@@ -79,7 +79,7 @@ public class AttemptController {
 
     @PostMapping("/attempts")
     public Map<String, Object> start(CurrentUser user, @RequestBody StartAttemptRequest req) {
-        AttemptState a = attempts.startSelf(req.taskId(), user.userId());
+        AttemptStateDto a = attempts.startSelf(req.taskId(), user.userId());
         return Map.of("attemptId", a.id());
     }
 
@@ -90,11 +90,11 @@ public class AttemptController {
         Map<Long, String> codes = catalog.codes(rows.stream().map(Attempt::getTaskId).distinct().toList());
         List<Map<String, Object>> out = new java.util.ArrayList<>();
         // 같은 과제를 여러 번 푼 응시가 많아서 과제 정의는 한 번만 만든다 (응시마다 DB 에서 다시 읽지 않는다)
-        Map<String, TaskDef> definitions = new java.util.HashMap<>();
+        Map<String, TaskDefDto> definitions = new java.util.HashMap<>();
         for (Attempt r : rows) {
             String id = String.valueOf(r.getId());
-            if (r.getStatus() == AttemptState.Status.SOLVING && isEmpty(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
-            TaskDef task = definitions.computeIfAbsent(codes.get(r.getTaskId()), catalog::definition);
+            if (r.getStatus() == AttemptStateDto.Status.SOLVING && isEmpty(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
+            TaskDefDto task = definitions.computeIfAbsent(codes.get(r.getTaskId()), catalog::definition);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", id);
             m.put("taskId", codes.get(r.getTaskId()));
@@ -102,7 +102,7 @@ public class AttemptController {
             m.put("taskType", task.type());
             m.put("startedAt", r.getStartedAt());
             m.put("status", r.getStatus());
-            if (r.getStatus() == AttemptState.Status.DONE) {
+            if (r.getStatus() == AttemptStateDto.Status.DONE) {
                 JsonNode rep = readReportSafely(id);
                 if (rep != null) {
                     // version 2(감점식)만 총점이 있다. 이전 형식은 다시 채점해야 한다.
@@ -140,7 +140,7 @@ public class AttemptController {
 
     @GetMapping("/attempts/{id}")
     public Map<String, Object> attempt(@PathVariable String id) {
-        AttemptState a = store.load(id);
+        AttemptStateDto a = store.load(id);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("attempt", a);
         m.put("task", tasks.get(a.taskId()));
@@ -199,8 +199,8 @@ public class AttemptController {
     @PostMapping("/attempts/{id}/chat")
     public List<TurnResponse> chat(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
-        AttemptState a = store.load(id);
-        List<ChatTurnState> added = attempts.chat(id, req.message(), req.attachments(), null);
+        AttemptStateDto a = store.load(id);
+        List<ChatTurnStateDto> added = attempts.chat(id, req.message(), req.attachments(), null);
         var edits = attempts.edits(id);
         var attached = chatAttachments.views(Long.parseLong(id));
         return added.stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()), attached)).toList();
@@ -215,11 +215,11 @@ public class AttemptController {
     @PostMapping(value = "/attempts/{id}/chat/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
     public org.springframework.web.servlet.mvc.method.annotation.SseEmitter chatStream(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
-        AttemptState a = store.load(id);
+        AttemptStateDto a = store.load(id);
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(6 * 60 * 1000L);
         streams.submit(() -> {
             try {
-                List<ChatTurnState> added = attempts.chat(id, req.message(), req.attachments(), delta -> {
+                List<ChatTurnStateDto> added = attempts.chat(id, req.message(), req.attachments(), delta -> {
                     try {
                         emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event().name("delta").data(Map.of("t", delta)));
                     } catch (java.io.IOException e) {
@@ -296,30 +296,30 @@ public class AttemptController {
     }
 
     @PostMapping("/attempts/{id}/submit")
-    public AttemptState submit(@PathVariable String id) {
+    public AttemptStateDto submit(@PathVariable String id) {
         return attempts.submit(id);
     }
 
     @PostMapping("/attempts/{id}/followups")
-    public AttemptState followUps(@PathVariable String id, @RequestBody FollowUpRequest req) {
+    public AttemptStateDto followUps(@PathVariable String id, @RequestBody FollowUpRequest req) {
         return attempts.followUps(id, req.answers());
     }
 
     @PostMapping("/attempts/{id}/rescore")
-    public AttemptState rescore(@PathVariable String id) {
+    public AttemptStateDto rescore(@PathVariable String id) {
         return attempts.rescore(id);
     }
 
     @GetMapping("/attempts/{id}/report")
     public Map<String, Object> report(@PathVariable String id) {
-        AttemptState a = store.load(id);
+        AttemptStateDto a = store.load(id);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("status", a.status());
         m.put("error", a.error());
-        JsonNode report = a.status() == AttemptState.Status.DONE ? withAttachments(store.readReport(id), Long.parseLong(id)) : null;
+        JsonNode report = a.status() == AttemptStateDto.Status.DONE ? withAttachments(store.readReport(id), Long.parseLong(id)) : null;
         m.put("report", report);
         // 문항(객관식·단답형) 점수는 6개 역량 점수와 따로 보여 준다. 문항이 없으면 null. 정답은 제출 뒤 리포트에서만 나간다.
-        m.put("questions", a.status() == AttemptState.Status.DONE ? questions.report(Long.parseLong(id)) : null);
+        m.put("questions", a.status() == AttemptStateDto.Status.DONE ? questions.report(Long.parseLong(id)) : null);
         return m;
     }
 
@@ -340,7 +340,7 @@ public class AttemptController {
         return copy;
     }
 
-    private static TurnResponse view(AttemptState a, ChatTurnState t, List<AttemptService.EditView> edits,
+    private static TurnResponse view(AttemptStateDto a, ChatTurnStateDto t, List<AttemptService.EditView> edits,
             Map<Integer, List<ChatAttachmentService.View>> attached) {
         long s = Math.max(0, Duration.between(a.startedAt(), t.at()).toSeconds());
         return new TurnResponse(t.turn(), t.role(), String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60), t.text(), edits,

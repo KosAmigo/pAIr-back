@@ -1,5 +1,6 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
@@ -47,7 +48,7 @@ public class CheckpointService {
 
     /** 질문 턴과 그 체크포인트를 한 트랜잭션에 저장한다. files: 질문을 보낸 순간의 작업 파일 전체 */
     @Transactional
-    public void appendQuestion(String attemptId, ChatTurnState question, Map<String, String> files) {
+    public void appendQuestion(String attemptId, ChatTurnStateDto question, Map<String, String> files) {
         store.appendTurn(attemptId, question);
         Long id = Long.valueOf(attemptId);
         Map<String, String> before = restore(attemptId, Integer.MAX_VALUE);

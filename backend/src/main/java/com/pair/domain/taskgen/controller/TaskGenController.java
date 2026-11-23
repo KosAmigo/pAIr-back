@@ -1,9 +1,9 @@
 package com.pair.domain.taskgen.controller;
 
 import com.pair.domain.taskgen.dto.TaskGenRequest;
-import com.pair.domain.taskgen.service.GeneratedTaskWriter;
-import com.pair.domain.taskgen.service.TaskGenJobs;
-import com.pair.domain.taskgen.service.TaskSuggestions;
+import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
+import com.pair.domain.taskgen.service.TaskGenJobService;
+import com.pair.domain.taskgen.service.TaskSuggestionService;
 import java.util.Map;
 
 import org.springframework.http.MediaType;
@@ -23,11 +23,11 @@ import com.pair.global.error.ForbiddenException;
 @RequestMapping("/api/admin")
 public class TaskGenController {
 
-    private final TaskGenJobs jobs;
-    private final GeneratedTaskWriter writer;
-    private final TaskSuggestions suggestions;
+    private final TaskGenJobService jobs;
+    private final GeneratedTaskRepository writer;
+    private final TaskSuggestionService suggestions;
 
-    public TaskGenController(TaskGenJobs jobs, GeneratedTaskWriter writer, TaskSuggestions suggestions) {
+    public TaskGenController(TaskGenJobService jobs, GeneratedTaskRepository writer, TaskSuggestionService suggestions) {
         this.suggestions = suggestions;
         this.jobs = jobs;
         this.writer = writer;
@@ -43,13 +43,13 @@ public class TaskGenController {
 
     /** 주제·함정 후보 3개를 AI 가 추천한다(동기 호출). 400 입력 오류, 429 분당 한도, 503 AI 실패 */
     @PostMapping("/task-gen/suggestions")
-    public TaskSuggestions.Result suggest(CurrentUser user, @RequestBody TaskSuggestions.Request req) {
+    public TaskSuggestionService.Result suggest(CurrentUser user, @RequestBody TaskSuggestionService.Request req) {
         requireAdmin(user);
         return suggestions.suggest(req, user.userId());
     }
 
     @GetMapping("/task-gen/{jobId}")
-    public TaskGenJobs.JobStatus status(CurrentUser user, @PathVariable String jobId) {
+    public TaskGenJobService.JobStatus status(CurrentUser user, @PathVariable String jobId) {
         requireAdmin(user);
         return jobs.status(jobId);
     }

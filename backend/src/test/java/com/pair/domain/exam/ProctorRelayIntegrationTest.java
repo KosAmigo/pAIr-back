@@ -1,7 +1,7 @@
 package com.pair.domain.exam;
 
-import com.pair.domain.exam.service.RelayAuthorizer;
-import com.pair.domain.exam.service.RelayLimits;
+import com.pair.domain.exam.service.RelayAuthService;
+import com.pair.domain.exam.service.RelayLimitService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
@@ -27,7 +27,7 @@ import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.exam.service.AttemptSubmitter;
+import com.pair.domain.exam.service.AttemptSubmitService;
 
 /** 휴대폰 JPEG 프레임 중계 (실제 WebSocket). 서버는 프레임을 분석하지 않고 PC 로 그대로 넘긴다 */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -48,8 +48,8 @@ class ProctorRelayIntegrationTest {
 
     @LocalServerPort int port;
     @Autowired ObjectMapper json;
-    @MockitoBean RelayAuthorizer authorizer;
-    @MockitoBean AttemptSubmitter attempts;
+    @MockitoBean RelayAuthService authorizer;
+    @MockitoBean AttemptSubmitService attempts;
     @MockitoBean org.springframework.mail.javamail.JavaMailSender mail;
 
     /** 받은 메시지를 큐에 모으는 테스트 클라이언트 */
@@ -136,7 +136,7 @@ class ProctorRelayIntegrationTest {
         nextJson(pc);
 
         phone.session.sendMessage(new BinaryMessage(ByteBuffer.wrap(new byte[] {1, 2, 3, 4})));
-        phone.session.sendMessage(new BinaryMessage(ByteBuffer.wrap(new byte[RelayLimits.MAX_FRAME_BYTES + 1])));
+        phone.session.sendMessage(new BinaryMessage(ByteBuffer.wrap(new byte[RelayLimitService.MAX_FRAME_BYTES + 1])));
         byte[] good = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 9};
         phone.session.sendMessage(new BinaryMessage(ByteBuffer.wrap(good)));
 

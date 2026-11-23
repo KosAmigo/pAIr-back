@@ -1,17 +1,19 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.dto.BizDraftDto;
+import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 
-import com.pair.domain.taskgen.service.BizDraft.Choice;
-import com.pair.domain.taskgen.service.BizDraft.DocDraft;
-import com.pair.domain.taskgen.service.BizDraft.QuestionDraft;
-import com.pair.domain.taskgen.service.BizDraft.Source;
-import com.pair.domain.taskgen.service.BizDraft.Trap;
-import com.pair.domain.taskgen.service.BizDraft.Type;
+import com.pair.domain.taskgen.dto.BizDraftDto.Choice;
+import com.pair.domain.taskgen.dto.BizDraftDto.DocDraft;
+import com.pair.domain.taskgen.dto.BizDraftDto.QuestionDraft;
+import com.pair.domain.taskgen.dto.BizDraftDto.Source;
+import com.pair.domain.taskgen.dto.BizDraftDto.Trap;
+import com.pair.domain.taskgen.dto.BizDraftDto.Type;
 
 /** 비개발 테스트용 Draft 와 가짜 풀이 모델 */
 final class BizFixtures {
@@ -28,15 +30,15 @@ final class BizFixtures {
     }
 
     /** 가짜 풀이 모델이 맞히는 정상 Draft (정답: 1, 2, 21080, 2000) */
-    static BizDraft good(String code) {
-        return new BizDraft("저가 요금제 출시 검토", "저가 요금제를 내놓아도 될지 자료로 판단합니다.", code, "기획안 작성",
+    static BizDraftDto good(String code) {
+        return new BizDraftDto("저가 요금제 출시 검토", "저가 요금제를 내놓아도 될지 자료로 판단합니다.", code, "기획안 작성",
                 List.of("영상 구독 서비스의 이탈률이 올랐습니다.", "자료를 보고 1페이지 기획안을 쓰세요."),
                 List.of("결론과 근거 3개를 쓴다.", "리스크를 1개 이상 쓴다."),
                 List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "같은 결론을 얻는 지시 순서는?"),
                 List.of(new DocDraft(DOC1, List.of("이탈 고객 설문 결과입니다. 응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.",
                                 "현재 이용자 설문입니다.\n" + EVIDENCE)),
                         new DocDraft(DOC2, List.of("월 이탈률은 5월 4.1%에서 10월 6.8%로 올랐습니다."))),
-                List.of(new DevDraft.FileDraft(CSV, "월,요금제,가입자 수,월 요금(원)\n2026-10,베이직,62000,9900\n2026-10,라이트,0,5900\n2026-09,베이직,60000,9900\n")),
+                List.of(new DevDraftDto.FileDraft(CSV, "월,요금제,가입자 수,월 요금(원)\n2026-10,베이직,62000,9900\n2026-10,라이트,0,5900\n2026-09,베이직,60000,9900\n")),
                 "# 체크리스트\n\n## 필수 항목\n1. 결론을 밝힌다.\n\n## 참고 계산\n62000 x 0.34",
                 new Trap("설문 의향을 실제 전환율로 보정하지 않는다.", EVIDENCE),
                 List.of(single("현재 이용자 중 라이트 전환 의향 비율은?", List.of("34%", "38%", "41%", "50%"), 1, DOC1 + "|2", DOC2 + "|1"),
@@ -69,7 +71,7 @@ final class BizFixtures {
     }
 
     /** Draft 의 일부만 바꾼 복사본 */
-    static BizDraft edit(BizDraft d, UnaryOperator<Builder> change) {
+    static BizDraftDto edit(BizDraftDto d, UnaryOperator<Builder> change) {
         return change.apply(new Builder(d)).build();
     }
 
@@ -77,11 +79,11 @@ final class BizFixtures {
         String title, summary, code, category, checklist;
         List<String> description, requirements, followUps;
         List<DocDraft> documents;
-        List<DevDraft.FileDraft> csvFiles;
+        List<DevDraftDto.FileDraft> csvFiles;
         Trap trap;
         List<QuestionDraft> questions;
 
-        Builder(BizDraft d) {
+        Builder(BizDraftDto d) {
             title = d.title();
             summary = d.summary();
             code = d.code();
@@ -98,25 +100,25 @@ final class BizFixtures {
 
         Builder questions(List<QuestionDraft> q) { questions = q; return this; }
         Builder documents(List<DocDraft> v) { documents = v; return this; }
-        Builder csvFiles(List<DevDraft.FileDraft> v) { csvFiles = v; return this; }
+        Builder csvFiles(List<DevDraftDto.FileDraft> v) { csvFiles = v; return this; }
         Builder trap(Trap v) { trap = v; return this; }
         Builder description(List<String> v) { description = v; return this; }
         Builder code(String v) { code = v; return this; }
 
-        BizDraft build() {
-            return new BizDraft(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions);
+        BizDraftDto build() {
+            return new BizDraftDto(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions);
         }
     }
 
     /** 문항을 하나만 바꾼 목록 */
-    static List<QuestionDraft> replaceQuestion(BizDraft d, int index, QuestionDraft q) {
+    static List<QuestionDraft> replaceQuestion(BizDraftDto d, int index, QuestionDraft q) {
         List<QuestionDraft> out = new ArrayList<>(d.questions());
         out.set(index, q);
         return out;
     }
 
     /** 정해 둔 답을 돌려주는 가짜 풀이 모델 */
-    static final class FakeSolver implements TaskGenSolver {
+    static final class FakeSolver implements TaskGenSolverService {
         final AtomicInteger calls = new AtomicInteger();
         volatile String reply = "계산했습니다.\n{\"answers\": [\"1\", \"2\", \"21080\", \"2000\"]}";
         volatile RuntimeException error;

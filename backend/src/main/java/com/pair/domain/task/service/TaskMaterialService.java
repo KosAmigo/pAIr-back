@@ -43,12 +43,12 @@ public class TaskMaterialService {
     public record PdfFile(String fileName, byte[] bytes) {}
 
     private final AttemptRepository attempts;
-    private final TaskCatalog catalog;
+    private final TaskCatalogService catalog;
     private final TaskFileRepository files;
     private final DocumentPageRepository pages;
     private final TaskFileStorage storage;
 
-    public TaskMaterialService(AttemptRepository attempts, TaskCatalog catalog, TaskFileRepository files,
+    public TaskMaterialService(AttemptRepository attempts, TaskCatalogService catalog, TaskFileRepository files,
             DocumentPageRepository pages, TaskFileStorage storage) {
         this.attempts = attempts;
         this.catalog = catalog;

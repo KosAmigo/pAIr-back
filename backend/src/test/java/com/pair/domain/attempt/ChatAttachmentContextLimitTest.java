@@ -26,7 +26,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.ChatAttachmentService.Ref;
-import com.pair.domain.attempt.service.ChatTurnState.AssistantRequest;
+import com.pair.domain.attempt.dto.ChatTurnStateDto.AssistantRequest;
 import com.pair.domain.task.repository.TaskQuestionRepository;
 import com.pair.domain.task.repository.TaskFileRepository;
 import com.pair.domain.task.repository.TaskRepository;

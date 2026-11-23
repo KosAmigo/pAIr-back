@@ -3,9 +3,9 @@ package com.pair.domain.attempt;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.service.AttemptRegistryService;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.ReplayTreeService;
 import com.pair.domain.attempt.service.RollbackService;
@@ -68,7 +68,7 @@ class CheckpointRollbackTest {
     }
 
     @Autowired AttemptStateRepository store;
-    @Autowired AttemptRegistry registry;
+    @Autowired AttemptRegistryService registry;
     @Autowired AttemptRepository records;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;
@@ -138,10 +138,10 @@ class CheckpointRollbackTest {
         Attempt fork = records.findById(Long.valueOf(res.attemptId())).orElseThrow();
         assertThat(fork.getForkedFromCheckpointId()).isEqualTo(cp3);
         assertThat(fork.getMode()).isEqualTo(Attempt.Mode.SELF);
-        assertThat(fork.getStatus()).isEqualTo(AttemptState.Status.SOLVING);
+        assertThat(fork.getStatus()).isEqualTo(AttemptStateDto.Status.SOLVING);
         assertThat(store.readFiles(res.attemptId()).get(path)).isEqualTo(edited);
         // 질문 3 앞의 대화(1, 2)만 같은 번호로 복사된다
-        assertThat(store.turns(res.attemptId())).extracting(ChatTurnState::turn).containsExactly(1, 2);
+        assertThat(store.turns(res.attemptId())).extracting(ChatTurnStateDto::turn).containsExactly(1, 2);
         // 원래 응시는 그대로
         assertThat(store.turns(id)).hasSize(4);
         assertThat(credits.balance(userId)).isEqualTo(190);
@@ -207,9 +207,9 @@ class CheckpointRollbackTest {
         String fork = rollbacks.rollback(userId, cp3).attemptId();
 
         // 원래 응시만 채점이 끝났다
-        AttemptState a = store.load(id);
+        AttemptStateDto a = store.load(id);
         Instant t = Instant.now();
-        store.save(a.withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
+        store.save(a.withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptStateDto.Status.DONE));
         store.writeReport(id, java.util.Map.of("version", 2, "total", 80, "max", 100,
                 "items", List.of(java.util.Map.of("key", "usage", "name", "AI 활용력", "max", 20, "score", 16))));
 
@@ -317,12 +317,12 @@ class CheckpointRollbackTest {
         checkpoints.appendQuestion(attemptId, turn(turn, "user", "질문" + turn), files);
     }
 
-    static ChatTurnState turn(int no, String role, String text) {
-        return new ChatTurnState(no, role, Instant.now(), text, null, null, null, null, null, null);
+    static ChatTurnStateDto turn(int no, String role, String text) {
+        return new ChatTurnStateDto(no, role, Instant.now(), text, null, null, null, null, null, null);
     }
 
-    static AttemptState attempt(String id) {
-        return new AttemptState(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
-                AttemptState.Status.SOLVING, List.of(), null, null);
+    static AttemptStateDto attempt(String id) {
+        return new AttemptStateDto(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptStateDto.Status.SOLVING, List.of(), null, null);
     }
 }

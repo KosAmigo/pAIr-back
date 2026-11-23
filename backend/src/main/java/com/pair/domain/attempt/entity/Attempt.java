@@ -2,7 +2,7 @@ package com.pair.domain.attempt.entity;
 
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.repository.DbAttemptStateRepository;
-import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
 import java.time.Instant;
 
 import org.hibernate.annotations.JdbcTypeCode;
@@ -56,7 +56,7 @@ public class Attempt {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private AttemptState.Status status = AttemptState.Status.SOLVING;
+    private AttemptStateDto.Status status = AttemptStateDto.Status.SOLVING;
 
     @Column(name = "assistant_model", nullable = false, length = 50)
     private String assistantModel;
@@ -119,7 +119,7 @@ public class Attempt {
     }
 
     /** 응시 상태 전체를 저장한다(AttemptStateRepository.save). questions·answers 는 JSON 문자열 */
-    public void apply(AttemptState a, String questionsJson, String answersJson) {
+    public void apply(AttemptStateDto a, String questionsJson, String answersJson) {
         sync(a.status(), a.submittedAt(), a.followupsDoneAt());
         this.provider = a.provider();
         if (a.model() != null) this.assistantModel = a.model();
@@ -130,12 +130,12 @@ public class Attempt {
     }
 
     /** 응시 상태를 맞춘다. 제출 시각은 한 번 정해지면 바꾸지 않는다 */
-    public void sync(AttemptState.Status status, Instant submittedAt, Instant followupsDoneAt) {
+    public void sync(AttemptStateDto.Status status, Instant submittedAt, Instant followupsDoneAt) {
         if (this.submittedAt == null && submittedAt != null) this.submittedAt = submittedAt;
         if (this.followupsDoneAt == null && followupsDoneAt != null) this.followupsDoneAt = followupsDoneAt;
         // ERD 검사: 풀이 중이 아니면 제출 시각, 채점 단계면 후속 질문 완료 시각이 있어야 한다
-        if (status != AttemptState.Status.SOLVING && this.submittedAt == null) return;
-        if (status != AttemptState.Status.SOLVING && status != AttemptState.Status.FOLLOWUP && this.followupsDoneAt == null) return;
+        if (status != AttemptStateDto.Status.SOLVING && this.submittedAt == null) return;
+        if (status != AttemptStateDto.Status.SOLVING && status != AttemptStateDto.Status.FOLLOWUP && this.followupsDoneAt == null) return;
         this.status = status;
     }
 

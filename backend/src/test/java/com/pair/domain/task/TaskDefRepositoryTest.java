@@ -7,8 +7,8 @@ import com.pair.domain.task.repository.TaskFileRepository;
 import com.pair.domain.task.repository.TaskQuestionRepository;
 import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.repository.TaskDefRepository;
-import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.TaskDefDto;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -41,7 +41,7 @@ class TaskDefRepositoryTest {
     }
 
     @Autowired TaskDefRepository tasks;
-    @Autowired TaskCatalog catalog;
+    @Autowired TaskCatalogService catalog;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
@@ -66,7 +66,7 @@ class TaskDefRepositoryTest {
 
     @Test
     void 목록은_원본_과제만_번호_순으로() {
-        assertThat(tasks.all()).extracting(TaskDef::id).containsExactly(TestTasks.SELF_DEV, TestTasks.SELF_BIZ);
+        assertThat(tasks.all()).extracting(TaskDefDto::id).containsExactly(TestTasks.SELF_DEV, TestTasks.SELF_BIZ);
         assertThat(tasks.has(TestTasks.SELF_DEV)).isTrue();
         assertThat(tasks.has(TestTasks.LIVE_DEV)).isFalse();
         assertThat(tasks.has("no-such")).isFalse();
@@ -91,7 +91,7 @@ class TaskDefRepositoryTest {
         taskQuestions.save(new TaskQuestion(50L, TaskQuestion.FOLLOWUP, "ESSAY", 2, "둘째"));
         taskQuestions.save(new TaskQuestion(50L, TaskQuestion.FOLLOWUP, "ESSAY", 1, "첫째"));
 
-        TaskDef d = tasks.get("ai-made");
+        TaskDefDto d = tasks.get("ai-made");
         assertThat(d.type()).isEqualTo("dev");
         assertThat(d.minutes()).isEqualTo(30);
         assertThat(d.description()).containsExactly("설명 1줄", "설명 2줄");
@@ -101,6 +101,6 @@ class TaskDefRepositoryTest {
         assertThat(d.d4Minutes()).containsExactly(10, 20, 30, 40);
         assertThat(tasks.visibleFiles("ai-made")).containsOnlyKeys("a.txt").containsEntry("a.txt", "안녕");
         assertThat(tasks.hiddenFiles("ai-made")).containsOnlyKeys("t/hidden.txt");
-        assertThat(tasks.all()).extracting(TaskDef::id).contains("ai-made");
+        assertThat(tasks.all()).extracting(TaskDefDto::id).contains("ai-made");
     }
 }

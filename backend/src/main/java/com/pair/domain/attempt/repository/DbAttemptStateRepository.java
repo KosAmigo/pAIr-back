@@ -1,9 +1,9 @@
 package com.pair.domain.attempt.repository;
 
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.service.ChatTurnState;
+import com.pair.domain.attempt.dto.AttemptStateDto;
+import com.pair.domain.attempt.service.AttemptRegistryService;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,13 +25,13 @@ import com.pair.domain.attempt.entity.AttemptEvent;
 import com.pair.domain.attempt.entity.AttemptFile;
 import com.pair.domain.attempt.entity.AttemptReport;
 import com.pair.domain.attempt.entity.ChatTurn;
-import com.pair.domain.scoring.service.ScoringReportReader;
-import com.pair.domain.task.service.TaskCatalog;
+import com.pair.domain.scoring.repository.ScoringReportRepository;
+import com.pair.domain.task.service.TaskCatalogService;
 
 /**
  * 실제 응시 기록을 DB 에 읽고 쓴다.
  * 상태 attempts, 작업 파일 attempt_files, 대화 chat_turns, 작업 기록 attempt_events, 리포트 attempt_reports.
- * 응시 행(attempts)은 AttemptRegistry 가 먼저 만들고, 여기서는 그 행을 고치기만 한다.
+ * 응시 행(attempts)은 AttemptRegistryService 가 먼저 만들고, 여기서는 그 행을 고치기만 한다.
  */
 @Component
 public class DbAttemptStateRepository implements AttemptStateRepository {
@@ -43,16 +43,16 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
     private final ChatTurnRepository turns;
     private final AttemptEventRepository events;
     private final AttemptReportRepository reports;
-    private final TaskCatalog catalog;
+    private final TaskCatalogService catalog;
     private final ObjectMapper json;
-    private final ScoringReportReader scoringReports;
+    private final ScoringReportRepository scoringReports;
 
     /** DB task_id → 과제 내용 code. 과제 code 는 바뀌지 않아 한 번 읽으면 둔다 */
     private final Map<Long, String> taskCodes = new ConcurrentHashMap<>();
 
     public DbAttemptStateRepository(AttemptRepository records, AttemptFileRepository files, ChatTurnRepository turns,
-                          AttemptEventRepository events, AttemptReportRepository reports, TaskCatalog catalog,
-                          ObjectMapper json, ScoringReportReader scoringReports) {
+                          AttemptEventRepository events, AttemptReportRepository reports, TaskCatalogService catalog,
+                          ObjectMapper json, ScoringReportRepository scoringReports) {
         this.records = records;
         this.files = files;
         this.turns = turns;
@@ -67,7 +67,7 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
 
     @Override
     @Transactional
-    public void create(AttemptState a, Map<String, String> initial) {
+    public void create(AttemptStateDto a, Map<String, String> initial) {
         Long id = key(a.id());
         Instant now = Instant.now();
         for (var e : new TreeMap<>(initial).entrySet()) {
@@ -78,7 +78,7 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
 
     @Override
     @Transactional
-    public void save(AttemptState a) {
+    public void save(AttemptStateDto a) {
         Attempt r = record(a.id());
         r.apply(a, toJson(a.followUpQuestions()), toJson(a.followUpAnswers()));
         records.save(r);
@@ -86,10 +86,10 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public AttemptState load(String id) {
+    public AttemptStateDto load(String id) {
         Attempt r = record(id);
         List<String> answers = readStrings(r.getFollowupAnswers());
-        return new AttemptState(id, taskCode(r.getTaskId()), r.getProvider(), r.getAssistantModel(), r.getStartedAt(),
+        return new AttemptStateDto(id, taskCode(r.getTaskId()), r.getProvider(), r.getAssistantModel(), r.getStartedAt(),
                 r.getSubmittedAt(), r.getFollowupsDoneAt(), r.getFirstValidAt(), r.getStatus(),
                 answers == null ? List.of() : answers, r.getError(), readStrings(r.getFollowupQuestions()));
     }
@@ -138,7 +138,7 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
 
     @Override
     @Transactional
-    public void appendTurn(String id, ChatTurnState t) {
+    public void appendTurn(String id, ChatTurnStateDto t) {
         turns.save(new ChatTurn(key(id), t.turn(), t.role().toUpperCase(), t.text() == null ? "" : t.text(),
                 t.model(), toInt(t.inputTokens()), toInt(t.outputTokens()), t.at() == null ? Instant.now() : t.at(),
                 t.provider(), t.request() == null ? null : toJson(t.request()), toInt(t.latencyMs())));
@@ -146,10 +146,10 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ChatTurnState> turns(String id) {
-        List<ChatTurnState> out = new ArrayList<>();
+    public List<ChatTurnStateDto> turns(String id) {
+        List<ChatTurnStateDto> out = new ArrayList<>();
         for (ChatTurn r : turns.findByAttemptIdOrderByTurnNoAsc(key(id))) {
-            out.add(new ChatTurnState(r.getTurnNo(), r.getRole().toLowerCase(), r.getCreatedAt(), r.getContent(),
+            out.add(new ChatTurnStateDto(r.getTurnNo(), r.getRole().toLowerCase(), r.getCreatedAt(), r.getContent(),
                     r.getProvider(), r.getModel(), readRequest(r.getRequest()),
                     toLong(r.getInputTokens()), toLong(r.getOutputTokens()), toLong(r.getLatencyMs())));
         }
@@ -218,7 +218,7 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
     }
 
     private static Long key(String id) {
-        Long k = AttemptRegistry.parse(id);
+        Long k = AttemptRegistryService.parse(id);
         if (k == null) throw new NoSuchElementException("없는 응시입니다: " + id);
         return k;
     }
@@ -253,10 +253,10 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
         }
     }
 
-    private ChatTurnState.AssistantRequest readRequest(String s) {
+    private ChatTurnStateDto.AssistantRequest readRequest(String s) {
         if (s == null) return null;
         try {
-            return json.readValue(s, ChatTurnState.AssistantRequest.class);
+            return json.readValue(s, ChatTurnStateDto.AssistantRequest.class);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("저장된 AI 요청을 읽지 못했습니다", e);
         }

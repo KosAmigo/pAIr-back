@@ -41,11 +41,11 @@ public class ReplayCompareService {
     public record FileDiff(String path, String base, String a, String b) {}
 
     private final AttemptRepository records;
-    private final ReplayReports reports;
+    private final ReplayReportService reports;
     private final AttemptStateRepository store;
     private final TaskDefRepository tasks;
 
-    public ReplayCompareService(AttemptRepository records, ReplayReports reports, AttemptStateRepository store, TaskDefRepository tasks) {
+    public ReplayCompareService(AttemptRepository records, ReplayReportService reports, AttemptStateRepository store, TaskDefRepository tasks) {
         this.records = records;
         this.reports = reports;
         this.store = store;

@@ -1,5 +1,8 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.dto.DevDraftDto;
+import com.pair.domain.taskgen.dto.GenCheckResultDto;
+import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -38,7 +41,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.pair.infra.ai.AiUnavailableException;
 import com.pair.infra.sandbox.CodeRunner;
-import com.pair.domain.task.service.TaskDef;
+import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.repository.TaskDefRepository;
@@ -61,7 +64,7 @@ class TaskGenFlowTest {
     }
 
     /** 미리 정한 순서대로 Draft 나 오류를 돌려주는 가짜 AI. gate 가 있으면 열릴 때까지 기다린다 */
-    static class ScriptedAi implements TaskGenAi {
+    static class ScriptedAi implements TaskGenAiService {
         final Deque<Object> script = new ArrayDeque<>();
         final List<String> users = new ArrayList<>();
         volatile CountDownLatch gate;
@@ -104,10 +107,10 @@ class TaskGenFlowTest {
     @MockitoBean JavaMailSender mail;
     @Autowired ScriptedAi ai;
     @Autowired CodeRunner runner;
-    @Autowired DevTaskGenerator generator;
+    @Autowired DevTaskGeneratorService generator;
     @Autowired TaskDefRepository tasks;
     @Autowired TaskRepository records;
-    @Autowired GeneratedTaskWriter writer;
+    @Autowired GeneratedTaskRepository writer;
     @Autowired ObjectMapper json;
 
     private final List<String> steps = new ArrayList<>();
@@ -121,19 +124,19 @@ class TaskGenFlowTest {
         ((TaskGenFixtures.FakeRunner) runner).bugCaught = true;
     }
 
-    private static DevDraft good(String code) {
-        DevDraft d = TaskGenFixtures.good();
-        return new DevDraft(d.title(), d.summary(), code, d.category(), d.description(), d.requirements(), d.answer(),
+    private static DevDraftDto good(String code) {
+        DevDraftDto d = TaskGenFixtures.good();
+        return new DevDraftDto(d.title(), d.summary(), code, d.category(), d.description(), d.requirements(), d.answer(),
                 d.files(), d.hiddenTests(), d.solution());
     }
 
-    private static DevDraft bad(String code) {
-        DevDraft d = TaskGenFixtures.badSolution();
-        return new DevDraft(d.title(), d.summary(), code, d.category(), d.description(), d.requirements(), d.answer(),
+    private static DevDraftDto bad(String code) {
+        DevDraftDto d = TaskGenFixtures.badSolution();
+        return new DevDraftDto(d.title(), d.summary(), code, d.category(), d.description(), d.requirements(), d.answer(),
                 d.files(), d.hiddenTests(), d.solution());
     }
 
-    private TaskGenerator.Outcome generate() {
+    private TaskGeneratorService.Outcome generate() {
         return generator.generate(TaskGenFixtures.form(), 1L, steps::add);
     }
 
@@ -172,8 +175,8 @@ class TaskGenFlowTest {
     @Test
     @DisplayName("20분 과제: 제한 시간 20, d4Minutes 는 비례해서 줄고, AI 가 정한 난이도를 저장한다")
     void twentyMinutesAndAiDifficulty() {
-        DevDraft g = good("flow-20min");
-        ai.script.add(new DevDraft(g.title(), g.summary(), g.code(), g.category(), g.description(), g.requirements(), g.answer(),
+        DevDraftDto g = good("flow-20min");
+        ai.script.add(new DevDraftDto(g.title(), g.summary(), g.code(), g.category(), g.description(), g.requirements(), g.answer(),
                 g.files(), g.hiddenTests(), g.solution(), "고급"));
         var form = new TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 중복 적용", "SELF", 20);
         generator.generate(form, 1L, steps::add);
@@ -188,17 +191,17 @@ class TaskGenFlowTest {
     @Test
     @DisplayName("저장한 과제를 TaskDefRepository 로 다시 읽으면 Draft 와 같다 (숨은 테스트는 test/ 를 뗀 경로)")
     void roundTrip() {
-        DevDraft d = good("flow-roundtrip");
+        DevDraftDto d = good("flow-roundtrip");
         ai.script.add(d);
         generate();
 
-        TaskDef def = tasks.get("flow-roundtrip");
+        TaskDefDto def = tasks.get("flow-roundtrip");
         assertThat(def.type()).isEqualTo("dev");
         assertThat(def.title()).isEqualTo(d.title());
         assertThat(def.minutes()).isEqualTo(60);
         assertThat(def.description()).containsExactlyElementsOf(d.description());
         assertThat(def.requirements()).containsExactlyElementsOf(d.requirements());
-        assertThat(def.followUps()).containsExactlyElementsOf(GeneratedTaskWriter.DEV_FOLLOW_UPS);
+        assertThat(def.followUps()).containsExactlyElementsOf(GeneratedTaskRepository.DEV_FOLLOW_UPS);
         assertThat(def.openFile()).isEqualTo("src/shop/Cart.java");
         assertThat(def.d4Minutes()).containsExactly(20, 30, 40, 50);
 
@@ -233,8 +236,8 @@ class TaskGenFlowTest {
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(o.taskCode()).isEqualTo("flow-retry-2");
         assertThat(ai.users).hasSize(2);
-        assertThat(ai.users.get(1)).contains(DevChecks.SOLVED_PASSES).contains("테스트");
-        assertThat(ai.users.get(0)).doesNotContain(DevChecks.SOLVED_PASSES);
+        assertThat(ai.users.get(1)).contains(DevCheckService.SOLVED_PASSES).contains("테스트");
+        assertThat(ai.users.get(0)).doesNotContain(DevCheckService.SOLVED_PASSES);
         assertThat(steps).containsExactly("생성 중", "확인 중", "다시 생성 중", "확인 중", "저장 중");
         assertThat(records.findByCode("flow-retry-1")).isEmpty();
         var report = json.readTree(writer.report("flow-retry-2"));
@@ -253,7 +256,7 @@ class TaskGenFlowTest {
         assertThat(o.passed()).isFalse();
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(ai.users).hasSize(2);
-        assertThat(o.checks()).filteredOn(c -> !c.ok()).extracting(GenCheckResult::name).containsExactly(DevChecks.SOLVED_PASSES);
+        assertThat(o.checks()).filteredOn(c -> !c.ok()).extracting(GenCheckResultDto::name).containsExactly(DevCheckService.SOLVED_PASSES);
         assertThat(records.findByCode("flow-fail-2").orElseThrow().getStatus()).isEqualTo(Task.Status.HIDDEN);
         var report = json.readTree(writer.report("flow-fail-2"));
         assertThat(report.get("passed").asBoolean()).isFalse();

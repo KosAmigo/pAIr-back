@@ -33,7 +33,7 @@ import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.service.EnvCheckService;
 import com.pair.domain.exam.service.ExamEntryService;
 import com.pair.domain.exam.service.ExamSessionService;
-import com.pair.domain.exam.service.InvitesCreated;
+import com.pair.domain.exam.dto.InvitesCreatedDto;
 import com.pair.domain.exam.service.NoticeService;
 import com.pair.domain.exam.dto.ConsentRequest;
 import com.pair.domain.exam.dto.ParticipantInputDto;
@@ -79,7 +79,7 @@ class EnvNoticeIntegrationTest {
     @Autowired com.pair.domain.task.repository.TaskFileRepository taskFiles;
     @Autowired com.pair.domain.task.repository.TaskQuestionRepository taskQuestions;
 
-    @MockitoBean com.pair.domain.exam.service.AttemptSubmitter attempts;
+    @MockitoBean com.pair.domain.exam.service.AttemptSubmitService attempts;
     @MockitoBean JavaMailSender mail;
 
     @BeforeEach
@@ -225,7 +225,7 @@ class EnvNoticeIntegrationTest {
     private String invite(Long sessionId, String email) {
         sessions.addParticipants(sessionId, List.of(new ParticipantInputDto("응시자", email)));
         Long id = pid(sessionId, email);
-        return appEvents.stream(InvitesCreated.class).flatMap(e -> e.invites().stream())
+        return appEvents.stream(InvitesCreatedDto.class).flatMap(e -> e.invites().stream())
                 .filter(i -> i.participantId().equals(id)).reduce((a, b) -> b).orElseThrow().token();
     }
 

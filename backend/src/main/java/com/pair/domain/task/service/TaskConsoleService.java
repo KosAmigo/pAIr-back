@@ -1,5 +1,6 @@
 package com.pair.domain.task.service;
 
+import com.pair.domain.task.dto.TaskDefDto;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashMap;
@@ -13,7 +14,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.repository.TaskFileRepository;
-import com.pair.domain.taskgen.service.GeneratedTaskWriter;
+import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.global.error.ConflictException;
 import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskRepository;
@@ -26,7 +27,7 @@ import com.pair.domain.task.repository.TaskRepository;
 public class TaskConsoleService {
 
     /**
-     * id: 과제 code. type: dev | biz (응시 화면 TaskDef.type 과 같은 값).
+     * id: 과제 code. type: dev | biz (응시 화면 TaskDefDto.type 과 같은 값).
      * track: DEV/BIZ. generated: AI 가 만든 과제(_gen/report.json 있음). checksOk: 그 확인 검사가 모두 통과했는지(report 가 없으면 null).
      * usage: SELF 자가진단 / LIVE 기업 실전(회차에 거는 과제). parentId: 실전 복사본이면 원본 code
      */
@@ -35,12 +36,12 @@ public class TaskConsoleService {
             String summary, Instant createdAt, boolean generated, Boolean checksOk) {}
 
     private final TaskRepository records;
-    private final TaskCatalog catalog;
+    private final TaskCatalogService catalog;
     private final Clock clock;
     private final TaskFileRepository files;
     private final ObjectMapper json;
 
-    public TaskConsoleService(TaskRepository records, TaskCatalog catalog, Clock clock, TaskFileRepository files,
+    public TaskConsoleService(TaskRepository records, TaskCatalogService catalog, Clock clock, TaskFileRepository files,
             ObjectMapper json) {
         this.files = files;
         this.json = json;
@@ -54,7 +55,7 @@ public class TaskConsoleService {
         List<Task> all = records.findAllByOrderByIdAsc();
         var codes = catalog.codes(all.stream().map(Task::getParentTaskId).filter(java.util.Objects::nonNull).toList());
         Map<Long, Boolean> reports = new HashMap<>(); // 과제 id → checksOk. 키가 있으면 AI 생성 과제(값은 null 일 수 있음)
-        for (TaskFile f : files.findByPath(GeneratedTaskWriter.REPORT_PATH)) reports.put(f.getTaskId(), checksOk(f.getContent()));
+        for (TaskFile f : files.findByPath(GeneratedTaskRepository.REPORT_PATH)) reports.put(f.getTaskId(), checksOk(f.getContent()));
         return all.stream().map(t -> summary(t, t.getParentTaskId() == null ? null : codes.get(t.getParentTaskId()), reports)).toList();
     }
 
@@ -111,7 +112,7 @@ public class TaskConsoleService {
     private TaskSummary summary(Task t) {
         String parent = t.getParentTaskId() == null ? null : catalog.require(t.getParentTaskId()).getCode();
         Map<Long, Boolean> reports = new HashMap<>();
-        files.findByTaskIdAndPath(t.getId(), GeneratedTaskWriter.REPORT_PATH).ifPresent(f -> reports.put(t.getId(), checksOk(f.getContent())));
+        files.findByTaskIdAndPath(t.getId(), GeneratedTaskRepository.REPORT_PATH).ifPresent(f -> reports.put(t.getId(), checksOk(f.getContent())));
         return summary(t, parent, reports);
     }
 
