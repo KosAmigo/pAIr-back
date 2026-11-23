@@ -2,6 +2,7 @@ package com.pair.exam.service;
 
 import java.util.List;
 
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.web.util.HtmlUtils;
 
 /**
@@ -9,9 +10,12 @@ import org.springframework.web.util.HtmlUtils;
  * 표(table) 레이아웃과 인라인 스타일로만 만든다. 로고는 메일에 붙인 이미지(cid:logo)를 쓴다.
  * 사용자가 넣은 값(이름, 회차 제목)은 모두 이스케이프한다.
  */
-final class MailLayout {
-    static final String LOGO_CID = "logo";
+public final class MailLayout {
+    public static final String LOGO_CID = "logo";
+    /** 머리띠에 쓰는 로고 이미지. 메일마다 {@link #LOGO_CID} 로 붙인다 */
+    public static final ClassPathResource LOGO = new ClassPathResource("mail/logo.png");
 
+    private static final String DEFAULT_FOOTER = "이 메일은 pAIr 시험 안내를 위해 자동으로 발송되었습니다. 회신하지 않아도 됩니다.";
     private static final String BRAND = "#6C47FF";
     private static final String TEXT = "#1F2430";
     private static final String MUTED = "#6B7280";
@@ -20,15 +24,22 @@ final class MailLayout {
     }
 
     /** 표 한 줄: 라벨과 값 (예: 시험 시간) */
-    record Fact(String label, String value) {
+    public record Fact(String label, String value) {
     }
 
     /** 단추. url 이 null 이면 단추를 그리지 않는다 */
-    record Button(String label, String url) {
+    public record Button(String label, String url) {
     }
 
-    static String html(String heading, String greeting, List<String> paragraphs, List<Fact> facts, Button button,
-            List<String> notes) {
+    /** 시험 안내 메일 본문 (맨 아래 문구는 시험 안내용) */
+    public static String html(String heading, String greeting, List<String> paragraphs, List<Fact> facts,
+            Button button, List<String> notes) {
+        return html(heading, greeting, paragraphs, facts, button, notes, DEFAULT_FOOTER);
+    }
+
+    /** footer: 맨 아래 회색 줄. 메일 종류에 맞는 문구를 넣는다 */
+    public static String html(String heading, String greeting, List<String> paragraphs, List<Fact> facts,
+            Button button, List<String> notes, String footer) {
         StringBuilder sb = new StringBuilder(2048);
         sb.append("<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\">")
                 .append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>")
@@ -87,7 +98,7 @@ final class MailLayout {
         }
         sb.append("</td></tr>")
                 .append("<tr><td style=\"padding:16px 32px;background:#FAFAFC;font-size:12px;color:").append(MUTED)
-                .append(";text-align:center;\">이 메일은 pAIr 시험 안내를 위해 자동으로 발송되었습니다. 회신하지 않아도 됩니다.</td></tr>")
+                .append(";text-align:center;\">").append(esc(footer)).append("</td></tr>")
                 .append("</table></td></tr></table></body></html>");
         return sb.toString();
     }

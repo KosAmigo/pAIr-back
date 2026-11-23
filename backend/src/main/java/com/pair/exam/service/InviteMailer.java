@@ -9,7 +9,6 @@ import jakarta.mail.internet.MimeMessage;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.MailException;
 import org.springframework.mail.MailPreparationException;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -36,7 +35,6 @@ import com.pair.exam.repository.ExamParticipantRepository;
 public class InviteMailer {
     private static final Logger log = LoggerFactory.getLogger(InviteMailer.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final ClassPathResource LOGO = new ClassPathResource("mail/logo.png");
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(KST);
 
     private final JavaMailSender mail;
@@ -110,7 +108,7 @@ public class InviteMailer {
             helper.setTo(m.to());
             helper.setSubject(m.subject());
             helper.setText(m.text(), m.html());
-            helper.addInline(MailLayout.LOGO_CID, LOGO, "image/png");
+            helper.addInline(MailLayout.LOGO_CID, MailLayout.LOGO, "image/png");
             return mime;
         } catch (MessagingException e) {
             throw new MailPreparationException(e);

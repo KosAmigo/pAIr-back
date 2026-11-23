@@ -13,16 +13,17 @@ import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import jakarta.mail.internet.MimeMessage;
+
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -34,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pair.exam.service.MailLayout;
 
 /** 가입·로그인·로그아웃과 토큰 기반 권한 확인 흐름을 H2 DB로 검증한다. */
 @SpringBootTest(properties = "pair.auth.mode=bearer")
@@ -92,6 +94,27 @@ class AuthIntegrationTest {
         mvc.perform(tokenRequest("/api/auth/refresh", newRefresh)).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("인증 코드 메일은 시험 초대 메일과 같은 서식(로고 머리띠·표)의 HTML 이고, 글자 본문에도 코드가 있다")
+    void verificationMailUsesInviteLayout() throws Exception {
+        AuthTestSupport.prepareMail(mail);
+        mvc.perform(post("/api/auth/email-verifications")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new AuthDtos.EmailVerificationRequest("layout@example.com"))))
+                .andExpect(status().isAccepted());
+        ArgumentCaptor<MimeMessage> sent = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mail).send(sent.capture());
+        clearInvocations(mail);
+
+        String html = AuthTestSupport.htmlText(sent.getValue());
+        String code = Pattern.compile("인증 코드: ([0-9]{6})").matcher(AuthTestSupport.plainText(sent.getValue()))
+                .results().findFirst().orElseThrow().group(1);
+        assertThat(html).contains("src=\"cid:" + MailLayout.LOGO_CID + "\"")
+                .contains("회원가입 이메일 인증 코드").contains(code).contains("유효 시간")
+                .contains("회원가입 인증을 위해 자동으로 발송");
+        assertThat(sent.getValue().getSubject()).isEqualTo("[pAIr] 회원가입 이메일 인증 코드");
     }
 
     @Test
@@ -377,16 +400,12 @@ class AuthIntegrationTest {
     }
 
     private String requestVerificationCode(String email) throws Exception {
+        AuthTestSupport.prepareMail(mail);
         mvc.perform(post("/api/auth/email-verifications")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json.writeValueAsString(new AuthDtos.EmailVerificationRequest(email))))
                 .andExpect(status().isAccepted());
-        ArgumentCaptor<SimpleMailMessage> message = ArgumentCaptor.forClass(SimpleMailMessage.class);
-        verify(mail).send(message.capture());
-        clearInvocations(mail);
-        Matcher matcher = Pattern.compile("인증 코드: ([0-9]{6})").matcher(message.getValue().getText());
-        if (!matcher.find()) throw new AssertionError("인증 코드가 메일 본문에 없습니다.");
-        return matcher.group(1);
+        return AuthTestSupport.sentCode(mail);
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder signup(
