@@ -11,6 +11,7 @@ import java.util.function.Consumer;
  * 하위 클래스는 프롬프트, 출력 형식, 검사 목록, 저장 방법만 정한다.
  * AI 호출이 실패하면(첫 호출) 예외를 그대로 던지고 저장하지 않는다.
  * 검사가 끝내 실패해도 저장한다(검수 전 상태라 어디에도 보이지 않는다).
+ * 검사 등급: fail 만 다시 생성을 일으키고, warn 은 저장한 뒤 검수자에게 알리기만 한다.
  */
 public abstract class TaskGeneratorService<D> {
 
@@ -70,7 +71,7 @@ public abstract class TaskGeneratorService<D> {
 
         onStep.accept(STEP_CHECKING);
         List<GenCheckResultDto> results = runChecks(form, draft);
-        List<GenCheckResultDto> failed = results.stream().filter(c -> !c.ok()).toList();
+        List<GenCheckResultDto> failed = results.stream().filter(GenCheckResultDto::needsRegeneration).toList();
 
         if (!failed.isEmpty()) {
             onStep.accept(STEP_REGENERATING);
@@ -88,7 +89,8 @@ public abstract class TaskGeneratorService<D> {
             }
         }
 
-        boolean passed = results.stream().allMatch(GenCheckResultDto::ok);
+        // warn 검사는 통과 여부에 영향을 주지 않는다(검수자에게 알리기만 한다)
+        boolean passed = results.stream().noneMatch(GenCheckResultDto::needsRegeneration);
         onStep.accept(STEP_SAVING);
         long seconds = Math.round((System.nanoTime() - started) / 1e9);
         // 요청에 역량이 있으면 그대로, 비어 있으면 모델이 정한 값(검증해서 잘못된 key 는 버림)을 쓴다. 보고서 form 에도 이 값이 남는다
@@ -103,7 +105,7 @@ public abstract class TaskGeneratorService<D> {
             try {
                 return c.run(draft);
             } catch (RuntimeException e) {
-                return new GenCheckResultDto(c.name(), false, "검사 중 오류: " + e.getMessage());
+                return new GenCheckResultDto(c.name(), false, "검사 중 오류: " + e.getMessage(), c.level());
             }
         }).toList();
     }

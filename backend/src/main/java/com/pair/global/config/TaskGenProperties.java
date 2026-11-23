@@ -21,7 +21,7 @@ public record TaskGenProperties(String model, Integer maxConcurrent, String effo
         if (model == null || model.isBlank()) model = "gpt-6.1-terra";
         if (maxConcurrent == null || maxConcurrent < 1) maxConcurrent = 2;
         if (effort == null || effort.isBlank()) effort = "medium";
-        if (maxTokens == null || maxTokens < 1000) maxTokens = 32000;
+        if (maxTokens == null || maxTokens < 1000) maxTokens = 48000;
         if (solverModel == null || solverModel.isBlank()) solverModel = "claude-sonnet-5-5";
         if (suggestModel == null || suggestModel.isBlank()) suggestModel = "gpt-6-luna";
         if (suggestMaxTokens == null || suggestMaxTokens < 500) suggestMaxTokens = 2000;

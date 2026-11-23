@@ -125,15 +125,11 @@ class TaskGenFlowTest {
     }
 
     private static DevDraftDto good(String code) {
-        DevDraftDto d = TaskGenFixtures.good();
-        return new DevDraftDto(d.title(), d.summary(), code, d.category(), d.description(), d.requirements(), d.answer(),
-                d.files(), d.hiddenTests(), d.solution());
+        return TaskGenFixtures.edit(TaskGenFixtures.good(), b -> b.code(code));
     }
 
     private static DevDraftDto bad(String code) {
-        DevDraftDto d = TaskGenFixtures.badSolution();
-        return new DevDraftDto(d.title(), d.summary(), code, d.category(), d.description(), d.requirements(), d.answer(),
-                d.files(), d.hiddenTests(), d.solution());
+        return TaskGenFixtures.edit(TaskGenFixtures.badSolution(), b -> b.code(code));
     }
 
     private TaskGeneratorService.Outcome generate() {
@@ -168,7 +164,8 @@ class TaskGenFlowTest {
         assertThat(report.get("passed").asBoolean()).isTrue();
         assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
         assertThat(report.get("outputTokens").asLong()).isEqualTo(2000);
-        assertThat(report.get("checks")).hasSize(6);
+        assertThat(report.get("checks")).hasSize(11);
+        assertThat(report.get("checks")).allSatisfy(c -> assertThat(c.get("level").asText()).isIn("fail", "warn"));
         assertThat(report.get("form").get("topic").asText()).isEqualTo("쿠폰 할인 계산");
     }
 
@@ -176,8 +173,7 @@ class TaskGenFlowTest {
     @DisplayName("20분 과제: 제한 시간 20, d4Minutes 는 비례해서 줄고, AI 가 정한 난이도를 저장한다")
     void twentyMinutesAndAiDifficulty() {
         DevDraftDto g = good("flow-20min");
-        ai.script.add(new DevDraftDto(g.title(), g.summary(), g.code(), g.category(), g.description(), g.requirements(), g.answer(),
-                g.files(), g.hiddenTests(), g.solution(), "고급"));
+        ai.script.add(TaskGenFixtures.edit(g, b -> b.difficulty("고급")));
         var form = new TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 중복 적용", "SELF", 20);
         generator.generate(form, 1L, steps::add);
 
@@ -189,8 +185,7 @@ class TaskGenFlowTest {
     }
 
     private static DevDraftDto withCompetencies(DevDraftDto g, List<String> competencies) {
-        return new DevDraftDto(g.title(), g.summary(), g.code(), g.category(), g.description(), g.requirements(), g.answer(),
-                g.files(), g.hiddenTests(), g.solution(), null, competencies);
+        return TaskGenFixtures.edit(g, b -> b.competencies(competencies));
     }
 
     private String settingsOf(String code) {
@@ -273,14 +268,17 @@ class TaskGenFlowTest {
         assertThat(def.minutes()).isEqualTo(60);
         assertThat(def.description()).containsExactlyElementsOf(d.description());
         assertThat(def.requirements()).containsExactlyElementsOf(d.requirements());
-        assertThat(def.followUps()).containsExactlyElementsOf(GeneratedTaskRepository.DEV_FOLLOW_UPS);
+        assertThat(def.followUps()).containsExactly(GeneratedTaskRepository.DEV_FOLLOW_UPS.get(0),
+                GeneratedTaskRepository.DEV_FOLLOW_UPS.get(1), d.taskFollowUp()); // 3번째는 과제 맞춤 질문
         assertThat(def.openFile()).isEqualTo("src/shop/Cart.java");
         assertThat(def.d4Minutes()).containsExactly(20, 30, 40, 50);
 
-        assertThat(tasks.visibleFiles("flow-roundtrip")).containsOnlyKeys("src/shop/Cart.java", "test/shop/CartTest.java")
+        assertThat(tasks.visibleFiles("flow-roundtrip")).containsOnlyKeys("src/shop/Cart.java", "test/shop/CartTest.java", "NOTES.md")
                 .containsEntry("src/shop/Cart.java", d.files().get(0).content());
         assertThat(tasks.hiddenFiles("flow-roundtrip")).containsOnlyKeys("shop/HiddenCartTest.java", "answer.md",
-                "_gen/report.json", "_gen/solution/src/shop/Cart.java.txt")
+                "_gen/report.json", "_gen/solution/src/shop/Cart.java.txt",
+                "_gen/wrong-fixes/1/reason.md", "_gen/wrong-fixes/1/src/shop/Cart.java.txt",
+                "_gen/wrong-fixes/2/reason.md", "_gen/wrong-fixes/2/src/shop/Cart.java.txt")
                 .containsEntry("shop/HiddenCartTest.java", d.hiddenTests().get(0).content())
                 .containsEntry("answer.md", d.answer())
                 .containsEntry("_gen/solution/src/shop/Cart.java.txt", d.solution().get(0).content());
@@ -315,6 +313,68 @@ class TaskGenFlowTest {
         var report = json.readTree(writer.report("flow-retry-2"));
         assertThat(report.get("attempts").asInt()).isEqualTo(2);
         assertThat(report.get("inputTokens").asLong()).isEqualTo(2000);
+    }
+
+    private static DevDraftDto leaky(String code) {
+        return TaskGenFixtures.edit(TaskGenFixtures.good(), b -> b.code(code).description(List.of("쿠폰이 중복 적용 되어 금액이 줄어듭니다.")));
+    }
+
+    /** 정답 변경이 1줄뿐이라 분량 경고(warn)만 나오는 Draft */
+    private static DevDraftDto small(String code) {
+        return TaskGenFixtures.edit(TaskGenFixtures.withSolution(TaskGenFixtures.good(),
+                TaskGenFixtures.CART_START.replace("sum += 1;", "sum += 9; // FIXED")), b -> b.code(code));
+    }
+
+    @Test
+    @DisplayName("fail 검사(핵심어 노출)에 걸리면 이름과 내용을 붙여 1번 다시 만들고, 다시 만든 것이 통과하면 그것을 저장한다")
+    void failLevelRegenerates() throws Exception {
+        ai.script.add(leaky("flow-leak-1"));
+        ai.script.add(good("flow-leak-2"));
+        var o = generate();
+
+        assertThat(o.passed()).isTrue();
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(ai.users).hasSize(2);
+        assertThat(ai.users.get(1)).contains(DevCheckService.TRAP_WORDS).contains("'중복 적용'");
+        assertThat(records.findByCode("flow-leak-1")).isEmpty();
+        assertThat(json.readTree(writer.report("flow-leak-2")).get("checks")).allSatisfy(c -> assertThat(c.get("ok").asBoolean()).isTrue());
+    }
+
+    @Test
+    @DisplayName("warn 만 있으면 다시 만들지 않고 그대로 저장한다. report 에 level 이 남고 passed 는 true")
+    void warnOnlyIsSavedAsIs() throws Exception {
+        ai.script.add(small("flow-warn"));
+        ai.script.add(good("flow-never-2"));
+        var o = generate();
+
+        assertThat(o.passed()).isTrue();
+        assertThat(o.attempts()).isEqualTo(1);
+        assertThat(ai.users).hasSize(1);
+        assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
+        assertThat(o.checks()).filteredOn(c -> !c.ok()).extracting(GenCheckResultDto::name).containsExactly(DevCheckService.AMOUNT);
+        assertThat(records.findByCode("flow-warn").orElseThrow().getStatus()).isEqualTo(Task.Status.HIDDEN);
+
+        var report = json.readTree(writer.report("flow-warn"));
+        assertThat(report.get("passed").asBoolean()).isTrue();
+        assertThat(report.get("attempts").asInt()).isEqualTo(1);
+        for (var c : report.get("checks")) {
+            boolean amount = c.get("name").asText().equals(DevCheckService.AMOUNT);
+            assertThat(c.get("level").asText()).isEqualTo(amount ? "warn" : "fail");
+            assertThat(c.get("ok").asBoolean()).isEqualTo(!amount);
+            assertThat(c.has("name") && c.has("detail")).isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("fail 과 warn 이 함께 있으면 fail 만 다시 만들 때 프롬프트에 붙고, warn 은 붙지 않는다")
+    void retryPromptHasOnlyFail() throws Exception {
+        ai.script.add(TaskGenFixtures.edit(small("flow-mix-1"), b -> b.description(List.of("이중 할인이 원인입니다."))));
+        ai.script.add(small("flow-mix-2"));
+        var o = generate();
+
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(o.passed()).isTrue(); // 두 번째는 warn 만 남음
+        assertThat(ai.users.get(1)).contains(DevCheckService.TRAP_WORDS).doesNotContain(DevCheckService.AMOUNT);
     }
 
     @Test
@@ -423,10 +483,10 @@ class TaskGenFlowTest {
         assertThat(done.get("status").asText()).isEqualTo("DONE");
         assertThat(done.get("taskCode").asText()).isEqualTo("flow-api");
         assertThat(done.get("passed").asBoolean()).isTrue();
-        assertThat(done.get("checks")).hasSize(6);
+        assertThat(done.get("checks")).hasSize(11);
 
         mvc.perform(as(get("/api/admin/tasks/flow-api/gen-report"), "ADMIN")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(6));
+                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(11));
         mvc.perform(as(get("/api/admin/tasks/order-deadlock/gen-report"), "ADMIN")).andExpect(status().isNotFound());
         mvc.perform(as(get("/api/admin/task-gen/no-such-job"), "ADMIN")).andExpect(status().isNotFound());
     }

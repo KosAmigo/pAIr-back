@@ -140,7 +140,7 @@ pair:
     solver-model: claude-sonnet-5-5
     max-concurrent: 2
     effort: medium
-    max-tokens: 32000
+    max-tokens: 48000
     # 주제·함정 추천: 싼 모델, 짧은 출력. 추론 모델이라 생각 토큰도 상한에 들어간다
     suggest-model: gpt-6-luna
     suggest-max-tokens: 2000

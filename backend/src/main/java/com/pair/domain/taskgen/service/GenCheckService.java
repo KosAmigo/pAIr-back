@@ -8,4 +8,9 @@ public interface GenCheckService<D> {
     String name();
 
     GenCheckResultDto run(D draft);
+
+    /** 등급: fail(실패하면 다시 생성) 또는 warn(알리기만). 기본은 fail */
+    default String level() {
+        return GenCheckResultDto.FAIL;
+    }
 }

@@ -32,10 +32,10 @@ class BizCheckServiceTest {
     }
 
     @Test
-    @DisplayName("정상 Draft 는 검사 7개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
+    @DisplayName("정상 Draft 는 검사 10개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
     void allPass() {
         var results = run(BizFixtures.good("c"));
-        assertThat(results).hasSize(7).allMatch(GenCheckResultDto::ok, results.toString());
+        assertThat(results).hasSize(10).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
         assertThat(solver.lastPrompt).contains("자료/설문 요약.pdf (2쪽)").contains("34%가 라이트").contains("1) 34%").contains("월,요금제,가입자 수");
         assertThat(solver.calls.get()).isEqualTo(1);
@@ -124,7 +124,7 @@ class BizCheckServiceTest {
         var r = run(oneDoc);
         assertThat(r.get(0).ok()).isFalse();
         assertThat(r.get(0).detail()).contains("2개 이상");
-        assertThat(r.subList(1, 7)).noneMatch(GenCheckResultDto::ok);
+        assertThat(r.subList(1, 10)).noneMatch(GenCheckResultDto::ok);
         assertThat(solver.calls.get()).isZero();
 
         var badPath = edit(d, b -> b.csvFiles(List.of(new DevDraftDto.FileDraft("자료/../evil.csv", "a,b\n1,2\n"))));
@@ -170,5 +170,61 @@ class BizCheckServiceTest {
         assertThat(BizCheckService.formatProblem(tooLong, pdf)).contains("쪽이 늘어납니다");
         var emoji = edit(d, b -> b.documents(List.of(new BizDraftDto.DocDraft(DOC1, List.of("좋아요 😀")), d.documents().get(1))));
         assertThat(BizCheckService.formatProblem(emoji, pdf)).contains("PDF 로 만들 수 없습니다");
+    }
+
+    // ── 검수 결과로 더한 검사 3개 ─────────────────────
+
+    private GenCheckResultDto result(BizDraftDto d, String name) {
+        return run(d).stream().filter(r -> r.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    @Test
+    @DisplayName("핵심어가 설명·요구사항·자료 파일 이름에 있으면 '함정 핵심어 노출 없음' 만 실패한다 (공백 무시, 자료 본문은 보지 않음)")
+    void trapWordExposed() {
+        BizDraftDto d = BizFixtures.good("c");
+        var hit = edit(d, b -> b.description(List.of("의향  보정 없이 계산하면 틀립니다.")));
+        assertThat(failed(hit)).containsExactly(BizCheckService.TRAP_WORDS);
+        assertThat(result(hit, BizCheckService.TRAP_WORDS).detail()).contains("설명").contains("의향 보정");
+        var inReq = edit(d, b -> b.requirements(List.of("전환율을 반드시 쓴다.")));
+        assertThat(result(inReq, BizCheckService.TRAP_WORDS).detail()).contains("요구사항").contains("전환율");
+        // 자료 본문에 있는 말은 괜찮다 (함정 근거 문장이 거기 있어야 하므로). 설문 요약 문서에 "의향" 이 있어도 통과한다
+        assertThat(failed(d)).isEmpty();
+        assertThat(failed(edit(d, b -> b.trapKeywords(List.of("전환율"))))).containsExactly(BizCheckService.TRAP_WORDS);
+    }
+
+    @Test
+    @DisplayName("단답형의 흔한 오답이 인정 답안과 같거나 0.5% 안이면 '단답 오답이 인정 답안과 다름' 만 실패한다")
+    void commonWrongAnswers() {
+        BizDraftDto d = BizFixtures.good("c");
+        assertThat(result(d, BizCheckService.WRONG_ANSWERS).ok()).isTrue();
+
+        var q = d.questions().get(2); // 인정 답안 21080
+        var same = BizFixtures.wrong(BizFixtures.shortQ(q.content(), "21080", q.calc(), CSV + "|", DOC1 + "|2"), "21080", "같은 값");
+        assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 2, same))))).containsExactly(BizCheckService.WRONG_ANSWERS);
+        assertThat(result(edit(d, b -> b.questions(replaceQuestion(d, 2, same))), BizCheckService.WRONG_ANSWERS).detail()).contains("21080").contains("인정 답안과 같아");
+
+        var near = BizFixtures.wrong(BizFixtures.shortQ(q.content(), "21080", q.calc(), CSV + "|", DOC1 + "|2"), "21100", "0.1% 차이");
+        assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 2, near))))).containsExactly(BizCheckService.WRONG_ANSWERS);
+        var far = BizFixtures.wrong(BizFixtures.shortQ(q.content(), "21080", q.calc(), CSV + "|", DOC1 + "|2"), "21300", "1% 차이");
+        // 기본 오답 "1" 과 "21300" 모두 인정 답안과 다르므로 통과
+        assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 2, far))))).isEmpty();
+
+        // 흔한 오답이 아예 없거나 숫자가 아니어도 실패
+        var none = new BizDraftDto.QuestionDraft(q.type(), q.content(), q.choices(), q.accepted(), q.calc(), q.sources(), List.of());
+        assertThat(result(edit(d, b -> b.questions(replaceQuestion(d, 2, none))), BizCheckService.WRONG_ANSWERS).detail()).contains("없습니다");
+        var text = BizFixtures.wrong(none, "많음", "숫자 아님");
+        assertThat(result(edit(d, b -> b.questions(replaceQuestion(d, 2, text))), BizCheckService.WRONG_ANSWERS).detail()).contains("숫자가 아닙니다");
+    }
+
+    @Test
+    @DisplayName("3번째 후속 질문에 핵심어가 있거나 앞의 공용 질문과 같으면 '후속 질문이 과제에 맞음' 만 실패한다")
+    void followUp() {
+        BizDraftDto d = BizFixtures.good("c");
+        assertThat(result(d, BizCheckService.FOLLOW_UP).ok()).isTrue();
+        var keyword = edit(d, b -> b.followUps(List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "전환율을 어떻게 검산했나요?")));
+        assertThat(failed(keyword)).containsExactly(BizCheckService.FOLLOW_UP);
+        assertThat(result(keyword, BizCheckService.FOLLOW_UP).detail()).contains("전환율");
+        var same = edit(d, b -> b.followUps(List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "채택하지 않은 제안은?")));
+        assertThat(failed(same)).containsExactly(BizCheckService.FOLLOW_UP);
     }
 }

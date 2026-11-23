@@ -34,7 +34,7 @@ final class BizFixtures {
         return new BizDraftDto("저가 요금제 출시 검토", "저가 요금제를 내놓아도 될지 자료로 판단합니다.", code, "기획안 작성",
                 List.of("영상 구독 서비스의 이탈률이 올랐습니다.", "자료를 보고 1페이지 기획안을 쓰세요."),
                 List.of("결론과 근거 3개를 쓴다.", "리스크를 1개 이상 쓴다."),
-                List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "같은 결론을 얻는 지시 순서는?"),
+                List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "AI 가 계산한 인원을 자료의 어느 칸 값과 맞춰 봤나요?"),
                 List.of(new DocDraft(DOC1, List.of("이탈 고객 설문 결과입니다. 응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.",
                                 "현재 이용자 설문입니다.\n" + EVIDENCE)),
                         new DocDraft(DOC2, List.of("월 이탈률은 5월 4.1%에서 10월 6.8%로 올랐습니다."))),
@@ -43,11 +43,12 @@ final class BizFixtures {
                 new Trap("설문 의향을 실제 전환율로 보정하지 않는다.", EVIDENCE),
                 List.of(single("현재 이용자 중 라이트 전환 의향 비율은?", List.of("34%", "38%", "41%", "50%"), 1, DOC1 + "|2", DOC2 + "|1"),
                         single("5월에서 10월까지 월 이탈률은 어떻게 변했나?", List.of("4.1%에서 5.5%", "4.1%에서 6.8%", "6.8%에서 4.1%", "변화 없음"), 2, DOC2 + "|1", DOC1 + "|1"),
-                        shortQ("10월 베이직 가입자 중 라이트 전환 예상 인원은 몇 명인가요? (명, 소수 첫째 자리 반올림)", "21080",
-                                "round(v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") * 0.34)", CSV + "|", DOC1 + "|2"),
-                        shortQ("9월 대비 10월 베이직 가입자는 몇 명 늘었나요? (명)", "2000",
+                        wrong(shortQ("10월 베이직 가입자 중 라이트 전환 예상 인원은 몇 명인가요? (명, 소수 첫째 자리 반올림)", "21080",
+                                "round(v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") * 0.34)", CSV + "|", DOC1 + "|2"), "23560", "설문 의향 38%를 그대로 곱함"),
+                        wrong(shortQ("9월 대비 10월 베이직 가입자는 몇 명 늘었나요? (명)", "2000",
                                 "v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") - v(\"자료/매출.csv\", \"월=2026-09;요금제=베이직\", \"가입자 수\")",
-                                CSV + "|", DOC2 + "|1")));
+                                CSV + "|", DOC2 + "|1"), "62000", "증가분이 아니라 10월 가입자 수를 적음")),
+                null, null, List.of("전환율", "의향 보정"));
     }
 
     static QuestionDraft single(String content, List<String> choices, int correct, String... sources) {
@@ -57,7 +58,14 @@ final class BizFixtures {
     }
 
     static QuestionDraft shortQ(String content, String accepted, String calc, String... sources) {
-        return new QuestionDraft(Type.SHORT, content, List.of(), List.of(accepted), calc, sources(sources));
+        return new QuestionDraft(Type.SHORT, content, List.of(), List.of(accepted), calc, sources(sources), List.of(new BizDraftDto.WrongAnswer("1", "테스트용 흔한 오답")));
+    }
+
+    /** 흔한 오답 1개를 더한 문항 */
+    static QuestionDraft wrong(QuestionDraft q, String value, String reason) {
+        List<BizDraftDto.WrongAnswer> all = new ArrayList<>(q.commonWrongAnswers() == null ? List.of() : q.commonWrongAnswers());
+        all.add(new BizDraftDto.WrongAnswer(value, reason));
+        return new QuestionDraft(q.type(), q.content(), q.choices(), q.accepted(), q.calc(), q.sources(), all);
     }
 
     /** "경로|쪽" 형태 */
@@ -82,6 +90,7 @@ final class BizFixtures {
         List<DevDraftDto.FileDraft> csvFiles;
         Trap trap;
         List<QuestionDraft> questions;
+        List<String> trapKeywords;
 
         Builder(BizDraftDto d) {
             title = d.title();
@@ -96,6 +105,7 @@ final class BizFixtures {
             csvFiles = d.csvFiles();
             trap = d.trap();
             questions = d.questions();
+            trapKeywords = d.trapKeywords();
         }
 
         Builder questions(List<QuestionDraft> q) { questions = q; return this; }
@@ -104,9 +114,12 @@ final class BizFixtures {
         Builder trap(Trap v) { trap = v; return this; }
         Builder description(List<String> v) { description = v; return this; }
         Builder code(String v) { code = v; return this; }
+        Builder requirements(List<String> v) { requirements = v; return this; }
+        Builder followUps(List<String> v) { followUps = v; return this; }
+        Builder trapKeywords(List<String> v) { trapKeywords = v; return this; }
 
         BizDraftDto build() {
-            return new BizDraftDto(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions);
+            return new BizDraftDto(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, null, null, trapKeywords);
         }
     }
 
