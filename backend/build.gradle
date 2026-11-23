@@ -38,6 +38,8 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok'
 
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // 휴대폰 보조 캠 JPEG 프레임 중계 (/ws/proctor). 서버는 분석하지 않고 최신 프레임만 응시자 PC 로 넘긴다
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     // 회원 비밀번호를 BCrypt 로 안전하게 해시하기 위해 사용한다.
     implementation 'org.springframework.security:spring-security-crypto'
