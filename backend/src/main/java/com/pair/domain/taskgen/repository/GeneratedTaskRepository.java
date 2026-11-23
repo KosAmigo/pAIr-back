@@ -65,6 +65,12 @@ public class GeneratedTaskRepository {
             "AI가 제안한 내용 중 채택하지 않은 것이 있다면 무엇이고, 이유는 무엇인가요?",
             "동료가 같은 결과를 얻으려면 AI에게 어떤 지시를 어떤 순서로 주면 되나요?");
 
+    /** 공용 후속 질문 중 앞의 2개. 3번째는 과제마다 AI 가 만든 질문(Draft 의 taskFollowUp)을 쓴다 */
+    private static final int COMMON_FOLLOW_UPS = 2;
+
+    /** 검수자가 볼 수 있게 HIDDEN 으로 저장하는 그럴듯한 오답의 폴더 */
+    public static final String WRONG_FIX_DIR = "_gen/wrong-fixes/";
+
     /** 60분 기준 d4 시점(분). 시간이 짧으면 비례해서 줄인다 */
     private static final List<Integer> D4_BASE = List.of(20, 30, 40, 50);
 
@@ -128,10 +134,23 @@ public class GeneratedTaskRepository {
         rows.add(file(id, "answer.md", d.answer(), TaskFile.HIDDEN, true));
         for (var f : d.solution()) rows.add(file(id, SOLUTION_DIR + f.path() + ".txt", f.content(), TaskFile.HIDDEN, true));
         rows.add(file(id, REPORT_PATH, toJson(report), TaskFile.HIDDEN, true));
+        if (d.wrongFixes() != null) {
+            int n = 0;
+            for (var w : d.wrongFixes()) {
+                n++;
+                String dir = WRONG_FIX_DIR + n + "/";
+                rows.add(file(id, dir + "reason.md", orElse(w.reason(), "(이유 없음)"), TaskFile.HIDDEN, true));
+                // 정답 코드처럼 .java 로 컴파일되지 않게 끝에 .txt 를 붙인다
+                if (w.files() != null) for (var f : w.files()) rows.add(file(id, dir + f.path() + ".txt", f.content(), TaskFile.HIDDEN, true));
+            }
+        }
         files.saveAll(rows);
 
-        for (int i = 0; i < DEV_FOLLOW_UPS.size(); i++) {
-            questions.save(new TaskQuestion(id, TaskQuestion.FOLLOWUP, "ESSAY", i + 1, DEV_FOLLOW_UPS.get(i)));
+        // 앞의 공용 질문 2개 + 이 과제의 함정에 맞춘 질문. 맞춤 질문이 비었으면(검사 실패) 공용 3번째 문구를 쓴다
+        List<String> followUps = new ArrayList<>(DEV_FOLLOW_UPS.subList(0, COMMON_FOLLOW_UPS));
+        followUps.add(d.taskFollowUp() == null || d.taskFollowUp().isBlank() ? DEV_FOLLOW_UPS.get(COMMON_FOLLOW_UPS) : d.taskFollowUp().strip());
+        for (int i = 0; i < followUps.size(); i++) {
+            questions.save(new TaskQuestion(id, TaskQuestion.FOLLOWUP, "ESSAY", i + 1, followUps.get(i)));
         }
         return code;
     }

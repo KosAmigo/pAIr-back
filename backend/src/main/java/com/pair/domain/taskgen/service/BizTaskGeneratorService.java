@@ -26,7 +26,10 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
             - 문항마다 sources 에 근거 자료를 2개 이상 적습니다. 서로 다른 문서(또는 CSV)의 경로와 쪽 번호(예: path "자료/설문 요약.pdf", pages "1,2")입니다. 정답은 문서 여러 개를 함께 봐야 알 수 있게 만들고, 한 문서만으로 풀리지 않게 합니다. 경로와 쪽 번호는 실제로 있어야 합니다(CSV 는 pages 를 빈 문자열로).
             - calc 형식: v("자료/파일.csv", "열=값;열=값", "열 이름") 이 그 조건에 맞는 한 행의 칸 값입니다(조건에 맞는 행은 정확히 1개). 사칙연산, 괄호, round(x, 자릿수) 만 씁니다. 예: round(v("자료/매출.csv", "월=2026-10;요금제=베이직", "가입자 수") * 0.34 * (9900 - 5900) / 10000)
             - 단답형 문항에는 답의 단위와 반올림 방법(예: 만 원 단위, 소수 첫째 자리 반올림)을 적습니다. accepted 첫 번째는 그 단위의 숫자만 씁니다(쉼표 없이).
-            - followUps 는 후속 질문 3개: 직접 검증한 것, 채택하지 않은 AI 제안과 이유, 동료가 같은 결론을 얻을 지시 순서.
+            - followUps 는 후속 질문 3개입니다. 앞의 2개는 공용 질문(직접 검증한 것은 무엇이고 어떻게 확인했나, 채택하지 않은 AI 제안과 이유)이고, 3번째는 이 과제의 함정에 맞춘 질문 1개입니다(예: "AI 가 계산한 전환 인원을 어느 자료 어느 칸의 값과 맞춰 봤나요?"). 3번째 질문에는 trapKeywords 를 쓰지 않고 검증 방법만 묻습니다.
+            - trapKeywords 는 함정의 핵심어 2~5개입니다(응시자가 알면 정답이 거의 드러나는 단어, 예: 의향, 보정). description 과 requirements, 자료 파일 이름에 이 단어를 쓰지 말고 현상만 설명합니다. 함정 근거 문장은 자료 본문에만 둡니다.
+            - 단답형(SHORT) 문항마다 commonWrongAnswers 에 "AI 가 흔히 낼 법한 틀린 값" 1~2개를 씁니다. 각각 value(숫자만, 쉼표 없이)와 reason(왜 그 값이 나오는지)입니다. 틀린 값은 인정 답안과 0.5%% 넘게 달라야 합니다. 객관식(SINGLE)은 빈 배열로 둡니다.
+              예: {"value": "62000", "reason": "전환율 보정 없이 가입자 전체를 곱함"}
             - code 는 과제를 나타내는 영문 소문자와 하이픈만 쓴 짧은 이름(예: lite-plan), summary 는 과제 목록 카드에 보일 한국어 한 문장(80자 이내, 함정을 드러내지 않음), category 는 과제 형태를 나타내는 짧은 한국어(예: 기획안 작성, 데이터 분석).
             - 과제 깊이는 제한 시간에 맞춥니다: %s
             - difficulty 는 만든 과제의 수준을 보고 초급, 중급, 고급 중 하나로 정합니다.
@@ -81,7 +84,7 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
 
     @Override
     protected List<GenCheckService<BizDraftDto>> checks(TaskGenRequest form, BizDraftDto draft) {
-        return BizCheckService.forDraft(pdf, solver, props.solverModel(), draft, form.minutes());
+        return BizCheckService.forDraft(pdf, solver, props.solverModel(), draft, form.minutes(), form);
     }
 
     @Override
@@ -89,6 +92,7 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("solverModel", props.solverModel());
         if (draft.trap() != null) m.put("trap", draft.trap());
+        m.put("trapKeywords", draft.trapKeywords());
         return m;
     }
 

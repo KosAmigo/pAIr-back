@@ -18,12 +18,19 @@ import com.pair.infra.sandbox.CodeRunner.RunResult;
 final class DevRunService {
 
     static final Pattern PATH = Pattern.compile("(src|test)/[\\w/]+\\.java");
+    /** 응시자에게 보이는 자료 파일: 장애 접수 메모, 재현 로그. 실행(컴파일)에는 쓰이지 않는다 */
+    static final Pattern EXTRA = Pattern.compile("NOTES\\.md|INCIDENT\\.md|logs/[\\w.\\-]+\\.(log|txt|md)");
+    static final int MAX_WRONG_FIXES = 3;
+
+    /** 그럴듯한 오답 1개를 돌린 결과 (number 는 1부터) */
+    record WrongRun(int number, DevDraftDto.WrongFix fix, RunResult result) {}
 
     private final CodeRunner runner;
     private final DevDraftDto draft;
     private RunResult start;
     private RunResult startHidden;
     private RunResult solved;
+    private List<WrongRun> wrongRuns;
 
     DevRunService(CodeRunner runner, DevDraftDto draft) {
         this.runner = runner;
@@ -42,6 +49,7 @@ final class DevRunService {
         List<DevDraftDto.FileDraft> sol = nz(d.solution());
         for (var f : concat(files, hidden, sol)) {
             if (f == null || f.path() == null || f.content() == null) return "경로나 내용이 빈 파일이 있습니다.";
+            if (files.contains(f) && EXTRA.matcher(f.path()).matches()) continue;
             if (!PATH.matcher(f.path()).matches() || f.path().contains("//")) {
                 return "파일 경로 형식이 맞지 않습니다: " + f.path() + " (src/…java 또는 test/…java)";
             }
@@ -82,6 +90,47 @@ final class DevRunService {
             solved = runner.run(m);
         }
         return solved;
+    }
+
+    /** 그럴듯한 오답의 형식 문제. 문제가 없으면 null. 오답은 src/ 파일만 가능하다(경로가 폴더 밖으로 나가지 않게) */
+    static String wrongFixProblem(DevDraftDto d) {
+        List<DevDraftDto.WrongFix> fixes = nz(d.wrongFixes());
+        if (fixes.size() < 2) return "그럴듯한 오답(wrongFixes)이 2~3개 있어야 합니다 (지금 " + fixes.size() + "개).";
+        if (fixes.size() > MAX_WRONG_FIXES) return "그럴듯한 오답(wrongFixes)은 3개까지입니다 (지금 " + fixes.size() + "개).";
+        int n = 0;
+        for (var w : fixes) {
+            n++;
+            if (w == null || isBlank(w.reason())) return "오답 " + n + "에 틀린 이유(reason)가 없습니다.";
+            if (nz(w.files()).isEmpty()) return "오답 " + n + "에 파일이 없습니다.";
+            for (var f : w.files()) {
+                if (f == null || f.path() == null || f.content() == null) return "오답 " + n + "에 경로나 내용이 빈 파일이 있습니다.";
+                if (!PATH.matcher(f.path()).matches() || f.path().contains("//") || !f.path().startsWith("src/")) {
+                    return "오답 " + n + "의 파일 경로가 맞지 않습니다: " + f.path() + " (src/…java)";
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 오답마다 (시작 코드에 오답 파일을 덮어쓴 것 + 공개 테스트 + 숨은 테스트)를 한 번씩 돌린다. 처음 필요할 때 한 번만 돈다.
+     * 형식이 맞지 않으면 돌리지 않고 빈 목록.
+     */
+    List<WrongRun> wrongRuns() {
+        if (wrongRuns == null) {
+            List<WrongRun> out = new ArrayList<>();
+            if (formatOk() && wrongFixProblem(draft) == null) {
+                int n = 0;
+                for (var w : draft.wrongFixes()) {
+                    Map<String, String> m = toMap(draft.files());
+                    m.putAll(toMap(w.files()));
+                    m.putAll(toMap(draft.hiddenTests()));
+                    out.add(new WrongRun(++n, w, runner.run(m)));
+                }
+            }
+            wrongRuns = out;
+        }
+        return wrongRuns;
     }
 
     /** 컴파일 실패 등 실패 원인을 한두 줄로 */
