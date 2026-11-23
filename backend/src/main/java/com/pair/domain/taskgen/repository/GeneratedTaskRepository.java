@@ -69,6 +69,7 @@ public class GeneratedTaskRepository {
     private static final int COMMON_FOLLOW_UPS = 2;
 
     /** 검수자가 볼 수 있게 HIDDEN 으로 저장하는 그럴듯한 오답의 폴더 */
+    public static final String SOLO_DIR = "_gen/solo/";
     public static final String WRONG_FIX_DIR = "_gen/wrong-fixes/";
 
     /** 60분 기준 d4 시점(분). 시간이 짧으면 비례해서 줄인다 */
@@ -118,6 +119,12 @@ public class GeneratedTaskRepository {
     /** 저장하고 과제 code 를 돌려준다. code 가 겹치면 -2, -3 … 을 붙인다 */
     @Transactional
     public String saveDev(TaskGenRequest form, DevDraftDto d, TaskGeneratorService.GenReport report, long adminId) {
+        return saveDev(form, d, report, adminId, Map.of());
+    }
+
+    /** soloFiles: "AI 혼자 바로 풀림" 검사에서 AI 가 낸 풀이. 키는 "1/src/x/Y.java"(시도 번호/경로) */
+    @Transactional
+    public String saveDev(TaskGenRequest form, DevDraftDto d, TaskGeneratorService.GenReport report, long adminId, Map<String, String> soloFiles) {
         String code = uniqueCode(d.code(), d.title());
         Instant now = clock.instant();
         long id = nextTaskId();
@@ -134,6 +141,8 @@ public class GeneratedTaskRepository {
         rows.add(file(id, "answer.md", d.answer(), TaskFile.HIDDEN, true));
         for (var f : d.solution()) rows.add(file(id, SOLUTION_DIR + f.path() + ".txt", f.content(), TaskFile.HIDDEN, true));
         rows.add(file(id, REPORT_PATH, toJson(report), TaskFile.HIDDEN, true));
+        // 정답 코드처럼 .java 로 컴파일되지 않게 끝에 .txt 를 붙인다
+        soloFiles.forEach((path, content) -> rows.add(file(id, SOLO_DIR + path + ".txt", content, TaskFile.HIDDEN, true)));
         if (d.wrongFixes() != null) {
             int n = 0;
             for (var w : d.wrongFixes()) {

@@ -28,6 +28,11 @@ public abstract class TaskGeneratorService<D> {
             boolean passed, TaskGenRequest form, List<GenCheckResultDto> checks, String retryError,
             java.util.Map<String, Object> details) {}
 
+    /** 확인이 모두 끝난 뒤 최종 결과에 덧붙이는 검사·자료. files 는 저장 때 함께 올린다 */
+    public record Extra(List<GenCheckResultDto> checks, java.util.Map<String, Object> details, java.util.Map<String, String> files) {
+        public static final Extra NONE = new Extra(List.of(), java.util.Map.of(), java.util.Map.of());
+    }
+
     private final TaskGenAiService ai;
     private final TaskGenProperties props;
 
@@ -49,6 +54,16 @@ public abstract class TaskGeneratorService<D> {
     /** report.json 에 더 남길 내용 (예: 비개발 함정 정보) */
     protected java.util.Map<String, Object> details(D draft) {
         return java.util.Map.of();
+    }
+
+    /** 재생성까지 끝난 최종 Draft 와 그 검사 결과를 보고 덧붙일 검사·자료를 만든다. 기본은 없음. 던지지 않는다 */
+    protected Extra afterChecks(TaskGenRequest form, D draft, List<GenCheckResultDto> results) {
+        return Extra.NONE;
+    }
+
+    /** extraFiles 가 있는 하위 클래스만 덮어쓴다 */
+    protected String save(TaskGenRequest form, D draft, GenReport report, long adminId, java.util.Map<String, String> extraFiles) {
+        return save(form, draft, report, adminId);
     }
 
     /** Draft 에서 모델이 정한 역량(검증 전 값) */
@@ -89,6 +104,15 @@ public abstract class TaskGeneratorService<D> {
             }
         }
 
+        Extra extra = afterChecks(form, draft, results);
+        if (!extra.checks().isEmpty()) {
+            List<GenCheckResultDto> all = new java.util.ArrayList<>(results);
+            all.addAll(extra.checks());
+            results = all;
+        }
+        java.util.Map<String, Object> detail = new java.util.LinkedHashMap<>(details(draft));
+        detail.putAll(extra.details());
+
         // warn 검사는 통과 여부에 영향을 주지 않는다(검수자에게 알리기만 한다)
         boolean passed = results.stream().noneMatch(GenCheckResultDto::needsRegeneration);
         onStep.accept(STEP_SAVING);
@@ -96,7 +120,7 @@ public abstract class TaskGeneratorService<D> {
         // 요청에 역량이 있으면 그대로, 비어 있으면 모델이 정한 값(검증해서 잘못된 key 는 버림)을 쓴다. 보고서 form 에도 이 값이 남는다
         TaskGenRequest saved = form.competencies() != null && !form.competencies().isEmpty() ? form
                 : form.withCompetencies(TaskGenRequest.pickCompetencies(draftCompetencies(draft)));
-        String code = save(saved, draft, new GenReport(model, attempts, seconds, in, out, passed, saved, results, retryError, details(draft)), adminId);
+        String code = save(saved, draft, new GenReport(model, attempts, seconds, in, out, passed, saved, results, retryError, detail), adminId, extra.files());
         return new Outcome(code, passed, attempts, results);
     }
 

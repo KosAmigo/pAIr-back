@@ -145,6 +145,11 @@ pair:
     suggest-model: gpt-6-luna
     suggest-max-tokens: 2000
     suggest-effort: low      # gpt-6-luna 는 none/low/medium/high/xhigh 만 받는다(minimal 은 400 오류)
+    # "AI 혼자 바로 풀림" 검사(개발 과제, 경고만): 응시자 AI 처럼 설명·보이는 파일만 주고 solo-attempts 번 풀게 해 모두 통과하면 알린다
+    # 모델·추론 강도·출력 한도는 응시자 AI 설정(pair.assistant)을 그대로 쓴다. 끄면 검사를 건너뛰고 report 에 "건너뜀"만 남는다
+    solo-enabled: true
+    solo-model: ${pair.assistant.model}
+    solo-attempts: 2
 
   # 응시자가 쓰는 AI 어시스턴트.
   assistant:

@@ -50,11 +50,14 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
 
     private final CodeRunner runner;
     private final GeneratedTaskRepository writer;
+    private final SoloSolveService solo;
 
-    public DevTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, CodeRunner runner, GeneratedTaskRepository writer) {
+    public DevTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, CodeRunner runner, GeneratedTaskRepository writer,
+            SoloSolveService solo) {
         super(ai, props);
         this.runner = runner;
         this.writer = writer;
+        this.solo = solo;
     }
 
     @Override
@@ -86,6 +89,27 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
         return DevCheckService.forDraft(runner, draft, form);
     }
 
+    /** 다른 fail 검사가 모두 통과한 최종 Draft 에만 "AI 혼자 바로 풀림" 검사를 돌린다(비용 절약) */
+    @Override
+    protected Extra afterChecks(TaskGenRequest form, DevDraftDto draft, List<GenCheckResultDto> results) {
+        if (solo == null || !solo.enabled()) return skip("pair.taskgen.solo-enabled=false");
+        if (results.stream().anyMatch(GenCheckResultDto::needsRegeneration)) return skip("다른 검사가 실패해 돌리지 않음");
+        try {
+            SoloSolveService.Result r = solo.run(draft);
+            Map<String, Object> tokens = new LinkedHashMap<>();
+            tokens.put("input", r.inputTokens());
+            tokens.put("output", r.outputTokens());
+            return new Extra(List.of(r.check()), Map.of("soloTokens", tokens), r.files());
+        } catch (RuntimeException e) {
+            return new Extra(List.of(new GenCheckResultDto(SoloSolveService.NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패)",
+                    GenCheckResultDto.WARN)), Map.of(), Map.of());
+        }
+    }
+
+    private static Extra skip(String why) {
+        return new Extra(List.of(SoloSolveService.skipped(why)), Map.of(), Map.of());
+    }
+
     @Override
     protected Map<String, Object> details(DevDraftDto draft) {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -103,5 +127,10 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
     @Override
     protected String save(TaskGenRequest form, DevDraftDto draft, GenReport report, long adminId) {
         return writer.saveDev(form, draft, report, adminId);
+    }
+
+    @Override
+    protected String save(TaskGenRequest form, DevDraftDto draft, GenReport report, long adminId, Map<String, String> extraFiles) {
+        return writer.saveDev(form, draft, report, adminId, extraFiles);
     }
 }

@@ -29,7 +29,7 @@ class TaskGenTimeTest {
     @Test
     @DisplayName("개발 과제 프롬프트에 시간별 깊이가 들어간다")
     void devDepth() {
-        DevTaskGeneratorService g = new DevTaskGeneratorService(null, null, null, null);
+        DevTaskGeneratorService g = new DevTaskGeneratorService(null, null, null, null, null);
         assertThat(g.system(form("DEV", 20))).contains("20분", "파일 2~3개", "버그 1개", "숨은 테스트 1~2개").contains("difficulty");
         assertThat(g.system(form("DEV", 40))).contains("파일 3~5개");
         assertThat(g.system(form("DEV", 60))).contains("파일 4~6개");

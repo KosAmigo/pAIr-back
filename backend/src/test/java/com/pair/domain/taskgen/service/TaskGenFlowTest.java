@@ -67,11 +67,21 @@ class TaskGenFlowTest {
     static class ScriptedAi implements TaskGenAiService {
         final Deque<Object> script = new ArrayDeque<>();
         final List<String> users = new ArrayList<>();
+        /** "AI 혼자 바로 풀림" 검사 호출(SoloAnswerDto)은 따로 모은다. 준비된 풀이가 없으면 호출 실패 */
+        final Deque<Object> soloScript = new ArrayDeque<>();
+        final List<String> soloUsers = new ArrayList<>();
         volatile CountDownLatch gate;
 
         @Override
         @SuppressWarnings("unchecked")
         public synchronized <T> Output<T> generate(String model, String system, String user, Class<T> type) {
+            if (type == com.pair.domain.taskgen.dto.SoloAnswerDto.class) {
+                soloUsers.add(user);
+                Object s = soloScript.poll();
+                if (s instanceof RuntimeException e) throw e;
+                if (s == null) throw new AiUnavailableException("준비된 풀이가 없습니다.");
+                return new Output<>((T) s, 30, 20);
+            }
             users.add(user);
             CountDownLatch g = gate;
             if (g != null) {
@@ -119,6 +129,8 @@ class TaskGenFlowTest {
     void reset() {
         ai.script.clear();
         ai.users.clear();
+        ai.soloScript.clear();
+        ai.soloUsers.clear();
         ai.gate = null;
         steps.clear();
         ((TaskGenFixtures.FakeRunner) runner).bugCaught = true;
@@ -164,7 +176,11 @@ class TaskGenFlowTest {
         assertThat(report.get("passed").asBoolean()).isTrue();
         assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
         assertThat(report.get("outputTokens").asLong()).isEqualTo(2000);
-        assertThat(report.get("checks")).hasSize(11);
+        // 11개 + AI 혼자 바로 풀림(준비된 풀이가 없어 호출 실패 → 이 검사만 warn, 생성은 계속)
+        assertThat(report.get("checks")).hasSize(12);
+        assertThat(report.get("checks").get(11).get("name").asText()).isEqualTo(SoloSolveService.NAME);
+        assertThat(report.get("checks").get(11).get("ok").asBoolean()).isTrue();
+        assertThat(report.get("checks").get(11).get("detail").asText()).contains("호출 실패");
         assertThat(report.get("checks")).allSatisfy(c -> assertThat(c.get("level").asText()).isIn("fail", "warn"));
         assertThat(report.get("form").get("topic").asText()).isEqualTo("쿠폰 할인 계산");
     }
@@ -359,7 +375,8 @@ class TaskGenFlowTest {
         assertThat(report.get("attempts").asInt()).isEqualTo(1);
         for (var c : report.get("checks")) {
             boolean amount = c.get("name").asText().equals(DevCheckService.AMOUNT);
-            assertThat(c.get("level").asText()).isEqualTo(amount ? "warn" : "fail");
+            boolean solo = c.get("name").asText().equals(SoloSolveService.NAME); // 풀이가 준비되지 않아 호출 실패 → ok, warn
+            assertThat(c.get("level").asText()).isEqualTo(amount || solo ? "warn" : "fail");
             assertThat(c.get("ok").asBoolean()).isEqualTo(!amount);
             assertThat(c.has("name") && c.has("detail")).isTrue();
         }
@@ -483,10 +500,10 @@ class TaskGenFlowTest {
         assertThat(done.get("status").asText()).isEqualTo("DONE");
         assertThat(done.get("taskCode").asText()).isEqualTo("flow-api");
         assertThat(done.get("passed").asBoolean()).isTrue();
-        assertThat(done.get("checks")).hasSize(11);
+        assertThat(done.get("checks")).hasSize(12);
 
         mvc.perform(as(get("/api/admin/tasks/flow-api/gen-report"), "ADMIN")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(11));
+                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(12));
         mvc.perform(as(get("/api/admin/tasks/order-deadlock/gen-report"), "ADMIN")).andExpect(status().isNotFound());
         mvc.perform(as(get("/api/admin/task-gen/no-such-job"), "ADMIN")).andExpect(status().isNotFound());
     }
@@ -518,5 +535,63 @@ class TaskGenFlowTest {
         waitDone(b);
         ai.script.add(good("flow-limit-3"));
         waitDone(startJob());
+    }
+
+    private static com.pair.domain.taskgen.dto.SoloAnswerDto soloAnswer(String content) {
+        return new com.pair.domain.taskgen.dto.SoloAnswerDto(List.of(TaskGenFixtures.f("src/shop/Cart.java", content)));
+    }
+
+    @Test
+    @DisplayName("fail 검사가 모두 통과하면 AI 혼자 풀기를 2번 돌리고 풀이 파일(_gen/solo)과 토큰을 저장한다. 2번 다 풀면 warn 이라 생성은 통과")
+    void soloAllSolved() throws Exception {
+        ai.script.add(good("flow-solo"));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        var o = generate();
+
+        assertThat(o.passed()).isTrue();
+        assertThat(o.attempts()).isEqualTo(1);
+        assertThat(ai.users).hasSize(1);
+        assertThat(ai.soloUsers).hasSize(2);
+        assertThat(ai.soloUsers.get(0)).doesNotContain("HiddenCartTest", "couponOnce", "쿠폰은 한 장만 적용한다", "중복 적용");
+        assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement().satisfies(c -> {
+            assertThat(c.ok()).isFalse();
+            assertThat(c.level()).isEqualTo("warn");
+        });
+
+        var report = json.readTree(writer.report("flow-solo"));
+        assertThat(report.get("passed").asBoolean()).isTrue();
+        assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
+        assertThat(report.get("details").get("soloTokens").get("input").asLong()).isEqualTo(60);
+        assertThat(report.get("details").get("soloTokens").get("output").asLong()).isEqualTo(40);
+        assertThat(tasks.hiddenFiles("flow-solo")).containsKeys("_gen/solo/1/src/shop/Cart.java.txt", "_gen/solo/2/src/shop/Cart.java.txt");
+    }
+
+    @Test
+    @DisplayName("fail 검사가 있어 다시 만들 때는 첫 Draft 에 AI 혼자 풀기를 돌리지 않고 최종 Draft 에만 돌린다")
+    void soloOnlyOnFinalDraft() {
+        ai.script.add(bad("flow-solo-first"));
+        ai.script.add(good("flow-solo-second"));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
+        var o = generate();
+
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(ai.soloUsers).hasSize(2);
+        assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement()
+                .satisfies(c -> assertThat(c.detail()).contains("2번 중 2번 숨은 테스트에서 실패"));
+    }
+
+    @Test
+    @DisplayName("다시 만들어도 fail 검사가 남으면 AI 혼자 풀기는 건너뛴다 (AI 호출 없음)")
+    void soloSkippedWhenStillFailing() {
+        ai.script.add(bad("flow-solo-bad1"));
+        ai.script.add(bad("flow-solo-bad2"));
+        var o = generate();
+
+        assertThat(o.passed()).isFalse();
+        assertThat(ai.soloUsers).isEmpty();
+        assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement()
+                .satisfies(c -> assertThat(c.detail()).startsWith("건너뜀"));
     }
 }
