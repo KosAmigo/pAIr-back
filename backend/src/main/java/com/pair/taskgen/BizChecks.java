@@ -31,7 +31,12 @@ final class BizChecks {
 
     /** 이 Draft 하나를 위한 검사 목록. 표와 형식 검사 결과를 검사끼리 나눠 쓴다 */
     static List<GenCheck<BizDraft>> forDraft(PdfMaker pdf, TaskGenSolver solver, String solverModel, BizDraft draft) {
-        Ctx ctx = new Ctx(pdf, draft);
+        return forDraft(pdf, solver, solverModel, draft, 60);
+    }
+
+    /** minutes: 제한 시간(20/40/60). 문항 개수 기준이 시간에 따라 다르다 */
+    static List<GenCheck<BizDraft>> forDraft(PdfMaker pdf, TaskGenSolver solver, String solverModel, BizDraft draft, int minutes) {
+        Ctx ctx = new Ctx(pdf, draft, minutes);
         return List.of(
                 check(FORMAT, d -> ctx.problem == null ? ok("필수 항목과 경로가 모두 맞습니다.") : fail(ctx.problem)),
                 check(CSV, d -> {
@@ -126,6 +131,10 @@ final class BizChecks {
 
     /** 형식에 맞으면 null. 경로 규칙은 파일 이름·경로 조작도 막는다 */
     static String formatProblem(BizDraft d, PdfMaker pdf) {
+        return formatProblem(d, pdf, 60);
+    }
+
+    static String formatProblem(BizDraft d, PdfMaker pdf, int minutes) {
         if (d == null) return "과제가 비어 있습니다.";
         if (blank(d.title())) return "제목이 비어 있습니다.";
         if (isEmpty(d.description()) || d.description().stream().anyMatch(BizChecks::blank)) return "설명(description)이 비어 있습니다.";
@@ -168,8 +177,9 @@ final class BizChecks {
             }
             if (q.sources() == null) return "문항에 근거 문서(sources)가 없습니다: " + shorten(q.content());
         }
+        int minShorts = minutes <= 20 ? 1 : 2; // 20분 과제는 객관식 2 + 단답형 1 을 허용한다
         if (singles < 2) return "객관식이 2개 이상이어야 합니다.";
-        if (shorts < 2) return "단답형이 2개 이상이어야 합니다.";
+        if (shorts < minShorts) return "단답형이 " + minShorts + "개 이상이어야 합니다.";
         return null;
     }
 
@@ -245,9 +255,9 @@ final class BizChecks {
         final Map<String, Integer> pageCounts = new LinkedHashMap<>();
         final BizDraft draft;
 
-        Ctx(PdfMaker pdf, BizDraft d) {
+        Ctx(PdfMaker pdf, BizDraft d, int minutes) {
             this.draft = d;
-            this.problem = formatProblem(d, pdf);
+            this.problem = formatProblem(d, pdf, minutes);
             this.tables = new BizTables(d == null ? null : d.csvFiles());
             if (problem == null) d.documents().forEach(x -> pageCounts.put(x.path(), x.pages().size()));
         }

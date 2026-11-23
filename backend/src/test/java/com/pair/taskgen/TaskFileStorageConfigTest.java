@@ -56,7 +56,7 @@ class TaskFileStorageConfigTest {
     }
 
     private static TaskGenForm form(String track) {
-        return new TaskGenForm(track, "회계", "MEDIUM", "주제", "함정", "사용", null);
+        return new TaskGenForm(track, "주제", "함정", "사용", null);
     }
 
     @Test

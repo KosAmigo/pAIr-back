@@ -19,10 +19,21 @@ public class DevTaskGenerator extends TaskGenerator<DevDraft> {
             - 공개 테스트는 시작 코드에서 통과하는 기본 동작만 확인합니다.
             - 숨은 테스트는 시작 코드에서 반드시 실패하고, 올바르게 고치면 반드시 통과해야 합니다. 동시성 테스트는 assertTimeoutPreemptively 로 10초 안에 끝나게 하고, 결과가 흔들리지 않게 충분히 반복합니다.
             - 정답(solution)은 시작 코드의 src 파일 중 바뀐 파일의 전체 내용입니다. 테스트 파일은 바꾸지 않습니다.
-            - 설명과 요구사항은 한국어로, 실제 회사의 장애 보고처럼 씁니다. 파일 3~6개 규모로 만듭니다.
+            - 설명과 요구사항은 한국어로, 실제 회사의 장애 보고처럼 씁니다.
+            - 과제 깊이는 제한 시간에 맞춥니다: %s
+            - difficulty 는 만든 과제의 수준을 보고 초급, 중급, 고급 중 하나로 정합니다.
             - code 는 과제를 나타내는 영문 소문자와 하이픈만 쓴 짧은 이름입니다(예: coupon-discount).
             - summary 는 과제 목록 카드에 보일 한국어 한 문장(80자 이내)입니다. 정답이나 버그 위치를 드러내지 않습니다.
             - category 는 과제 형태를 나타내는 한국어 짧은 말입니다(예: 장애 분석, 기능 구현, 성능 개선).""";
+
+    /** 제한 시간별 과제 깊이 */
+    static String depth(int minutes) {
+        return switch (minutes) {
+            case 20 -> "20분 = 파일 2~3개, 버그 1개, 숨은 테스트 1~2개. 짧은 시간에 읽고 고칠 수 있게 작게 만듭니다.";
+            case 40 -> "40분 = 파일 3~5개. 버그 1~2개 규모로 만듭니다.";
+            default -> "60분 = 파일 4~6개. 여러 파일을 따라가야 원인이 드러나는 규모로 만듭니다.";
+        };
+    }
 
     private final CodeRunner runner;
     private final GeneratedTaskWriter writer;
@@ -35,14 +46,13 @@ public class DevTaskGenerator extends TaskGenerator<DevDraft> {
 
     @Override
     protected String system(TaskGenForm form) {
-        return SYSTEM.formatted(form.minutes());
+        return SYSTEM.formatted(form.minutes(), depth(form.minutes()));
     }
 
     @Override
     protected String user(TaskGenForm form, List<CheckResult> failed) {
         StringBuilder sb = new StringBuilder();
-        sb.append("직군: ").append(form.jobRole()).append('\n')
-                .append("난이도: ").append(form.difficulty()).append('\n')
+        sb.append("제한 시간: ").append(form.minutes()).append("분\n")
                 .append("주제: ").append(form.topic()).append('\n')
                 .append("함정: ").append(form.trap()).append('\n')
                 .append("위 조건으로 과제를 만들어 주세요.");
@@ -59,7 +69,7 @@ public class DevTaskGenerator extends TaskGenerator<DevDraft> {
     }
 
     @Override
-    protected List<GenCheck<DevDraft>> checks(DevDraft draft) {
+    protected List<GenCheck<DevDraft>> checks(TaskGenForm form, DevDraft draft) {
         return DevChecks.forDraft(runner, draft);
     }
 
