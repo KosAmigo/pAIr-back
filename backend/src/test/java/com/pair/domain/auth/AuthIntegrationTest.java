@@ -1,6 +1,11 @@
 package com.pair.domain.auth;
 
-import com.pair.domain.auth.dto.AuthDtos;
+import com.pair.domain.auth.dto.EmailVerificationRequest;
+import com.pair.domain.auth.dto.LoginRequest;
+import com.pair.domain.auth.dto.PasswordChangeRequest;
+import com.pair.domain.auth.dto.RefreshRequest;
+import com.pair.domain.auth.dto.SignupRequest;
+import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.global.error.ConflictException;
@@ -109,7 +114,7 @@ class AuthIntegrationTest {
         AuthTestSupport.prepareMail(mail);
         mvc.perform(post("/api/auth/email-verifications")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new AuthDtos.EmailVerificationRequest("layout@example.com"))))
+                        .content(json.writeValueAsString(new EmailVerificationRequest("layout@example.com"))))
                 .andExpect(status().isAccepted());
         ArgumentCaptor<MimeMessage> sent = ArgumentCaptor.forClass(MimeMessage.class);
         verify(mail).send(sent.capture());
@@ -247,7 +252,7 @@ class AuthIntegrationTest {
         assertThat(jdbc.queryForObject("select count(*) from auth_refresh_sessions where user_id = ?", Integer.class, userId))
                 .isZero();
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new AuthDtos.Credentials(email, "secure-pass-123"))))
+                        .content(json.writeValueAsString(new LoginRequest(email, "secure-pass-123"))))
                 .andExpect(status().isUnauthorized());
         JsonNode renewed = login(email, "new-secure-pass");
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + renewed.path("token").asText()))
@@ -308,7 +313,7 @@ class AuthIntegrationTest {
         assertThat(jdbc.queryForObject("select balance_after from credit_ledger where user_id = ? order by ledger_id desc limit 1", Integer.class, userId))
                 .isEqualTo(225);
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new AuthDtos.Credentials(email, "secure-pass-123"))))
+                        .content(json.writeValueAsString(new LoginRequest(email, "secure-pass-123"))))
                 .andExpect(status().isUnauthorized());
         login(email, "new-secure-pass");
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
@@ -426,7 +431,7 @@ class AuthIntegrationTest {
 
     private JsonNode login(String email, String password) throws Exception {
         MvcResult result = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new AuthDtos.Credentials(email, password))))
+                        .content(json.writeValueAsString(new LoginRequest(email, password))))
                 .andExpect(status().isOk()).andReturn();
         return json.readTree(result.getResponse().getContentAsString());
     }
@@ -435,14 +440,14 @@ class AuthIntegrationTest {
             String token, String current, String replacement) throws Exception {
         return patch("/api/auth/password").header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json.writeValueAsString(new AuthDtos.PasswordChangeRequest(current, replacement)));
+                .content(json.writeValueAsString(new PasswordChangeRequest(current, replacement)));
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder withdrawal(
             String token, String current) throws Exception {
         return post("/api/auth/withdrawal").header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json.writeValueAsString(new AuthDtos.WithdrawalRequest(current)));
+                .content(json.writeValueAsString(new WithdrawalRequest(current)));
     }
 
     private boolean tryRefresh(String token, CountDownLatch start) throws InterruptedException {
@@ -458,7 +463,7 @@ class AuthIntegrationTest {
     private boolean trySignup(String email, String code, CountDownLatch start) throws InterruptedException {
         start.await();
         try {
-            auth.signup(new AuthDtos.SignupRequest("재가입 사용자", email, "secure-pass-123", code));
+            auth.signup(new SignupRequest("재가입 사용자", email, "secure-pass-123", code));
             return true;
         } catch (ConflictException | IllegalArgumentException e) {
             return false;
@@ -468,14 +473,14 @@ class AuthIntegrationTest {
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder tokenRequest(
             String path, String refreshToken) throws Exception {
         return post(path).contentType(MediaType.APPLICATION_JSON)
-                .content(json.writeValueAsString(new AuthDtos.RefreshRequest(refreshToken)));
+                .content(json.writeValueAsString(new RefreshRequest(refreshToken)));
     }
 
     private String requestVerificationCode(String email) throws Exception {
         AuthTestSupport.prepareMail(mail);
         mvc.perform(post("/api/auth/email-verifications")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json.writeValueAsString(new AuthDtos.EmailVerificationRequest(email))))
+                        .content(json.writeValueAsString(new EmailVerificationRequest(email))))
                 .andExpect(status().isAccepted());
         return AuthTestSupport.sentCode(mail);
     }
@@ -484,6 +489,6 @@ class AuthIntegrationTest {
             String name, String email, String password, String code) throws Exception {
         return post("/api/auth/signup")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json.writeValueAsString(new AuthDtos.SignupRequest(name, email, password, code)));
+                .content(json.writeValueAsString(new SignupRequest(name, email, password, code)));
     }
 }

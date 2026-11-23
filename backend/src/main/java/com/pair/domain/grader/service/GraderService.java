@@ -27,12 +27,12 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PreDestroy;
 
 import com.pair.infra.ai.BatchClient;
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.scoring.service.ScoringService;
 import com.pair.domain.task.service.TaskDef;
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,9 +58,9 @@ public class GraderService {
 
     private final ScoringService scoring;
     private final PromptStore prompts;
-    private final TaskRepository tasks;
-    private final AttemptStore mine;
-    private final AttemptStore samples;
+    private final TaskDefRepository tasks;
+    private final AttemptStoreRepository mine;
+    private final AttemptStoreRepository samples;
     private final Path samplesDir;
     private final Path runsDir;
     private final PairProperties props;
@@ -75,7 +75,7 @@ public class GraderService {
         return t;
     });
 
-    public GraderService(ScoringService scoring, PromptStore prompts, TaskRepository tasks, AttemptStore mine,
+    public GraderService(ScoringService scoring, PromptStore prompts, TaskDefRepository tasks, AttemptStoreRepository mine,
                          PairProperties props, ObjectMapper json, BatchClient batch) {
         this.batch = batch;
         this.scoring = scoring;
@@ -83,7 +83,7 @@ public class GraderService {
         this.tasks = tasks;
         this.mine = mine;
         this.samplesDir = Path.of(props.grader().dir(), "samples").toAbsolutePath();
-        this.samples = new com.pair.domain.attempt.repository.FileAttemptStore(samplesDir, json);
+        this.samples = new com.pair.domain.attempt.repository.FileAttemptStoreRepository(samplesDir, json);
         this.runsDir = Path.of(props.grader().dir(), "runs").toAbsolutePath();
         this.props = props;
         this.json = json;
@@ -131,9 +131,9 @@ public class GraderService {
     }
 
     private AttemptRow row(String source, String id, String label) {
-        AttemptStore src = store(source);
+        AttemptStoreRepository src = store(source);
         try {
-            Attempt a = src.load(id);
+            AttemptState a = src.load(id);
             if (a.followupsDoneAt() == null) return null; // 후속 질문까지 끝나야 채점할 수 있다
             TaskDef t = tasks.get(a.taskId());
             JsonNode rep = src.readReport(id);
@@ -166,7 +166,7 @@ public class GraderService {
         }
     }
 
-    private AttemptStore store(String source) {
+    private AttemptStoreRepository store(String source) {
         if (SAMPLE.equals(source)) return samples;
         if (MINE.equals(source)) return mine;
         throw new IllegalArgumentException("응시 출처는 sample 또는 mine 입니다: " + source);
@@ -218,7 +218,7 @@ public class GraderService {
     }
 
     private AttemptEstimate estimateOne(AttemptRef ref, int judgeRepeat) {
-        AttemptStore src = store(ref.source());
+        AttemptStoreRepository src = store(ref.source());
         JsonNode rep = src.readReport(ref.id());
         String basis = "report";
         if (rep == null || !rep.has("tokens")) {
@@ -254,7 +254,7 @@ public class GraderService {
 
     /** 같은 과제의 지난 채점 기록 중 아무거나(샘플 먼저) 하나를 기준으로 쓴다. */
     private JsonNode averageReport(String taskId) {
-        for (AttemptStore src : List.of(samples, mine)) {
+        for (AttemptStoreRepository src : List.of(samples, mine)) {
             for (String id : src.ids()) {
                 try {
                     if (!src.load(id).taskId().equals(taskId)) continue;
@@ -313,7 +313,7 @@ public class GraderService {
     public RunMeta start(RunRequest req) {
         req = fixed(req);
         validate(req, true);
-        PromptVersion version = prompts.get(req.versionId());
+        PromptVersionState version = prompts.get(req.versionId());
         List<AttemptRow> rows = new ArrayList<>();
         for (AttemptRef ref : req.attempts()) {
             AttemptRow r = row(ref.source(), ref.id(), SAMPLE.equals(ref.source()) ? sampleLabels().getOrDefault(ref.id(), ref.id()) : null);

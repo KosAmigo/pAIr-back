@@ -43,7 +43,7 @@ import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
@@ -52,7 +52,7 @@ import com.pair.domain.exam.service.AttemptSubmitter;
 import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.AutoSubmitService;
 import com.pair.domain.exam.service.ExamEntryService;
-import com.pair.domain.exam.service.LinkExpiredException;
+import com.pair.domain.exam.exception.LinkExpiredException;
 import com.pair.domain.exam.service.ExamSessionService;
 import com.pair.domain.exam.service.InviteTokens;
 import com.pair.domain.exam.service.InvitesCreated;
@@ -61,13 +61,13 @@ import com.pair.domain.exam.service.ReminderService;
 import com.pair.domain.exam.service.SessionNotice;
 import com.pair.domain.exam.service.SessionResultService;
 import com.pair.infra.storage.SnapshotStorage;
-import com.pair.domain.exam.dto.ExamDtos.AddParticipantsResult;
-import com.pair.domain.exam.dto.ExamDtos.ConsentRequest;
-import com.pair.domain.exam.dto.ExamDtos.EntryInfo;
-import com.pair.domain.exam.dto.ExamDtos.ParticipantInput;
-import com.pair.domain.exam.dto.ExamDtos.ProctorEventRequest;
-import com.pair.domain.exam.dto.ExamDtos.SessionRequest;
-import com.pair.domain.exam.dto.ExamDtos.SessionSummary;
+import com.pair.domain.exam.dto.AddParticipantsResponse;
+import com.pair.domain.exam.dto.ConsentRequest;
+import com.pair.domain.exam.dto.EntryInfoResponse;
+import com.pair.domain.exam.dto.ParticipantInputDto;
+import com.pair.domain.exam.dto.ProctorEventRequest;
+import com.pair.domain.exam.dto.ExamSessionRequest;
+import com.pair.domain.exam.dto.SessionSummaryResponse;
 
 /**
  * 회차 전체 흐름 통합 테스트 (H2 메모리 DB).
@@ -113,7 +113,7 @@ class ExamFlowIntegrationTest {
     @Autowired com.pair.domain.exam.service.ConnectionGrace grace;
     @Autowired SessionResultService results;
     @Autowired ExamParticipantRepository participants;
-    @Autowired AttemptStore attemptStore;
+    @Autowired AttemptStoreRepository attemptStore;
     @Autowired ObjectMapper json;
     @Autowired ReminderService reminders;
     @Autowired SnapshotStorage storage;
@@ -122,9 +122,9 @@ class ExamFlowIntegrationTest {
     @MockitoBean AttemptSubmitter attempts;
     @MockitoBean JavaMailSender mail;
 
-    @Autowired com.pair.domain.task.repository.TaskRecordRepository taskRecords;
-    @Autowired com.pair.domain.task.repository.TaskFileRecordRepository taskFiles;
-    @Autowired com.pair.domain.task.repository.TaskQuestionRecordRepository taskQuestions;
+    @Autowired com.pair.domain.task.repository.TaskRepository taskRecords;
+    @Autowired com.pair.domain.task.repository.TaskFileRepository taskFiles;
+    @Autowired com.pair.domain.task.repository.TaskQuestionRepository taskQuestions;
 
     @BeforeEach
     void setUp() {
@@ -143,10 +143,10 @@ class ExamFlowIntegrationTest {
     @DisplayName("회차를 만들고 목록에서 인원 수를 함께 본다")
     void createAndList() {
         Long company = 101L;
-        SessionSummary s = createSession(company, true);
-        sessions.addParticipants(s.id(), List.of(new ParticipantInput("김응시", "a@test.dev")));
+        SessionSummaryResponse s = createSession(company, true);
+        sessions.addParticipants(s.id(), List.of(new ParticipantInputDto("김응시", "a@test.dev")));
 
-        List<SessionSummary> list = sessions.list(company);
+        List<SessionSummaryResponse> list = sessions.list(company);
 
         assertThat(list).hasSize(1);
         assertThat(list.get(0).participants()).isEqualTo(1);
@@ -156,7 +156,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("시작 시각이 지난 회차는 수정·취소할 수 없다")
     void cannotEditAfterStart() {
-        SessionSummary s = createSession(102L, true);
+        SessionSummaryResponse s = createSession(102L, true);
         clock.set(s.startsAt().plusSeconds(1));
 
         assertThatThrownBy(() -> sessions.cancel(s.id())).isInstanceOf(IllegalStateException.class);
@@ -166,14 +166,14 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("취소: 지우지 않고 canceled_at 을 남기고, 입장·시작·자동 제출 대상에서 빠지며 대상자에게 안내 메일을 보낸다")
     void cancelKeepsRecordAndNotifies() {
-        SessionSummary s = createSession(114L, false);
+        SessionSummaryResponse s = createSession(114L, false);
         String token = invite(s.id(), "cancel@test.dev");
 
-        SessionSummary canceled = sessions.cancel(s.id());
+        SessionSummaryResponse canceled = sessions.cancel(s.id());
 
         assertThat(canceled.phase()).isEqualTo(ExamSession.Phase.CANCELED);
         assertThat(canceled.canceledAt()).isEqualTo(T0);
-        assertThat(sessions.list(114L)).singleElement().extracting(SessionSummary::phase).isEqualTo(ExamSession.Phase.CANCELED);
+        assertThat(sessions.list(114L)).singleElement().extracting(SessionSummaryResponse::phase).isEqualTo(ExamSession.Phase.CANCELED);
         assertThat(appEvents.stream(SessionNotice.class))
                 .anySatisfy(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CANCELED));
         verify(mail, timeout(3000).atLeastOnce()).send(org.mockito.ArgumentMatchers.<MimeMessage>argThat(
@@ -190,18 +190,18 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("시작 전 수정: 일시가 바뀌면 초대 메일을 새 링크로 다시 보내고, 이름만 바뀌면 변경 안내, 같으면 아무것도 안 보낸다")
     void updateNotifiesOnlyWhenChanged() {
-        SessionSummary s = createSession(115L, true);
+        SessionSummaryResponse s = createSession(115L, true);
         String oldToken = invite(s.id(), "change@test.dev");
-        SessionRequest same = new SessionRequest(115L, s.title(), s.startsAt(), s.endsAt(), true, List.of(TASK));
+        ExamSessionRequest same = new ExamSessionRequest(115L, s.title(), s.startsAt(), s.endsAt(), true, List.of(TASK));
 
         sessions.update(s.id(), same);
         assertThat(appEvents.stream(SessionNotice.class)).isEmpty();
 
-        sessions.update(s.id(), new SessionRequest(115L, s.title() + " 수정", s.startsAt(), s.endsAt(), true, List.of(TASK)));
+        sessions.update(s.id(), new ExamSessionRequest(115L, s.title() + " 수정", s.startsAt(), s.endsAt(), true, List.of(TASK)));
         assertThat(appEvents.stream(SessionNotice.class)).singleElement()
                 .satisfies(n -> assertThat(n.kind()).isEqualTo(SessionNotice.Kind.CHANGED));
 
-        sessions.update(s.id(), new SessionRequest(115L, s.title() + " 수정", s.startsAt().plusSeconds(60), s.endsAt(), true, List.of(TASK)));
+        sessions.update(s.id(), new ExamSessionRequest(115L, s.title() + " 수정", s.startsAt().plusSeconds(60), s.endsAt(), true, List.of(TASK)));
         String newToken = lastToken(participant(s.id(), "change@test.dev").getId());
         assertThat(newToken).isNotEqualTo(oldToken);
         assertThat(appEvents.stream(SessionNotice.class)).hasSize(1);
@@ -214,7 +214,7 @@ class ExamFlowIntegrationTest {
         var rows = com.pair.domain.exam.service.ParticipantCsvParser.parse(template, 1000);
         assertThat(rows).as("지우지 않은 예시 행은 등록하지 않는다").isEmpty();
 
-        SessionSummary s = createSession(116L, true);
+        SessionSummaryResponse s = createSession(116L, true);
         invite(s.id(), "x@test.dev");
         byte[] xlsx = results.xlsx(s.id());
         assertThat(com.pair.domain.exam.service.ExamWorkbooks.isXlsx(xlsx)).isTrue();
@@ -232,7 +232,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("명단에서 빼기: 시작 전·입장 전만, 다른 회차 번호로는 못 뺀다")
     void removeParticipant() {
-        SessionSummary s = createSession(121L, false);
+        SessionSummaryResponse s = createSession(121L, false);
         String entered = invite(s.id(), "in@test.dev");
         invite(s.id(), "out@test.dev");
         entry.enter(entered);
@@ -249,7 +249,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("없는 과제로는 회차를 만들 수 없다")
     void rejectsUnknownTask() {
-        SessionRequest req = new SessionRequest(103L, "t", T0.plusSeconds(60), T0.plusSeconds(3600), true, List.of("no-such-task"));
+        ExamSessionRequest req = new ExamSessionRequest(103L, "t", T0.plusSeconds(60), T0.plusSeconds(3600), true, List.of("no-such-task"));
         assertThatThrownBy(() -> sessions.create(req, 1L)).isInstanceOf(NoSuchElementException.class);
     }
 
@@ -258,14 +258,14 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("대상자 추가: 형식 오류·목록 안 중복·이미 등록된 이메일은 이유와 함께 건너뛴다")
     void addParticipantsRejectsBadRows() {
-        SessionSummary s = createSession(104L, true);
-        sessions.addParticipants(s.id(), List.of(new ParticipantInput("기존", "old@test.dev")));
+        SessionSummaryResponse s = createSession(104L, true);
+        sessions.addParticipants(s.id(), List.of(new ParticipantInputDto("기존", "old@test.dev")));
 
-        AddParticipantsResult r = sessions.addParticipants(s.id(), List.of(
-                new ParticipantInput("정상", "Ok@Test.dev"),
-                new ParticipantInput("형식오류", "not-an-email"),
-                new ParticipantInput("중복", "ok@test.dev"),
-                new ParticipantInput("기존", "OLD@test.dev")));
+        AddParticipantsResponse r = sessions.addParticipants(s.id(), List.of(
+                new ParticipantInputDto("정상", "Ok@Test.dev"),
+                new ParticipantInputDto("형식오류", "not-an-email"),
+                new ParticipantInputDto("중복", "ok@test.dev"),
+                new ParticipantInputDto("기존", "OLD@test.dev")));
 
         assertThat(r.added()).isEqualTo(1);
         assertThat(r.rejected()).extracting(x -> x.line() + ":" + x.reason())
@@ -275,10 +275,10 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("CSV 업로드: 헤더 순서가 달라도 읽고, 거절 사유는 CSV 줄 번호로, 원본은 저장소에 남긴다")
     void importCsv() {
-        SessionSummary s = createSession(105L, true);
+        SessionSummaryResponse s = createSession(105L, true);
         byte[] csv = "\uFEFF이메일,이름\r\nx1@test.dev,일번\r\n,\r\nbad,\"이, 번\"\r\n".getBytes(StandardCharsets.UTF_8);
 
-        AddParticipantsResult r = sessions.importCsv(s.id(), csv, false);
+        AddParticipantsResponse r = sessions.importCsv(s.id(), csv, false);
 
         assertThat(r.added()).isEqualTo(1);
         assertThat(r.rejected()).singleElement().satisfies(x -> {
@@ -293,11 +293,11 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("CSV 미리 보기: 저장하지 않고 들어갈 인원과 거절 사유만 돌려준다. 엑셀 한글판(MS949) CSV 도 읽는다")
     void previewCsv() {
-        SessionSummary s = createSession(116L, true);
+        SessionSummaryResponse s = createSession(116L, true);
         invite(s.id(), "dup@test.dev");
         byte[] csv = "이름,이메일\r\n새사람,new@test.dev\r\n기존,dup@test.dev\r\n".getBytes(java.nio.charset.Charset.forName("MS949"));
 
-        AddParticipantsResult r = sessions.importCsv(s.id(), csv, true);
+        AddParticipantsResponse r = sessions.importCsv(s.id(), csv, true);
 
         assertThat(r.added()).isEqualTo(1);
         assertThat(r.rejected()).singleElement().satisfies(x -> {
@@ -311,7 +311,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("입장 토큰: DB 에는 SHA-256 해시만 있고, 다시 보내면 새 토큰이 나와 이전 링크는 막힌다")
     void tokenHashAndReissue() {
-        SessionSummary s = createSession(117L, true);
+        SessionSummaryResponse s = createSession(117L, true);
         String first = invite(s.id(), "token@test.dev");
         ExamParticipant p = participant(s.id(), "token@test.dev");
         assertThat(p.getInviteTokenHash()).hasSize(64).isEqualTo(InviteTokens.hash(first)).isNotEqualTo(first);
@@ -329,9 +329,9 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("하루 전 알림: 시작 24시간 안에 들어오면 한 번만 보내고, 24시간 안에 초대된 사람은 건너뛴다")
     void reminderOncePerParticipant() throws InterruptedException {
-        SessionRequest req = new SessionRequest(118L, "알림 회차", T0.plus(Duration.ofDays(3)), T0.plus(Duration.ofDays(3)).plusSeconds(3600),
+        ExamSessionRequest req = new ExamSessionRequest(118L, "알림 회차", T0.plus(Duration.ofDays(3)), T0.plus(Duration.ofDays(3)).plusSeconds(3600),
                 false, List.of(TASK));
-        SessionSummary s = sessions.create(req, 1L);
+        SessionSummaryResponse s = sessions.create(req, 1L);
         invite(s.id(), "early@test.dev");
         awaitInviteStatus(s.id(), "early@test.dev", ExamParticipant.InviteStatus.SENT);
 
@@ -351,11 +351,11 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("초대 메일: 등록이 커밋된 뒤 비동기로 보내고 성공·실패를 기록한다")
     void inviteMailAsync() throws InterruptedException {
-        SessionSummary s = createSession(106L, true);
+        SessionSummaryResponse s = createSession(106L, true);
         doThrowForAddress("fail@test.dev");
 
-        sessions.addParticipants(s.id(), List.of(new ParticipantInput("성공", "ok@test.dev"),
-                new ParticipantInput("실패", "fail@test.dev")));
+        sessions.addParticipants(s.id(), List.of(new ParticipantInputDto("성공", "ok@test.dev"),
+                new ParticipantInputDto("실패", "fail@test.dev")));
 
         verify(mail, timeout(3000).times(2)).send(any(MimeMessage.class));
         awaitInviteStatus(s.id(), "ok@test.dev", ExamParticipant.InviteStatus.SENT);
@@ -367,10 +367,10 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("서버 시각 기준: 시작 전에는 대기만, 시작 시각이 되면 시작, 감독 회차는 동의가 먼저")
     void startOnlyByServerClock() {
-        SessionSummary s = createSession(107L, true);
+        SessionSummaryResponse s = createSession(107L, true);
         String token = invite(s.id(), "start@test.dev");
 
-        EntryInfo waiting = entry.enter(token);
+        EntryInfoResponse waiting = entry.enter(token);
         assertThat(waiting.phase()).isEqualTo(ExamSession.Phase.UPCOMING);
         assertThatThrownBy(() -> entry.start(token)).hasMessageContaining("아직 시작 시각이 아닙니다");
 
@@ -378,8 +378,8 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> entry.start(token)).hasMessageContaining("감독 동의");
 
         entry.consent(token, consent());
-        EntryInfo started = entry.start(token);
-        EntryInfo again = entry.start(token);
+        EntryInfoResponse started = entry.start(token);
+        EntryInfoResponse again = entry.start(token);
 
         assertThat(started.attempts()).containsOnlyKeys(TASK);
         assertThat(started.tasks()).singleElement().satisfies(t -> assertThat(t.submitted()).isFalse());
@@ -390,15 +390,15 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("시작 시각이 지나도 종료 전이면 처음 입장해 점검·동의 뒤 시작할 수 있다 (입장 마감 없음)")
     void lateEntryAfterStartIsAllowed() {
-        SessionSummary s = createSession(143L, true);
+        SessionSummaryResponse s = createSession(143L, true);
         String token = invite(s.id(), "latecomer@test.dev");
 
         clock.set(s.startsAt().plus(Duration.ofMinutes(25))); // 시작 25분 뒤, 종료 전
 
-        EntryInfo entered = entry.enter(token);
+        EntryInfoResponse entered = entry.enter(token);
         assertThat(entered.phase()).isEqualTo(ExamSession.Phase.LIVE);
         entry.consent(token, consent());
-        EntryInfo started = entry.start(token);
+        EntryInfoResponse started = entry.start(token);
         assertThat(started.attempts()).containsOnlyKeys(TASK);
 
         clock.set(s.endsAt()); // 종료 시각이 되면 그때는 막힌다
@@ -543,7 +543,7 @@ class ExamFlowIntegrationTest {
     }
 
     private String startedParticipant(Long company, String email) {
-        SessionSummary s = createSession(company, true);
+        SessionSummaryResponse s = createSession(company, true);
         String token = invite(s.id(), email);
         clock.set(s.startsAt());
         entry.consent(token, consent());
@@ -563,22 +563,22 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("과제별 제출: 한 과제만 제출하면 그 과제만 넘기고, 모든 과제를 내면 대상자도 제출 완료")
     void submitPerTask() {
-        SessionSummary s = sessions.create(new SessionRequest(119L, "두 과제", clock.instant().plus(Duration.ofMinutes(10)),
+        SessionSummaryResponse s = sessions.create(new ExamSessionRequest(119L, "두 과제", clock.instant().plus(Duration.ofMinutes(10)),
                 clock.instant().plus(Duration.ofMinutes(70)), false, List.of(TASK, TASK2)), 1L);
         String token = invite(s.id(), "multi@test.dev");
         clock.set(s.startsAt());
-        EntryInfo started = entry.start(token);
+        EntryInfoResponse started = entry.start(token);
         String a1 = started.attempts().get(TASK);
         String a2 = started.attempts().get(TASK2);
 
-        EntryInfo afterFirst = entry.submitTask(token, TASK);
+        EntryInfoResponse afterFirst = entry.submitTask(token, TASK);
 
         verify(attempts).submitOne(a1);
         verify(attempts, times(0)).submitOne(a2);
         assertThat(afterFirst.submittedAt()).isNull();
         assertThat(afterFirst.tasks()).extracting(t -> t.taskId() + ":" + t.submitted()).containsExactly(TASK + ":true", TASK2 + ":false");
 
-        EntryInfo afterAll = entry.submitTask(token, TASK2);
+        EntryInfoResponse afterAll = entry.submitTask(token, TASK2);
 
         assertThat(afterAll.submittedAt()).isEqualTo(s.startsAt());
         assertThatThrownBy(() -> entry.submitTask(token, "not-in-session")).isInstanceOf(NoSuchElementException.class);
@@ -596,7 +596,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("종료 시각이 지나면 시작한 응시자만 자동 제출하고, 직접 제출한 응시자의 제출 시각은 그대로 둔다")
     void autoSubmitAtEnd() {
-        SessionSummary s = createSession(108L, false);
+        SessionSummaryResponse s = createSession(108L, false);
         String solving = invite(s.id(), "solving@test.dev");
         String manual = invite(s.id(), "manual@test.dev");
         String absent = invite(s.id(), "absent@test.dev");
@@ -625,7 +625,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("자동 제출 마무리에 실패한 응시가 있으면 회차를 닫지 않고 간격을 두고 다시 시도하다가, 한계를 넘기면 포기하고 닫는다")
     void autoSubmitRetriesThenGivesUp() {
-        SessionSummary s = createSession(122L, false);
+        SessionSummaryResponse s = createSession(122L, false);
         String token = invite(s.id(), "retry@test.dev");
         clock.set(s.startsAt());
         entry.start(token);
@@ -648,7 +648,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("재시도에서 마무리에 성공하면 그때 회차를 닫는다")
     void autoSubmitRetrySucceeds() {
-        SessionSummary s = createSession(123L, false);
+        SessionSummaryResponse s = createSession(123L, false);
         String token = invite(s.id(), "retry2@test.dev");
         clock.set(s.startsAt());
         entry.start(token);
@@ -670,7 +670,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("복구: 포기하고 닫힌 회차의 멈춘 응시를 다시 채점으로 넘긴다")
     void rescueStuckAttempts() {
-        SessionSummary s = createSession(124L, false);
+        SessionSummaryResponse s = createSession(124L, false);
         String token = invite(s.id(), "rescue@test.dev");
         clock.set(s.startsAt());
         entry.start(token);
@@ -692,7 +692,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("복구: 아직 끝나지 않은 회차나 취소한 회차에는 쓸 수 없다")
     void rescueOnlyEndedSessions() {
-        SessionSummary s = createSession(125L, false);
+        SessionSummaryResponse s = createSession(125L, false);
         invite(s.id(), "early@test.dev");
 
         assertThatThrownBy(() -> autoSubmit.rescue(s.id())).hasMessageContaining("종료");
@@ -702,7 +702,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("종료 뒤에는 시작도 직접 제출도 막힌다")
     void blockedAfterEnd() {
-        SessionSummary s = createSession(109L, false);
+        SessionSummaryResponse s = createSession(109L, false);
         String token = invite(s.id(), "late@test.dev");
         clock.set(s.endsAt());
 
@@ -715,7 +715,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("카메라 이벤트와 사진 1장을 저장하고, 회차 종료 7일이 지나면 사진만 지운다")
     void proctorEventAndPurge() {
-        SessionSummary s = createSession(110L, true);
+        SessionSummaryResponse s = createSession(110L, true);
         String token = startWithConsent(s, "cam@test.dev");
 
         var view = proctor.record(token, camEvent(s.startsAt().plusSeconds(30), "data:image/jpeg;base64,"
@@ -742,7 +742,7 @@ class ExamFlowIntegrationTest {
     @Autowired com.pair.domain.exam.service.SnapshotRetentionService retention;
 
     private Long sessionWithPhoto() {
-        SessionSummary s = createSession(140L, true);
+        SessionSummaryResponse s = createSession(140L, true);
         String token = startWithConsent(s, "ext@test.dev");
         proctor.record(token, camEvent(s.startsAt().plusSeconds(30), jpegB64()));
         return s.id();
@@ -801,11 +801,11 @@ class ExamFlowIntegrationTest {
 
     @Autowired com.pair.domain.exam.service.EvidenceClipService clips;
 
-    private com.pair.domain.exam.dto.ExamDtos.ClipFrameRequest frame(ProctorEvent.Source src, int offsetMs) {
-        return new com.pair.domain.exam.dto.ExamDtos.ClipFrameRequest(src, offsetMs, jpegB64());
+    private com.pair.domain.exam.dto.ClipFrameRequest frame(ProctorEvent.Source src, int offsetMs) {
+        return new com.pair.domain.exam.dto.ClipFrameRequest(src, offsetMs, jpegB64());
     }
 
-    private ProctorEventRequest eventWithId(SessionSummary s, String clientId) {
+    private ProctorEventRequest eventWithId(SessionSummaryResponse s, String clientId) {
         return new ProctorEventRequest(ProctorEvent.Type.PHONE, ProctorEvent.Source.PHONE_CAM, s.startsAt().plusSeconds(60), 1500,
                 new BigDecimal("0.800"), null, null, clientId);
     }
@@ -813,11 +813,11 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("증거 구간: 이벤트에 앞뒤 사진을 올리고 콘솔에서 시간순으로 보며, 다시 올려도 중복되지 않는다")
     void clipUploadAndView() {
-        SessionSummary s = createSession(150L, true);
+        SessionSummaryResponse s = createSession(150L, true);
         String token = startWithConsent(s, "clip@test.dev");
         var ev = proctor.record(token, eventWithId(s, "clip-evt-0001"));
 
-        var req = new com.pair.domain.exam.dto.ExamDtos.ClipUploadRequest(List.of(
+        var req = new com.pair.domain.exam.dto.ClipUploadRequest(List.of(
                 frame(ProctorEvent.Source.PC_CAM, 3000), frame(ProctorEvent.Source.PHONE_CAM, -8000), frame(ProctorEvent.Source.PC_CAM, -500)));
         clips.upload(token, "clip-evt-0001", req);
         clips.upload(token, "clip-evt-0001", req); // 재전송
@@ -833,29 +833,29 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("증거 구간: 구간 밖 시각·24장 초과·브라우저 출처·모르는 이벤트는 거절한다")
     void clipRejectsBadInput() {
-        SessionSummary s = createSession(151L, true);
+        SessionSummaryResponse s = createSession(151L, true);
         String token = startWithConsent(s, "clip2@test.dev");
         proctor.record(token, eventWithId(s, "clip-evt-0002"));
 
-        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ExamDtos.ClipUploadRequest(
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(
                 List.of(frame(ProctorEvent.Source.PC_CAM, -9000))))).hasMessageContaining("구간");
-        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ExamDtos.ClipUploadRequest(
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(
                 List.of(frame(ProctorEvent.Source.BROWSER, 0))))).hasMessageContaining("카메라");
-        List<com.pair.domain.exam.dto.ExamDtos.ClipFrameRequest> many = new java.util.ArrayList<>();
+        List<com.pair.domain.exam.dto.ClipFrameRequest> many = new java.util.ArrayList<>();
         for (int i = 0; i < 25; i++) many.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 100));
-        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ExamDtos.ClipUploadRequest(many)))
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(many)))
                 .hasMessageContaining("24");
-        assertThatThrownBy(() -> clips.upload(token, "no-such-event", new com.pair.domain.exam.dto.ExamDtos.ClipUploadRequest(
+        assertThatThrownBy(() -> clips.upload(token, "no-such-event", new com.pair.domain.exam.dto.ClipUploadRequest(
                 List.of(frame(ProctorEvent.Source.PC_CAM, 0))))).isInstanceOf(NoSuchElementException.class);
     }
 
     @Test
     @DisplayName("증거 구간 사진도 보관 7일·연장을 따르고, 지나면 파일만 지운다")
     void clipFollowsRetention() {
-        SessionSummary s = createSession(152L, true);
+        SessionSummaryResponse s = createSession(152L, true);
         String token = startWithConsent(s, "clip3@test.dev");
         var ev = proctor.record(token, eventWithId(s, "clip-evt-0003"));
-        clips.upload(token, "clip-evt-0003", new com.pair.domain.exam.dto.ExamDtos.ClipUploadRequest(List.of(frame(ProctorEvent.Source.PC_CAM, 0))));
+        clips.upload(token, "clip-evt-0003", new com.pair.domain.exam.dto.ClipUploadRequest(List.of(frame(ProctorEvent.Source.PC_CAM, 0))));
 
         clock.set(s.endsAt().plus(Duration.ofDays(5)));
         retention.extend(s.id(), 9L);
@@ -879,12 +879,12 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("환경 점검 사진: 시작 전에도 방향과 함께 올리고, 콘솔에서 목록과 사진을 볼 수 있다")
     void envScanUploadAndView() {
-        SessionSummary s = createSession(126L, true);
+        SessionSummaryResponse s = createSession(126L, true);
         String token = invite(s.id(), "scan@test.dev");
 
-        var room = envScan.upload(token, new com.pair.domain.exam.dto.ExamDtos.EnvScanRequest(
+        var room = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
                 com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 45, List.of("person", "cell phone"), jpegB64()));
-        var desk = envScan.upload(token, new com.pair.domain.exam.dto.ExamDtos.EnvScanRequest(
+        var desk = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
                 com.pair.domain.exam.entity.EnvScanPhoto.Stage.DESK, null, List.of(), jpegB64()));
 
         assertThat(room.angle()).isEqualTo(45);
@@ -898,16 +898,16 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("환경 점검 사진 검증: 잘못된 링크, 감독 안 쓰는 회차, JPEG 아님, 끝난 회차, 장수 한도는 거절")
     void envScanRejects() {
-        SessionSummary s = createSession(127L, true);
+        SessionSummaryResponse s = createSession(127L, true);
         String token = invite(s.id(), "scan2@test.dev");
-        var jpeg = new com.pair.domain.exam.dto.ExamDtos.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(), jpegB64());
+        var jpeg = new com.pair.domain.exam.dto.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(), jpegB64());
 
         assertThatThrownBy(() -> envScan.upload("x".repeat(43), jpeg)).isInstanceOf(java.util.NoSuchElementException.class);
-        var png = new com.pair.domain.exam.dto.ExamDtos.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(),
+        var png = new com.pair.domain.exam.dto.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(),
                 Base64.getEncoder().encodeToString(new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2}));
         assertThatThrownBy(() -> envScan.upload(token, png)).hasMessageContaining("JPEG");
 
-        SessionSummary plain = createSession(128L, false);
+        SessionSummaryResponse plain = createSession(128L, false);
         String plainToken = invite(plain.id(), "plain@test.dev");
         assertThatThrownBy(() -> envScan.upload(plainToken, jpeg)).hasMessageContaining("감독");
 
@@ -923,10 +923,10 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("환경 점검 사진: 다른 회차 번호로는 볼 수 없고, 회차 종료 7일 뒤 사진만 지운다")
     void envScanScopeAndPurge() {
-        SessionSummary s = createSession(130L, true);
-        SessionSummary other = createSession(131L, true);
+        SessionSummaryResponse s = createSession(130L, true);
+        SessionSummaryResponse other = createSession(131L, true);
         String token = invite(s.id(), "scan3@test.dev");
-        var photo = envScan.upload(token, new com.pair.domain.exam.dto.ExamDtos.EnvScanRequest(
+        var photo = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
                 com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 90, List.of(), jpegB64()));
         Long pid = participant(s.id(), "scan3@test.dev").getId();
 
@@ -944,7 +944,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("사진 검증: JPEG 가 아니거나 브라우저 이벤트에 붙은 사진, 시험 시간 밖 이벤트는 거절")
     void proctorEventValidation() {
-        SessionSummary s = createSession(111L, true);
+        SessionSummaryResponse s = createSession(111L, true);
         String token = startWithConsent(s, "val@test.dev");
         String png = Base64.getEncoder().encodeToString(new byte[] {(byte) 0x89, 'P', 'N', 'G'});
 
@@ -959,7 +959,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("사진 없는 카메라 이벤트는 사유가 붙고, 사진이 있거나 브라우저 이벤트면 사유가 없다")
     void missingSnapshotReasonForUploadFailure() {
-        SessionSummary s = createSession(141L, true);
+        SessionSummaryResponse s = createSession(141L, true);
         String token = startWithConsent(s, "missing@test.dev");
         Instant at = s.startsAt().plusSeconds(30);
 
@@ -976,7 +976,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("사진 상한(300장)을 넘은 이벤트는 남기되 사유(LIMIT_EXCEEDED)를 기록한다")
     void snapshotLimitRecordsReason() {
-        SessionSummary s = createSession(142L, true);
+        SessionSummaryResponse s = createSession(142L, true);
         String token = startWithConsent(s, "limit@test.dev");
         Long pid = participant(s.id(), "limit@test.dev").getId();
         Instant at = s.startsAt().plusSeconds(30);
@@ -998,7 +998,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("같은 clientId 로 다시 보내면 이벤트를 또 만들지 않고, 사진이 빠졌었다면 같은 이벤트에 연결한다")
     void resendWithSameClientIdKeepsOneEvent() {
-        SessionSummary s = createSession(140L, true);
+        SessionSummaryResponse s = createSession(140L, true);
         String token = startWithConsent(s, "resend@test.dev");
         Long pid = participant(s.id(), "resend@test.dev").getId();
         Instant at = s.startsAt().plusSeconds(30);
@@ -1022,7 +1022,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("PC 시계가 몇 분 어긋난 이벤트는 버리지 않고 시험 시간 안쪽으로 맞춰 저장한다")
     void skewedEventTimeIsClamped() {
-        SessionSummary s = createSession(141L, true);
+        SessionSummaryResponse s = createSession(141L, true);
         String token = startWithConsent(s, "skew@test.dev");
 
         var early = proctor.record(token, camEvent(s.startsAt().minus(Duration.ofMinutes(3)), null));
@@ -1035,7 +1035,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("종료 뒤 30분 안에 늦게 도착한 이벤트는 받고, 그 뒤에는 거절한다")
     void lateEventWithinGraceIsAccepted() {
-        SessionSummary s = createSession(142L, true);
+        SessionSummaryResponse s = createSession(142L, true);
         String token = startWithConsent(s, "late@test.dev");
         Instant at = s.endsAt().minusSeconds(10);
 
@@ -1048,7 +1048,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("담당자 판정: OK/SUSPECT 를 남기고 메모·판정자·시각을 기록, 지우면 미확인으로 돌아간다")
     void reviewEvent() {
-        SessionSummary s = createSession(120L, true);
+        SessionSummaryResponse s = createSession(120L, true);
         String token = startWithConsent(s, "review@test.dev");
         var ev = proctor.record(token, camEvent(s.startsAt(), null));
 
@@ -1070,7 +1070,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("다른 회차 번호로는 사진을 볼 수 없다")
     void snapshotBelongsToSession() {
-        SessionSummary s = createSession(112L, true);
+        SessionSummaryResponse s = createSession(112L, true);
         String token = startWithConsent(s, "own@test.dev");
         var view = proctor.record(token, camEvent(s.startsAt(), Base64.getEncoder().encodeToString(JPEG)));
 
@@ -1082,7 +1082,7 @@ class ExamFlowIntegrationTest {
     @Test
     @DisplayName("결과: 점수 순위(동점 같은 순위), 분포, 감독 이벤트 합계, 데이터 절감률, CSV")
     void results() throws Exception {
-        SessionSummary s = createSession(113L, true);
+        SessionSummaryResponse s = createSession(113L, true);
         String a = startWithConsent(s, "a@test.dev");
         String b = startWithConsent(s, "b@test.dev");
         String c = startWithConsent(s, "c@test.dev");
@@ -1109,18 +1109,18 @@ class ExamFlowIntegrationTest {
 
     // ── 도우미 ──
 
-    private SessionSummary createSession(Long company, boolean proctoring) {
+    private SessionSummaryResponse createSession(Long company, boolean proctoring) {
         return sessions.create(request(company, proctoring), 1L);
     }
 
-    private SessionRequest request(Long company, boolean proctoring) {
-        return new SessionRequest(company, "2026 하반기 실전", clock.instant().plus(Duration.ofMinutes(10)),
+    private ExamSessionRequest request(Long company, boolean proctoring) {
+        return new ExamSessionRequest(company, "2026 하반기 실전", clock.instant().plus(Duration.ofMinutes(10)),
                 clock.instant().plus(Duration.ofMinutes(70)), proctoring, List.of(TASK));
     }
 
     /** 토큰 원문은 DB 에 없으므로 메일러로 가는 이벤트에서 꺼낸다 */
     private String invite(Long sessionId, String email) {
-        sessions.addParticipants(sessionId, List.of(new ParticipantInput("응시자", email)));
+        sessions.addParticipants(sessionId, List.of(new ParticipantInputDto("응시자", email)));
         return lastToken(participant(sessionId, email).getId());
     }
 
@@ -1136,7 +1136,7 @@ class ExamFlowIntegrationTest {
         return sessionRepository;
     }
 
-    private String startWithConsent(SessionSummary s, String email) {
+    private String startWithConsent(SessionSummaryResponse s, String email) {
         String token = invite(s.id(), email);
         entry.consent(token, consent());
         clock.set(s.startsAt());

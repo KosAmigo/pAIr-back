@@ -43,9 +43,9 @@ class TaskConsoleIntegrationTest {
 
     @Autowired MockMvc mvc;
     @MockitoBean JavaMailSender mail;
-    @Autowired com.pair.domain.task.repository.TaskRecordRepository taskRecords;
-    @Autowired com.pair.domain.task.repository.TaskFileRecordRepository taskFiles;
-    @Autowired com.pair.domain.task.repository.TaskQuestionRecordRepository taskQuestions;
+    @Autowired com.pair.domain.task.repository.TaskRepository taskRecords;
+    @Autowired com.pair.domain.task.repository.TaskFileRepository taskFiles;
+    @Autowired com.pair.domain.task.repository.TaskQuestionRepository taskQuestions;
 
     @org.junit.jupiter.api.BeforeEach
     void seedTasks() {

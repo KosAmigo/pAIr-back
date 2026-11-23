@@ -19,17 +19,17 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.entity.AttemptRecord;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.grader.service.PromptVersion;
-import com.pair.domain.scoring.service.ScoringService.CheckResult;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.grader.service.PromptVersionState;
+import com.pair.domain.scoring.service.ScoringService.CheckOutcome;
 import com.pair.domain.scoring.service.ScoringService.ItemResult;
-import com.pair.domain.scoring.service.ScoringService.JudgeCall;
-import com.pair.domain.scoring.repository.CheckResultRecordRepository;
-import com.pair.domain.scoring.repository.ScoringRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.scoring.service.ScoringService.JudgeUsage;
+import com.pair.domain.scoring.repository.CheckResultRepository;
+import com.pair.domain.scoring.repository.ScoringRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 
 /** 채점 결과 저장 순서: 리포트 JSON → 채점 표 DONE → 응시 DONE. 중간에 실패하면 채점은 ERROR (모델 호출 없음) */
@@ -47,36 +47,36 @@ class ScoringSaveOrderTest {
 
     @Autowired ScoringService scoring;
     @Autowired ScoringRecords records;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AttemptRegistry registry;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired com.pair.domain.scoring.repository.PromptVersionRecordRepository promptVersions;
-    @Autowired ScoringRecordRepository scorings;
-    @Autowired CheckResultRecordRepository results;
+    @Autowired TaskRepository taskRecords;
+    @Autowired com.pair.domain.scoring.repository.PromptVersionRepository promptVersions;
+    @Autowired ScoringRepository scorings;
+    @Autowired CheckResultRepository results;
 
     final Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    final PromptVersion version = new PromptVersion("20261120-1000_order-test", "order", null, now, null, "규칙", Map.of());
+    final PromptVersionState version = new PromptVersionState("20261120-1000_order-test", "order", null, now, null, "규칙", Map.of());
     String id;
 
     @BeforeEach
     void setUp() {
         TestTasks.seed(taskRecords);
         TestPromptVersions.ensure(promptVersions, version);
-        AttemptRecord r = registry.save(AttemptRecord.self(1L, 1L, "gpt-test", now));
+        Attempt r = registry.save(Attempt.self(1L, 1L, "gpt-test", now));
         id = String.valueOf(r.getId());
-        store.create(new Attempt(id, TestTasks.SELF_DEV, "openai", "gpt-test", now, null, null, null,
-                Attempt.Status.SCORING, List.of(), null, null), Map.of("src/A.java", "class A {}"));
+        store.create(new AttemptState(id, TestTasks.SELF_DEV, "openai", "gpt-test", now, null, null, null,
+                AttemptState.Status.SCORING, List.of(), null, null), Map.of("src/A.java", "class A {}"));
         store.save(store.load(id).withSubmitted(now.plusSeconds(1)));
         store.save(store.load(id).withFollowUps(List.of("답"), List.of("질문"), now.plusSeconds(2))); // 채점 중(SCORING)
     }
 
     private Map<String, Object> report(Object extra) {
-        CheckResult u0 = new CheckResult("U0", "라벨", "AUTO", 20, 0, "PASSED", List.of(), null);
+        CheckOutcome u0 = new CheckOutcome("U0", "라벨", "AUTO", 20, 0, "PASSED", List.of(), null);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("version", 2);
         m.put("total", 100);
         m.put("items", List.of(new ItemResult("usage", "AI 활용력", 20, 20, List.of(u0))));
-        m.put("judgeCalls", List.<JudgeCall>of());
+        m.put("judgeCalls", List.<JudgeUsage>of());
         if (extra != null) m.put("bad", extra);
         return m;
     }
@@ -89,7 +89,7 @@ class ScoringSaveOrderTest {
 
         assertThat(scorings.findById(sid).orElseThrow().getStatus()).isEqualTo("ERROR");
         assertThat(results.findByScoringId(sid)).isEmpty();
-        assertThat(store.load(id).status()).isNotEqualTo(Attempt.Status.DONE);
+        assertThat(store.load(id).status()).isNotEqualTo(AttemptState.Status.DONE);
     }
 
     @Test
@@ -99,6 +99,6 @@ class ScoringSaveOrderTest {
 
         assertThat(scorings.findById(sid).orElseThrow().getStatus()).isEqualTo("DONE");
         assertThat(results.findByScoringId(sid)).hasSize(1);
-        assertThat(store.load(id).status()).isEqualTo(Attempt.Status.DONE);
+        assertThat(store.load(id).status()).isEqualTo(AttemptState.Status.DONE);
     }
 }

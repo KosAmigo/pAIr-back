@@ -15,7 +15,7 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.SnapshotRetentionExtension;
 import com.pair.domain.exam.repository.ExamSessionRepository;
 import com.pair.domain.exam.repository.SnapshotRetentionExtensionRepository;
-import com.pair.domain.exam.dto.ExamDtos.RetentionView;
+import com.pair.domain.exam.dto.RetentionResponse;
 
 /**
  * 감독 사진 보관 기간. 기본은 회차 종료 후 snapshot-retention-days(7일).
@@ -48,13 +48,13 @@ public class SnapshotRetentionService {
     }
 
     @Transactional(readOnly = true)
-    public RetentionView view(Long sessionId) {
+    public RetentionResponse view(Long sessionId) {
         ExamSession s = session(sessionId);
         return viewOf(s, extensions.findBySessionIdOrderBySeqAsc(sessionId));
     }
 
     @Transactional
-    public RetentionView extend(Long sessionId, Long userId) {
+    public RetentionResponse extend(Long sessionId, Long userId) {
         ExamSession s = session(sessionId);
         List<SnapshotRetentionExtension> history = extensions.findBySessionIdOrderBySeqAsc(sessionId);
         if (history.size() >= MAX_EXTENSIONS) throw new IllegalStateException("보관 연장은 최대 " + MAX_EXTENSIONS + "번까지입니다.");
@@ -71,12 +71,12 @@ public class SnapshotRetentionService {
         return viewOf(s, extensions.findBySessionIdOrderBySeqAsc(sessionId));
     }
 
-    private RetentionView viewOf(ExamSession s, List<SnapshotRetentionExtension> history) {
+    private RetentionResponse viewOf(ExamSession s, List<SnapshotRetentionExtension> history) {
         Instant now = clock.instant();
         Instant expiresAt = expiryOf(s.getEndsAt(), history.size());
         boolean canExtend = history.size() < MAX_EXTENSIONS && now.isBefore(expiresAt) && !now.isBefore(expiresAt.minus(EXTEND_WINDOW));
-        return new RetentionView(expiresAt, history.size(), MAX_EXTENSIONS, EXTENSION_DAYS, canExtend,
-                history.stream().map(h -> new RetentionView.Entry(h.getSeq(), h.getExtendedBy(), h.getExtendedAt(), h.getDays(),
+        return new RetentionResponse(expiresAt, history.size(), MAX_EXTENSIONS, EXTENSION_DAYS, canExtend,
+                history.stream().map(h -> new RetentionResponse.Entry(h.getSeq(), h.getExtendedBy(), h.getExtendedAt(), h.getDays(),
                         h.getExpiresBefore(), h.getExpiresAfter())).toList());
     }
 

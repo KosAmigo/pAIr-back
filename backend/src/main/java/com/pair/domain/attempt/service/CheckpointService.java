@@ -1,8 +1,8 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -12,11 +12,11 @@ import java.util.TreeMap;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.attempt.entity.CheckpointFileRecord;
-import com.pair.domain.attempt.repository.CheckpointFileRecordRepository;
-import com.pair.domain.attempt.entity.CheckpointRecord;
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.attempt.entity.CheckpointFile;
+import com.pair.domain.attempt.repository.CheckpointFileRepository;
+import com.pair.domain.attempt.entity.Checkpoint;
+import com.pair.domain.attempt.repository.CheckpointRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 
 /**
  * 체크포인트: 질문을 보낼 때마다 그 순간의 파일 상태를 남긴다. 바로 앞 체크포인트(첫 번째는 과제 원본)와
@@ -30,14 +30,14 @@ public class CheckpointService {
 
     public record View(Long checkpointId, int turnNo, String label, Instant createdAt) {}
 
-    private final AttemptStore store;
-    private final TaskRepository tasks;
-    private final CheckpointRecordRepository checkpoints;
-    private final CheckpointFileRecordRepository checkpointFiles;
-    private final AttemptRecordRepository records;
+    private final AttemptStoreRepository store;
+    private final TaskDefRepository tasks;
+    private final CheckpointRepository checkpoints;
+    private final CheckpointFileRepository checkpointFiles;
+    private final AttemptRepository records;
 
-    public CheckpointService(AttemptStore store, TaskRepository tasks, CheckpointRecordRepository checkpoints,
-                             CheckpointFileRecordRepository checkpointFiles, AttemptRecordRepository records) {
+    public CheckpointService(AttemptStoreRepository store, TaskDefRepository tasks, CheckpointRepository checkpoints,
+                             CheckpointFileRepository checkpointFiles, AttemptRepository records) {
         this.store = store;
         this.tasks = tasks;
         this.checkpoints = checkpoints;
@@ -47,14 +47,14 @@ public class CheckpointService {
 
     /** 질문 턴과 그 체크포인트를 한 트랜잭션에 저장한다. files: 질문을 보낸 순간의 작업 파일 전체 */
     @Transactional
-    public void appendQuestion(String attemptId, ChatTurn question, Map<String, String> files) {
+    public void appendQuestion(String attemptId, ChatTurnState question, Map<String, String> files) {
         store.appendTurn(attemptId, question);
         Long id = Long.valueOf(attemptId);
         Map<String, String> before = restore(attemptId, Integer.MAX_VALUE);
-        CheckpointRecord cp = checkpoints.save(new CheckpointRecord(id, question.turn(), Instant.now()));
-        List<CheckpointFileRecord> changed = files.entrySet().stream()
+        Checkpoint cp = checkpoints.save(new Checkpoint(id, question.turn(), Instant.now()));
+        List<CheckpointFile> changed = files.entrySet().stream()
                 .filter(e -> !e.getValue().equals(before.get(e.getKey())))
-                .map(e -> new CheckpointFileRecord(cp.getId(), e.getKey(), e.getValue()))
+                .map(e -> new CheckpointFile(cp.getId(), e.getKey(), e.getValue()))
                 .toList();
         checkpointFiles.saveAll(changed);
     }
@@ -63,7 +63,7 @@ public class CheckpointService {
     @Transactional(readOnly = true)
     public Map<String, String> restore(String attemptId, int upTo) {
         Map<String, String> out = new TreeMap<>(tasks.visibleFiles(store.load(attemptId).taskId()));
-        for (CheckpointFileRecord f : checkpointFiles.findUpTo(Long.valueOf(attemptId), upTo)) {
+        for (CheckpointFile f : checkpointFiles.findUpTo(Long.valueOf(attemptId), upTo)) {
             out.put(f.getPath(), f.getContent());
         }
         return out;
@@ -72,9 +72,9 @@ public class CheckpointService {
     /** 내 체크포인트에 이름을 붙인다. 비어 있으면 이름을 지운다. 남의 체크포인트는 있는지도 알려 주지 않는다 */
     @Transactional
     public View rename(Long userId, Long checkpointId, String label) {
-        CheckpointRecord cp = checkpoints.findById(checkpointId)
+        Checkpoint cp = checkpoints.findById(checkpointId)
                 .orElseThrow(() -> new NoSuchElementException("없는 체크포인트입니다."));
-        AttemptRecord attempt = records.findById(cp.getAttemptId()).orElseThrow();
+        Attempt attempt = records.findById(cp.getAttemptId()).orElseThrow();
         if (!userId.equals(attempt.getUserId())) throw new NoSuchElementException("없는 체크포인트입니다.");
         String name = label == null ? "" : label.strip();
         if (name.length() > MAX_LABEL) throw new IllegalArgumentException("이름은 " + MAX_LABEL + "자 이하로 입력하세요.");

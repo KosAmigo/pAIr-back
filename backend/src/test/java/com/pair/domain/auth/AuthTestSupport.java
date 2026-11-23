@@ -1,6 +1,7 @@
 package com.pair.domain.auth;
 
-import com.pair.domain.auth.dto.AuthDtos;
+import com.pair.domain.auth.dto.AuthResponse;
+import com.pair.domain.auth.dto.SignupRequest;
 import com.pair.domain.auth.service.AuthService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,10 +25,10 @@ public final class AuthTestSupport {
 
     private AuthTestSupport() {}
 
-    public static AuthDtos.AuthResponse signup(AuthService auth, JavaMailSender mail, String name, String email) {
+    public static AuthResponse signup(AuthService auth, JavaMailSender mail, String name, String email) {
         prepareMail(mail);
         auth.requestEmailVerification(email);
-        return auth.signup(new AuthDtos.SignupRequest(name, email, "password123", sentCode(mail)));
+        return auth.signup(new SignupRequest(name, email, "password123", sentCode(mail)));
     }
 
     /** 가짜 메일 발송기가 빈 메일(MimeMessage)을 만들어 주도록 한다. 인증 메일이 HTML 메일이라 요청 전에 부른다 */

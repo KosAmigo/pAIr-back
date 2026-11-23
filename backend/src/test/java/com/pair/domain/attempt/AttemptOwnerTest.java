@@ -1,5 +1,6 @@
 package com.pair.domain.attempt;
 
+import com.pair.domain.auth.dto.AuthResponse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -20,14 +21,13 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.RequestBuilder;
 
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.entity.AttemptRecord;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -43,12 +43,12 @@ class AttemptOwnerTest {
     @Autowired AuthService auth;
     @Autowired AttemptService attempts;
     @Autowired AttemptRegistry registry;
-    @Autowired AttemptStore store;
-    @Autowired TaskRecordRepository tasks;
+    @Autowired AttemptStoreRepository store;
+    @Autowired TaskRepository tasks;
     @MockitoBean JavaMailSender mail; // 가입은 이메일 인증 코드가 필요해 메일을 가짜로 받는다
 
-    AuthDtos.AuthResponse owner;
-    AuthDtos.AuthResponse other;
+    AuthResponse owner;
+    AuthResponse other;
     String id;
 
     @BeforeEach
@@ -59,7 +59,7 @@ class AttemptOwnerTest {
         id = attempts.startSelf(TestTasks.SELF_DEV, owner.user().id()).id();
     }
 
-    private AuthDtos.AuthResponse signup() {
+    private AuthResponse signup() {
         return AuthTestSupport.signup(auth, mail, "Test", UUID.randomUUID() + "@example.com");
     }
 
@@ -114,9 +114,9 @@ class AttemptOwnerTest {
     @Test
     void 실전_응시는_로그인_없이_초대_토큰으로_들어오므로_이_검사를_하지_않는다() throws Exception {
         Instant now = Instant.now();
-        String live = registry.save(AttemptRecord.live(1L, 3L, "test", now)).getId().toString();
-        store.create(new Attempt(live, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
-                Attempt.Status.SOLVING, List.of(), null, null), Map.of());
+        String live = registry.save(Attempt.live(1L, 3L, "test", now)).getId().toString();
+        store.create(new AttemptState(live, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
+                AttemptState.Status.SOLVING, List.of(), null, null), Map.of());
         mvc.perform(get("/api/attempts/{id}", live)).andExpect(status().isOk());
     }
 }

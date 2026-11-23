@@ -20,16 +20,16 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.attempt.entity.AttemptRecord;
+import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.domain.scoring.service.Rubric;
 import com.pair.domain.scoring.service.ScoringCatalog;
 import com.pair.domain.scoring.service.ScoringRecords;
 import com.pair.domain.scoring.service.ScoringService;
 import com.pair.domain.scoring.repository.PromptCheckHintRepository;
-import com.pair.domain.scoring.repository.PromptVersionRecordRepository;
-import com.pair.domain.scoring.repository.ScoringRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.scoring.repository.PromptVersionRepository;
+import com.pair.domain.scoring.repository.ScoringRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 
 /** 프롬프트 버전 원본이 DB 인지: 저장·조회, 활성 하나, 옛 파일 가져오기, 채점의 version_id (H2, 모델 호출 없음) */
@@ -50,35 +50,35 @@ class PromptStoreTest {
 
     @Autowired PromptStore store;
     @Autowired LegacyPromptFileImporter importer;
-    @Autowired PromptVersionRecordRepository versions;
+    @Autowired PromptVersionRepository versions;
     @Autowired PromptCheckHintRepository hints;
     @Autowired ScoringService scoring;
     @Autowired ScoringRecords records;
     @Autowired ScoringCatalog catalog;
-    @Autowired ScoringRecordRepository scorings;
+    @Autowired ScoringRepository scorings;
     @Autowired AttemptRegistry registry;
-    @Autowired TaskRecordRepository taskRecords;
+    @Autowired TaskRepository taskRecords;
     @Autowired ObjectMapper json;
 
-    private PromptVersion draft(String name, String parent, String hint) {
-        Map<String, PromptVersion.CheckPrompt> checks = new LinkedHashMap<>();
-        checks.put("U1", new PromptVersion.CheckPrompt(hint, 99)); // 배점은 무시되고 기준표 값이 저장된다
-        return new PromptVersion(null, name, "메모 " + name, null, parent, "공통 규칙 " + name, checks);
+    private PromptVersionState draft(String name, String parent, String hint) {
+        Map<String, PromptVersionState.CheckPrompt> checks = new LinkedHashMap<>();
+        checks.put("U1", new PromptVersionState.CheckPrompt(hint, 99)); // 배점은 무시되고 기준표 값이 저장된다
+        return new PromptVersionState(null, name, "메모 " + name, null, parent, "공통 규칙 " + name, checks);
     }
 
     @Test
     void 시작하면_내장_기본_버전이_들어가고_활성이_하나다() {
-        assertThat(store.list()).extracting(PromptVersion::id).contains(PromptStore.DEFAULT_ID);
+        assertThat(store.list()).extracting(PromptVersionState::id).contains(PromptStore.DEFAULT_ID);
         assertThat(versions.findByActiveTrue()).hasSize(1);
         assertThat(store.activeId()).isNotBlank();
     }
 
     @Test
     void 저장한_버전을_목록과_조회에서_똑같이_읽는다() {
-        PromptVersion base = store.create(draft("저장 테스트", null, "  새 판정 기준  "));
-        PromptVersion child = store.create(draft("저장 테스트", base.id(), null));
+        PromptVersionState base = store.create(draft("저장 테스트", null, "  새 판정 기준  "));
+        PromptVersionState child = store.create(draft("저장 테스트", base.id(), null));
 
-        PromptVersion read = store.get(base.id());
+        PromptVersionState read = store.get(base.id());
         assertThat(read).isEqualTo(base);
         assertThat(read.name()).isEqualTo("저장 테스트");
         assertThat(read.note()).isEqualTo("메모 저장 테스트");
@@ -94,7 +94,7 @@ class PromptStoreTest {
         assertThat(child.parent()).isEqualTo(base.id());
         assertThat(child.checks().get("U1").hint()).isNotBlank(); // 비우면 코드 기본값
 
-        List<String> ids = store.list().stream().map(PromptVersion::id).toList();
+        List<String> ids = store.list().stream().map(PromptVersionState::id).toList();
         assertThat(store.list()).contains(base, child);
         assertThat(ids.indexOf(base.id())).isLessThan(ids.indexOf(child.id())); // 만든 순서
 
@@ -104,8 +104,8 @@ class PromptStoreTest {
 
     @Test
     void 활성_변경은_하나만_남긴다() {
-        PromptVersion a = store.create(draft("활성 A", null, null));
-        PromptVersion b = store.create(draft("활성 B", null, null));
+        PromptVersionState a = store.create(draft("활성 A", null, null));
+        PromptVersionState b = store.create(draft("활성 B", null, null));
         store.setActive(a.id());
         assertThat(store.activeId()).isEqualTo(a.id());
         store.setActive(b.id());
@@ -120,9 +120,9 @@ class PromptStoreTest {
     @Test
     void 옛_파일_가져오기는_여러_번_돌려도_중복이_없다() throws Exception {
         Path vdir = Files.createDirectories(graderDir.resolve("versions"));
-        PromptVersion parent = new PromptVersion("20260101-0900_legacy-a", "옛 A", "메모A", Instant.parse("2026-01-01T00:00:00Z"), null,
-                "규칙A", Map.of("U1", new PromptVersion.CheckPrompt("옛 기준", 4)));
-        PromptVersion child = new PromptVersion("20260102-0900_legacy-b", "옛 B", null, Instant.parse("2026-01-02T00:00:00Z"),
+        PromptVersionState parent = new PromptVersionState("20260101-0900_legacy-a", "옛 A", "메모A", Instant.parse("2026-01-01T00:00:00Z"), null,
+                "규칙A", Map.of("U1", new PromptVersionState.CheckPrompt("옛 기준", 4)));
+        PromptVersionState child = new PromptVersionState("20260102-0900_legacy-b", "옛 B", null, Instant.parse("2026-01-02T00:00:00Z"),
                 parent.id(), "규칙B", Map.of());
         // 파일 이름 순서와 생성 시각 순서가 달라도 parent 가 이어져야 한다
         Files.writeString(vdir.resolve("0.json"), json.writeValueAsString(child));
@@ -150,11 +150,11 @@ class PromptStoreTest {
     @Test
     void 채점은_활성_버전의_행_id를_남긴다() {
         TestTasks.seed(taskRecords);
-        PromptVersion v = store.create(draft("채점 연결", null, null));
+        PromptVersionState v = store.create(draft("채점 연결", null, null));
         store.setActive(v.id());
-        long attemptId = registry.save(AttemptRecord.self(1L, 1L, "gpt-test", Instant.now())).getId();
+        long attemptId = registry.save(Attempt.self(1L, 1L, "gpt-test", Instant.now())).getId();
 
-        PromptVersion used = scoring.defaultOptions().version();
+        PromptVersionState used = scoring.defaultOptions().version();
         assertThat(used.id()).isEqualTo(v.id());
         long sid = records.start(attemptId, used);
 

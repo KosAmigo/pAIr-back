@@ -13,7 +13,7 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorNotice;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.repository.ProctorNoticeRepository;
-import com.pair.domain.exam.dto.ExamDtos.NoticeView;
+import com.pair.domain.exam.dto.NoticeResponse;
 
 /**
  * 콘솔이 응시자에게 보내는 안내 메시지 (일방향, 자유 입력). 시험 전·중 모두 보낼 수 있다.
@@ -35,7 +35,7 @@ public class NoticeService {
     }
 
     @Transactional
-    public NoticeView send(Long sessionId, Long participantId, String message, Long senderId) {
+    public NoticeResponse send(Long sessionId, Long participantId, String message, Long senderId) {
         Instant now = clock.instant();
         ExamParticipant p = inSession(sessionId, participantId);
         String text = message == null ? "" : message.trim();
@@ -44,20 +44,20 @@ public class NoticeService {
         ExamSession s = p.getSession();
         if (s.getCanceledAt() != null) throw new IllegalStateException("취소된 회차에는 안내를 보낼 수 없습니다.");
         if (now.isAfter(s.getEndsAt())) throw new IllegalStateException("끝난 회차에는 안내를 보낼 수 없습니다.");
-        return NoticeView.from(notices.save(new ProctorNotice(p.getId(), text, senderId, now)));
+        return NoticeResponse.from(notices.save(new ProctorNotice(p.getId(), text, senderId, now)));
     }
 
     /** 콘솔: 이 대상자에게 보낸 메시지와 읽음 여부 (보낸 순서) */
     @Transactional(readOnly = true)
-    public List<NoticeView> listOf(Long sessionId, Long participantId) {
+    public List<NoticeResponse> listOf(Long sessionId, Long participantId) {
         ExamParticipant p = inSession(sessionId, participantId);
-        return notices.findByParticipantIdOrderByIdAsc(p.getId()).stream().map(NoticeView::from).toList();
+        return notices.findByParticipantIdOrderByIdAsc(p.getId()).stream().map(NoticeResponse::from).toList();
     }
 
     /** 응시자: 내가 받은 메시지 (끝난 뒤에도 읽을 수 있다) */
     @Transactional(readOnly = true)
-    public List<NoticeView> forEntry(String token) {
-        return notices.findByParticipantIdOrderByIdAsc(byToken(token).getId()).stream().map(NoticeView::from).toList();
+    public List<NoticeResponse> forEntry(String token) {
+        return notices.findByParticipantIdOrderByIdAsc(byToken(token).getId()).stream().map(NoticeResponse::from).toList();
     }
 
     /** 응시자가 확인을 누름. 이미 읽은 메시지는 처음 읽은 시각을 지킨다. 남의 메시지는 없는 것으로 본다 */

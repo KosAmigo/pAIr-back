@@ -7,13 +7,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.entity.AttemptRecord;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 
 /**
- * 회차와 응시 파일(AttemptStore) 사이의 경계. 응시 행(DB attempts)은 회차 서비스가 만들고, 여기서는 파일만 다룬다.
+ * 회차와 응시 파일(AttemptStoreRepository) 사이의 경계. 응시 행(DB attempts)은 회차 서비스가 만들고, 여기서는 파일만 다룬다.
  * submitAll/submitOne 은 아직 풀고 있는(SOLVING) 응시만 제출한다. 이미 제출했거나 후속 질문 단계면 건드리지 않는다.
  * 제출 뒤 후속 질문·채점 큐는 AttemptService 가 이어 받는다.
  * finishAll 은 시험 종료 시각에 쓴다. 후속 질문 단계에서 멈춘 응시를 빈 답으로 마무리해 채점까지 보낸다.
@@ -23,15 +23,15 @@ public class AttemptSubmitter {
     private static final Logger log = LoggerFactory.getLogger(AttemptSubmitter.class);
 
     private final AttemptService attempts;
-    private final AttemptStore store;
+    private final AttemptStoreRepository store;
 
-    public AttemptSubmitter(AttemptService attempts, AttemptStore store) {
+    public AttemptSubmitter(AttemptService attempts, AttemptStoreRepository store) {
         this.attempts = attempts;
         this.store = store;
     }
 
     /** 응시 행에 작업 파일을 만든다. definitionCode: 과제 내용이 있는 원본 code */
-    public void prepare(AttemptRecord r, String definitionCode) {
+    public void prepare(Attempt r, String definitionCode) {
         attempts.createFiles(r, definitionCode);
     }
 
@@ -70,14 +70,14 @@ public class AttemptSubmitter {
     }
 
     private void finishOne(String attemptId) {
-        if (store.load(attemptId).status() == Attempt.Status.SOLVING) attempts.submit(attemptId);
-        if (store.load(attemptId).status() == Attempt.Status.FOLLOWUP) attempts.followUps(attemptId, List.of());
+        if (store.load(attemptId).status() == AttemptState.Status.SOLVING) attempts.submit(attemptId);
+        if (store.load(attemptId).status() == AttemptState.Status.FOLLOWUP) attempts.followUps(attemptId, List.of());
     }
 
     /** 과제 하나 제출. 이미 제출했으면 false (두 번 불러도 안전) */
     public boolean submitOne(String attemptId) {
         try {
-            if (store.load(attemptId).status() != Attempt.Status.SOLVING) return false;
+            if (store.load(attemptId).status() != AttemptState.Status.SOLVING) return false;
             attempts.submit(attemptId);
             return true;
         } catch (IllegalStateException e) {

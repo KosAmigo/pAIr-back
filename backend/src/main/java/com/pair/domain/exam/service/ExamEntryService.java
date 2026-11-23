@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.domain.exam.exception.LinkExpiredException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -10,7 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.attempt.entity.AttemptRecord;
+import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.exam.entity.ExamParticipant;
@@ -18,11 +19,11 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorConsent;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.repository.ProctorConsentRepository;
-import com.pair.domain.exam.dto.ExamDtos.ConsentRequest;
-import com.pair.domain.exam.dto.ExamDtos.EntryInfo;
-import com.pair.domain.exam.dto.ExamDtos.TaskStatus;
+import com.pair.domain.exam.dto.ConsentRequest;
+import com.pair.domain.exam.dto.EntryInfoResponse;
+import com.pair.domain.exam.dto.TaskStatusDto;
 import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.entity.TaskRecord;
+import com.pair.domain.task.entity.Task;
 
 /**
  * 응시자 입장 흐름: 링크(초대 토큰) → 시험 정보 → 동의·환경 점검 → 대기실 → 시작 → 과제별 제출.
@@ -61,12 +62,12 @@ public class ExamEntryService {
     }
 
     @Transactional(readOnly = true)
-    public EntryInfo info(String token) {
+    public EntryInfoResponse info(String token) {
         return view(find(token), clock.instant());
     }
 
     @Transactional
-    public EntryInfo consent(String token, ConsentRequest req) {
+    public EntryInfoResponse consent(String token, ConsentRequest req) {
         Instant now = clock.instant();
         ExamParticipant p = find(token);
         requireNotEnded(p.getSession(), now);
@@ -87,7 +88,7 @@ public class ExamEntryService {
      * 시험을 시작한 뒤 나갔다가 다시 들어오는 것은 마지막 연결 뒤 5분(유예) 안에만 된다. 넘으면 링크가 만료된다.
      */
     @Transactional(noRollbackFor = LinkExpiredException.class)
-    public EntryInfo enter(String token) {
+    public EntryInfoResponse enter(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
         requireNotEnded(p.getSession(), now);
@@ -98,7 +99,7 @@ public class ExamEntryService {
 
     /** 시험 시작. 과제마다 응시를 만든다. 두 번 눌러도 응시는 한 번만 만든다 (행 잠금). 이미 시작했다면 유예 안의 재입장으로 본다 */
     @Transactional(noRollbackFor = LinkExpiredException.class)
-    public EntryInfo start(String token) {
+    public EntryInfoResponse start(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
         ExamSession s = p.getSession();
@@ -117,11 +118,11 @@ public class ExamEntryService {
         else p.markSeen(now);
         p.markEntered(now);
         // 과제마다 응시 행(DB)을 만들고 그 ID 로 작업 파일을 만든다. 이미 있는 과제는 건너뛴다 (대상자 행 잠금으로 한 번만)
-        var have = pr.records().stream().map(AttemptRecord::getTaskId).collect(java.util.stream.Collectors.toSet());
+        var have = pr.records().stream().map(Attempt::getTaskId).collect(java.util.stream.Collectors.toSet());
         for (Long taskId : s.getTaskIds()) {
             if (have.contains(taskId)) continue;
-            TaskRecord t = catalog.require(taskId);
-            AttemptRecord r = registry.save(AttemptRecord.live(p.getId(), taskId, props.assistant().model(), now));
+            Task t = catalog.require(taskId);
+            Attempt r = registry.save(Attempt.live(p.getId(), taskId, props.assistant().model(), now));
             attempts.prepare(r, catalog.definitionCode(t));
         }
         return view(p, now);
@@ -154,7 +155,7 @@ public class ExamEntryService {
      * 모든 과제를 제출하면 대상자도 제출 완료로 본다. 종료 시각이 지나면 스케줄러가 남은 과제를 대신 제출하므로 막는다.
      */
     @Transactional
-    public EntryInfo submitTask(String token, String taskId) {
+    public EntryInfoResponse submitTask(String token, String taskId) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
         ParticipantProgress.Progress pr = progress.of(p);
@@ -170,7 +171,7 @@ public class ExamEntryService {
 
     /** 남은 과제를 모두 직접 제출 (시험 끝내기) */
     @Transactional
-    public EntryInfo submit(String token) {
+    public EntryInfoResponse submit(String token) {
         Instant now = clock.instant();
         ExamParticipant p = lock(token);
         ParticipantProgress.Progress pr = progress.of(p);
@@ -209,15 +210,15 @@ public class ExamEntryService {
         if (s.phase(now) == ExamSession.Phase.ENDED) throw new IllegalStateException("이미 끝난 시험입니다.");
     }
 
-    private EntryInfo view(ExamParticipant p, Instant now) {
+    private EntryInfoResponse view(ExamParticipant p, Instant now) {
         ExamSession s = p.getSession();
         ParticipantProgress.Progress pr = progress.of(p);
         List<String> codes = catalog.codesInOrder(s.getTaskIds());
-        List<TaskStatus> tasks = codes.stream()
-                .map(code -> new TaskStatus(code, pr.attempts().get(code), pr.submitted().getOrDefault(code, false)))
+        List<TaskStatusDto> tasks = codes.stream()
+                .map(code -> new TaskStatusDto(code, pr.attempts().get(code), pr.submitted().getOrDefault(code, false)))
                 .toList();
         boolean linkExpired = s.phase(now) == ExamSession.Phase.LIVE && ConnectionGrace.isExpired(p, pr.started(), pr.finished(), now);
-        return new EntryInfo(s.getTitle(), null, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
+        return new EntryInfoResponse(s.getTitle(), null, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
                 consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks, linkExpired);
     }
 }

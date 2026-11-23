@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.service;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import com.pair.global.config.TaskGenProperties;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,12 +53,12 @@ public class BizTaskGenerator extends TaskGenerator<BizDraft> {
     }
 
     @Override
-    protected String system(TaskGenForm form) {
+    protected String system(TaskGenRequest form) {
         return SYSTEM.formatted(form.minutes(), depth(form.minutes()));
     }
 
     @Override
-    protected String user(TaskGenForm form, List<CheckResult> failed) {
+    protected String user(TaskGenRequest form, List<GenCheckResult> failed) {
         StringBuilder sb = new StringBuilder();
         sb.append("제한 시간: ").append(form.minutes()).append("분\n")
                 .append("주제: ").append(form.topic()).append('\n')
@@ -66,7 +66,7 @@ public class BizTaskGenerator extends TaskGenerator<BizDraft> {
                 .append("위 조건으로 과제를 만들어 주세요.");
         if (!failed.isEmpty()) {
             sb.append("\n\n앞서 만든 과제는 자동 확인에서 아래 검사에 실패했습니다. 이 문제를 고쳐 과제를 처음부터 다시 만들어 주세요.");
-            for (CheckResult c : failed) sb.append("\n- ").append(c.name()).append(": ").append(c.detail());
+            for (GenCheckResult c : failed) sb.append("\n- ").append(c.name()).append(": ").append(c.detail());
         }
         return sb.toString();
     }
@@ -77,7 +77,7 @@ public class BizTaskGenerator extends TaskGenerator<BizDraft> {
     }
 
     @Override
-    protected List<GenCheck<BizDraft>> checks(TaskGenForm form, BizDraft draft) {
+    protected List<GenCheck<BizDraft>> checks(TaskGenRequest form, BizDraft draft) {
         return BizChecks.forDraft(pdf, solver, props.solverModel(), draft, form.minutes());
     }
 
@@ -90,7 +90,7 @@ public class BizTaskGenerator extends TaskGenerator<BizDraft> {
     }
 
     @Override
-    protected String save(TaskGenForm form, BizDraft draft, GenReport report, long adminId) {
+    protected String save(TaskGenRequest form, BizDraft draft, GenReport report, long adminId) {
         return writer.saveBiz(form, draft, report, adminId);
     }
 }

@@ -1,7 +1,7 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.attempt.service.Attempt;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -30,10 +30,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.ChatAttachmentService.Ref;
-import com.pair.domain.attempt.entity.ChatAttachmentRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.attempt.entity.ChatAttachment;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
@@ -58,12 +58,12 @@ class ReportQueryCostTest {
     }
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AuthService auth;
     @Autowired EntityManagerFactory emf;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
     @Autowired MockMvc mvc;
     @MockitoBean JavaMailSender mail;
     @MockitoBean AssistantClient assistant;
@@ -90,13 +90,13 @@ class ReportQueryCostTest {
         for (int i = 0; i < 3; i++) attempts.chat(devId, "질문 " + i, List.of(new Ref("ATTEMPT_FILE", bigFile, null)), null);
         store.writeReport(devId, Map.of("transcript", List.of(Map.of("turn", 1, "role", "user", "text", "질문"))));
         var t = java.time.Instant.now();
-        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
 
         Statistics stats = emf.unwrap(SessionFactory.class).getStatistics();
         stats.clear();
         mvc.perform(get("/api/attempts/{id}/report", devId).header("Authorization", "Bearer " + token)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.report.transcript[0].attachments[0].chars").isNumber());
-        long attachmentRows = stats.getEntityStatistics(ChatAttachmentRecord.class.getName()).getLoadCount();
+        long attachmentRows = stats.getEntityStatistics(ChatAttachment.class.getName()).getLoadCount();
         System.out.println("[report cost] statements=" + stats.getPrepareStatementCount() + ", attachment entities loaded=" + attachmentRows);
 
         // 길이만 필요한데 원문(최대 3만 자 × 5개 × 질문 수)을 통째로 읽으면 안 된다
@@ -114,7 +114,7 @@ class ReportQueryCostTest {
             store.writeReport(id, Map.of("version", 2, "total", 80, "items", List.of(Map.of("key", "d1", "score", 10)),
                     "transcript", List.of(Map.of("turn", 1, "role", "user", "text", "질문"))));
             var t = java.time.Instant.now();
-            store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+            store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
             ids.add(id);
         }
         Statistics stats = emf.unwrap(SessionFactory.class).getStatistics();

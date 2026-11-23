@@ -1,6 +1,6 @@
 package com.pair.domain.company.controller;
 
-import com.pair.domain.company.dto.CompanyInquiryDtos;
+import com.pair.domain.company.dto.InquiryResponse;
 import com.pair.domain.company.service.CompanyInquiryService;
 import java.nio.charset.StandardCharsets;
 
@@ -37,7 +37,7 @@ public class CompanyInquiryController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<CompanyInquiryDtos.InquiryView> submit(
+    public ResponseEntity<InquiryResponse> submit(
             @RequestParam String companyName,
             @RequestParam String businessNo,
             @RequestParam String contactName,

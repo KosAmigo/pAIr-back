@@ -1,9 +1,10 @@
 package com.pair.domain.question;
 
-import com.pair.domain.question.entity.QuestionResultRecord;
-import com.pair.domain.question.repository.ChoiceAnswerRecordRepository;
-import com.pair.domain.question.repository.QuestionResultRecordRepository;
-import com.pair.domain.question.repository.TextAnswerRecordRepository;
+import com.pair.domain.auth.dto.AuthResponse;
+import com.pair.domain.question.entity.QuestionResult;
+import com.pair.domain.question.repository.ChoiceAnswerRepository;
+import com.pair.domain.question.repository.QuestionResultRepository;
+import com.pair.domain.question.repository.TextAnswerRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -26,25 +27,24 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.attempt.service.Attempt;
+import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.grader.service.PromptVersion;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.grader.service.PromptVersionState;
 import com.pair.domain.scoring.service.ScoringRecords;
 import com.pair.domain.scoring.service.ScoringService;
 import com.pair.domain.scoring.service.ScoringTestAccess;
 import com.pair.domain.scoring.service.TestPromptVersions;
-import com.pair.domain.scoring.repository.PromptVersionRecordRepository;
-import com.pair.domain.scoring.repository.ScoringRecordRepository;
-import com.pair.domain.task.entity.QuestionChoiceRecord;
-import com.pair.domain.task.repository.QuestionChoiceRecordRepository;
-import com.pair.domain.task.entity.ShortAnswerKeyRecord;
-import com.pair.domain.task.repository.ShortAnswerKeyRecordRepository;
-import com.pair.domain.task.entity.TaskQuestionRecord;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.scoring.repository.PromptVersionRepository;
+import com.pair.domain.scoring.repository.ScoringRepository;
+import com.pair.domain.task.entity.QuestionChoice;
+import com.pair.domain.task.repository.QuestionChoiceRepository;
+import com.pair.domain.task.entity.ShortAnswerKey;
+import com.pair.domain.task.repository.ShortAnswerKeyRepository;
+import com.pair.domain.task.entity.TaskQuestion;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
@@ -61,22 +61,22 @@ class QuestionApiTest {
     @Autowired ObjectMapper json;
     @Autowired AuthService auth;
     @Autowired AttemptService attempts;
-    @Autowired AttemptStore store;
-    @Autowired TaskRecordRepository tasks;
-    @Autowired TaskQuestionRecordRepository questions;
-    @Autowired QuestionChoiceRecordRepository choices;
-    @Autowired ShortAnswerKeyRecordRepository keys;
-    @Autowired ChoiceAnswerRecordRepository choiceAnswers;
-    @Autowired TextAnswerRecordRepository textAnswers;
-    @Autowired QuestionResultRecordRepository results;
+    @Autowired AttemptStoreRepository store;
+    @Autowired TaskRepository tasks;
+    @Autowired TaskQuestionRepository questions;
+    @Autowired QuestionChoiceRepository choices;
+    @Autowired ShortAnswerKeyRepository keys;
+    @Autowired ChoiceAnswerRepository choiceAnswers;
+    @Autowired TextAnswerRepository textAnswers;
+    @Autowired QuestionResultRepository results;
     @Autowired ScoringService scoring;
     @Autowired ScoringRecords scoringRecords;
-    @Autowired PromptVersionRecordRepository promptVersions;
-    @Autowired ScoringRecordRepository scorings;
+    @Autowired PromptVersionRepository promptVersions;
+    @Autowired ScoringRepository scorings;
     @MockitoBean JavaMailSender mail;
 
-    AuthDtos.AuthResponse owner;
-    AuthDtos.AuthResponse other;
+    AuthResponse owner;
+    AuthResponse other;
     String id;
     long single, multi, shortQ, devQuestion;
     long singleA, singleB, multiA, multiB, multiC;
@@ -102,7 +102,7 @@ class QuestionApiTest {
         multiB = choice(multi, 2, "나", false);
         multiC = choice(multi, 3, "다", true);
         shortQ = question(BIZ_TASK, "SHORT", 3, 3);
-        keys.save(new ShortAnswerKeyRecord(shortQ, "8430"));
+        keys.save(new ShortAnswerKey(shortQ, "8430"));
         devQuestion = question(DEV_TASK, "SINGLE", 1, 5);
         choice(devQuestion, 1, "다른 과제 보기", true);
 
@@ -112,13 +112,13 @@ class QuestionApiTest {
     }
 
     private long question(long task, String type, int seq, int points) {
-        TaskQuestionRecord q = new TaskQuestionRecord(task, "TASK", type, seq, type + " 문항 " + seq);
+        TaskQuestion q = new TaskQuestion(task, "TASK", type, seq, type + " 문항 " + seq);
         q.setPoints(points);
         return questions.save(q).getId();
     }
 
     private long choice(long question, int seq, String text, boolean correct) {
-        return choices.save(new QuestionChoiceRecord(question, seq, text, correct)).getId();
+        return choices.save(new QuestionChoice(question, seq, text, correct)).getId();
     }
 
     private String token() {
@@ -242,16 +242,16 @@ class QuestionApiTest {
         putAnswer(id, single, "{\"choiceIds\":[]}", token()).andExpect(status().isOk());
 
         long sid = finishScoring(id);
-        assertThat(results.findByScoringId(sid)).extracting(QuestionResultRecord::getReason).containsOnly("답 없음");
-        assertThat(results.findByScoringId(sid)).extracting(QuestionResultRecord::getScore).containsOnly(0);
+        assertThat(results.findByScoringId(sid)).extracting(QuestionResult::getReason).containsOnly("답 없음");
+        assertThat(results.findByScoringId(sid)).extracting(QuestionResult::getScore).containsOnly(0);
     }
 
     // ── 채점 흐름 ─────────────────
 
     private long finishScoring(String attemptId) {
-        PromptVersion v = new PromptVersion("20261120-1100_question-test", "q", null, java.time.Instant.now(), null, "규칙", Map.of());
+        PromptVersionState v = new PromptVersionState("20261120-1100_question-test", "q", null, java.time.Instant.now(), null, "규칙", Map.of());
         TestPromptVersions.ensure(promptVersions, v);
-        if (store.load(attemptId).status() == Attempt.Status.SOLVING) {
+        if (store.load(attemptId).status() == AttemptState.Status.SOLVING) {
             attempts.submit(attemptId); // 제출 → 후속 질문 답 → 채점 중. 채점 모델은 부르지 않는다
             store.save(store.load(attemptId).withFollowUps(List.of("답"), List.of("질문"), java.time.Instant.now()));
         }
@@ -272,7 +272,7 @@ class QuestionApiTest {
         assertThat(rs).hasSize(3).allSatisfy(r -> assertThat(r.getMethod()).isEqualTo("AUTO"));
         assertThat(rs.stream().filter(r -> r.getQuestionId() == multi).findFirst().orElseThrow().getReason())
                 .isEqualTo("오답 (답: 가 / 정답: 가, 다)");
-        assertThat(store.load(id).status()).isEqualTo(Attempt.Status.DONE);
+        assertThat(store.load(id).status()).isEqualTo(AttemptState.Status.DONE);
 
         JsonNode body = getJson("/api/attempts/{id}/report");
         JsonNode q = body.path("questions");
@@ -293,7 +293,7 @@ class QuestionApiTest {
     @Test
     void 답을_안_하면_답_없음_0점이고_다시_채점하면_새_채점에_저장된다() throws Exception {
         long first = finishScoring(id);
-        assertThat(results.findByScoringId(first)).extracting(QuestionResultRecord::getReason).containsOnly("답 없음");
+        assertThat(results.findByScoringId(first)).extracting(QuestionResult::getReason).containsOnly("답 없음");
         putAnswer(id, single, "{\"choiceIds\":[" + singleB + "]}", token()).andExpect(status().isConflict()); // 채점이 끝난 응시는 답을 못 바꾼다
 
         long second = finishScoring(id);

@@ -1,6 +1,11 @@
 package com.pair.domain.auth.service;
 
-import com.pair.domain.auth.dto.AuthDtos;
+import com.pair.domain.auth.dto.AuthResponse;
+import com.pair.domain.auth.dto.LoginRequest;
+import com.pair.domain.auth.dto.PasswordChangeRequest;
+import com.pair.domain.auth.dto.SignupRequest;
+import com.pair.domain.auth.dto.UserResponse;
+import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.entity.RefreshSession;
 import com.pair.domain.auth.repository.AuthAccountRepository;
@@ -77,7 +82,7 @@ public class AuthService {
 
     /** 인증된 이메일로 일반 회원을 생성하고 로그인 상태로 사용할 세션 토큰을 발급한다. */
     @Transactional
-    public AuthDtos.AuthResponse signup(AuthDtos.SignupRequest request) {
+    public AuthResponse signup(SignupRequest request) {
         requireBcryptLength(request.password());
         String email = normalizeEmail(request.email());
         if (accounts.existsByEmailIgnoreCase(email)) throw new ConflictException("이미 가입된 이메일입니다.");
@@ -105,7 +110,7 @@ public class AuthService {
 
     /** 이메일과 BCrypt 비밀번호를 확인해 인증 실패 여부와 관계없이 같은 오류를 반환한다. */
     @Transactional
-    public AuthDtos.AuthResponse login(AuthDtos.Credentials request) {
+    public AuthResponse login(LoginRequest request) {
         String email = normalizeEmail(request.email());
         if (request.password().getBytes(StandardCharsets.UTF_8).length > 72) {
             throw new UnauthorizedException("이메일 또는 비밀번호가 올바르지 않습니다.");
@@ -127,7 +132,7 @@ public class AuthService {
 
     /** Refresh Token을 원자적으로 교체한다. */
     @Transactional
-    public AuthDtos.AuthResponse refresh(String refreshToken) {
+    public AuthResponse refresh(String refreshToken) {
         JwtTokens.VerifiedToken jwt = tokens.verify(refreshToken, "refresh")
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 리프레시 토큰입니다."));
         AuthAccount account = accounts.lockById(jwt.userId()).filter(AuthAccount::isActive)
@@ -151,7 +156,7 @@ public class AuthService {
     }
 
     @Transactional
-    public void changePassword(String accessToken, AuthDtos.PasswordChangeRequest request) {
+    public void changePassword(String accessToken, PasswordChangeRequest request) {
         JwtTokens.VerifiedToken jwt = requireAccess(accessToken);
         AuthAccount account = lockCurrentAccount(jwt);
         requirePassword(account, request.currentPassword());
@@ -161,7 +166,7 @@ public class AuthService {
     }
 
     @Transactional
-    public void withdraw(String accessToken, AuthDtos.WithdrawalRequest request) {
+    public void withdraw(String accessToken, WithdrawalRequest request) {
         JwtTokens.VerifiedToken jwt = requireAccess(accessToken);
         accounts.findCompanyIdById(jwt.userId()).ifPresent(accounts::lockByCompanyId);
         AuthAccount account = lockCurrentAccount(jwt);
@@ -201,7 +206,7 @@ public class AuthService {
         }
     }
 
-    private AuthDtos.AuthResponse createSession(AuthAccount account) {
+    private AuthResponse createSession(AuthAccount account) {
         Instant now = Instant.now();
         sessions.deleteExpired(now);
         String sessionId = InviteTokens.next();
@@ -211,9 +216,9 @@ public class AuthService {
         return response(account, refreshToken, now);
     }
 
-    private AuthDtos.AuthResponse response(AuthAccount account, String refreshToken, Instant now) {
-        return new AuthDtos.AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), now), refreshToken,
-                JwtTokens.ACCESS_LIFETIME.toSeconds(), AuthDtos.UserView.from(account));
+    private AuthResponse response(AuthAccount account, String refreshToken, Instant now) {
+        return new AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), now), refreshToken,
+                JwtTokens.ACCESS_LIFETIME.toSeconds(), UserResponse.from(account));
     }
 
     private static String normalizeEmail(String email) {

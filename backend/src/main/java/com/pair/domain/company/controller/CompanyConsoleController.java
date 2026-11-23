@@ -1,7 +1,9 @@
 package com.pair.domain.company.controller;
 
-import com.pair.domain.company.dto.CompanyInviteDtos;
-import com.pair.domain.company.dto.CompanyMemberDtos;
+import com.pair.domain.company.dto.CompanyInviteRequest;
+import com.pair.domain.company.dto.DelegateRequest;
+import com.pair.domain.company.dto.InviteSentResponse;
+import com.pair.domain.company.dto.MemberListResponse;
 import com.pair.domain.company.service.CompanyInviteService;
 import com.pair.domain.company.service.CompanyMemberService;
 import org.springframework.http.HttpStatus;
@@ -32,20 +34,20 @@ public class CompanyConsoleController {
     }
 
     @GetMapping("/members")
-    public CompanyMemberDtos.MemberList members(CurrentUser user) {
+    public MemberListResponse members(CurrentUser user) {
         return members.membersForManager(user);
     }
 
     @PostMapping("/proctor-invites")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public CompanyInviteDtos.InviteSent inviteProctor(CurrentUser user, @Valid @RequestBody CompanyInviteDtos.InviteRequest request) {
+    public InviteSentResponse inviteProctor(CurrentUser user, @Valid @RequestBody CompanyInviteRequest request) {
         invites.inviteProctor(user, request.email());
-        return new CompanyInviteDtos.InviteSent("감독관 초대 이메일을 발송했습니다.");
+        return new InviteSentResponse("감독관 초대 이메일을 발송했습니다.");
     }
 
     @PostMapping("/manager-delegation")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delegate(CurrentUser user, @Valid @RequestBody CompanyMemberDtos.DelegateRequest request) {
+    public void delegate(CurrentUser user, @Valid @RequestBody DelegateRequest request) {
         members.delegate(user, request.proctorUserId());
     }
 }

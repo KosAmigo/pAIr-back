@@ -1,6 +1,6 @@
 package com.pair.domain.task.controller;
 
-import com.pair.domain.task.dto.MaterialResponses;
+import com.pair.domain.task.service.MaterialResponses;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;

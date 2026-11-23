@@ -1,7 +1,7 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
@@ -15,14 +15,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 @Component
 class ReplayReports {
 
-    private final AttemptStore store;
+    private final AttemptStoreRepository store;
 
-    ReplayReports(AttemptStore store) {
+    ReplayReports(AttemptStoreRepository store) {
         this.store = store;
     }
 
-    Optional<JsonNode> scored(AttemptRecord r) {
-        if (r.getStatus() != Attempt.Status.DONE) return Optional.empty();
+    Optional<JsonNode> scored(Attempt r) {
+        if (r.getStatus() != AttemptState.Status.DONE) return Optional.empty();
         JsonNode rep;
         try {
             rep = store.readReport(String.valueOf(r.getId()));

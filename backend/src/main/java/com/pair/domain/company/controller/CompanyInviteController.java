@@ -1,6 +1,7 @@
 package com.pair.domain.company.controller;
 
-import com.pair.domain.company.dto.CompanyInviteDtos;
+import com.pair.domain.company.dto.InviteAcceptRequest;
+import com.pair.domain.company.dto.InviteInfoResponse;
 import com.pair.domain.company.service.CompanyInviteService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.CacheControl;
@@ -28,7 +29,7 @@ public class CompanyInviteController {
     }
 
     @GetMapping("/{token}")
-    public ResponseEntity<CompanyInviteDtos.InviteInfo> inspect(@PathVariable String token) {
+    public ResponseEntity<InviteInfoResponse> inspect(@PathVariable String token) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(invites.inspect(token));
     }
 
@@ -39,7 +40,7 @@ public class CompanyInviteController {
     }
 
     @PostMapping("/accept")
-    public ResponseEntity<com.pair.domain.auth.dto.AuthDtos.AuthResponse> accept(@Valid @RequestBody CompanyInviteDtos.AcceptRequest request) {
+    public ResponseEntity<com.pair.domain.auth.dto.AuthResponse> accept(@Valid @RequestBody InviteAcceptRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(invites.accept(request));
     }
 }

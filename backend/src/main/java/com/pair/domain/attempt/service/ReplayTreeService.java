@@ -1,7 +1,7 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,8 +14,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.pair.domain.attempt.entity.CheckpointRecord;
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
+import com.pair.domain.attempt.entity.Checkpoint;
+import com.pair.domain.attempt.repository.CheckpointRepository;
 
 /**
  * 복기 트리: 노드는 응시, 간선은 attempts.forked_from_checkpoint_id → checkpoints.attempt_id.
@@ -35,13 +35,13 @@ public class ReplayTreeService {
      * score 는 채점이 끝난(DONE) 응시만 있고, 아직 채점 전이거나 이전 형식 리포트(다시 채점 필요)면 null.
      */
     public record Node(String attemptId, String parentAttemptId, Integer forkedAtTurn, Long forkedFromCheckpointId,
-                       Attempt.Status status, Instant startedAt, Score score) {}
+                       AttemptState.Status status, Instant startedAt, Score score) {}
 
-    private final AttemptRecordRepository records;
-    private final CheckpointRecordRepository checkpoints;
+    private final AttemptRepository records;
+    private final CheckpointRepository checkpoints;
     private final ReplayReports reports;
 
-    public ReplayTreeService(AttemptRecordRepository records, CheckpointRecordRepository checkpoints, ReplayReports reports) {
+    public ReplayTreeService(AttemptRepository records, CheckpointRepository checkpoints, ReplayReports reports) {
         this.records = records;
         this.checkpoints = checkpoints;
         this.reports = reports;
@@ -49,14 +49,14 @@ public class ReplayTreeService {
 
     @Transactional(readOnly = true)
     public List<Node> tree(Long userId, String attemptId) {
-        AttemptRecord current = find(attemptId);
+        Attempt current = find(attemptId);
         // 남의 응시와 실전 응시는 있는지도 알려 주지 않는다
-        if (current.getMode() != AttemptRecord.Mode.SELF || !userId.equals(current.getUserId())) {
+        if (current.getMode() != Attempt.Mode.SELF || !userId.equals(current.getUserId())) {
             throw new NoSuchElementException("없는 응시입니다: " + attemptId);
         }
-        AttemptRecord root = current;
+        Attempt root = current;
         while (root.getForkedFromCheckpointId() != null) {
-            CheckpointRecord parent = checkpoints.findById(root.getForkedFromCheckpointId()).orElseThrow();
+            Checkpoint parent = checkpoints.findById(root.getForkedFromCheckpointId()).orElseThrow();
             root = records.findById(parent.getAttemptId()).orElseThrow();
         }
 
@@ -64,22 +64,22 @@ public class ReplayTreeService {
         out.add(new Node(String.valueOf(root.getId()), null, null, null, root.getStatus(), root.getStartedAt(), scoreOf(root)));
         List<Long> level = List.of(root.getId());
         while (!level.isEmpty()) {
-            Map<Long, CheckpointRecord> cps = checkpoints.findByAttemptIdIn(level).stream()
-                    .collect(Collectors.toMap(CheckpointRecord::getId, Function.identity()));
+            Map<Long, Checkpoint> cps = checkpoints.findByAttemptIdIn(level).stream()
+                    .collect(Collectors.toMap(Checkpoint::getId, Function.identity()));
             if (cps.isEmpty()) break;
-            List<AttemptRecord> children = records.findByForkedFromCheckpointIdIn(cps.keySet());
-            for (AttemptRecord c : children) {
-                CheckpointRecord cp = cps.get(c.getForkedFromCheckpointId());
+            List<Attempt> children = records.findByForkedFromCheckpointIdIn(cps.keySet());
+            for (Attempt c : children) {
+                Checkpoint cp = cps.get(c.getForkedFromCheckpointId());
                 out.add(new Node(String.valueOf(c.getId()), String.valueOf(cp.getAttemptId()), cp.getTurnNo(), cp.getId(),
                         c.getStatus(), c.getStartedAt(), scoreOf(c)));
             }
-            level = children.stream().map(AttemptRecord::getId).toList();
+            level = children.stream().map(Attempt::getId).toList();
         }
         return out;
     }
 
     /** 트리 노드의 점수(팀원 2 의 리포트: total, max, items[key,name,max,score]). 읽을 수 있는 리포트가 없어도 트리는 보여 준다 */
-    private Score scoreOf(AttemptRecord r) {
+    private Score scoreOf(Attempt r) {
         JsonNode rep = reports.scored(r).orElse(null);
         if (rep == null) return null;
         List<ItemScore> items = new ArrayList<>();
@@ -91,9 +91,9 @@ public class ReplayTreeService {
         return new Score(rep.path("total").asInt(), rep.path("max").asInt(), items);
     }
 
-    private AttemptRecord find(String attemptId) {
+    private Attempt find(String attemptId) {
         Long id = AttemptRegistry.parse(attemptId);
-        return (id == null ? java.util.Optional.<AttemptRecord>empty() : records.findById(id))
+        return (id == null ? java.util.Optional.<Attempt>empty() : records.findById(id))
                 .orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + attemptId));
     }
 }

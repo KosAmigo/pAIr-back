@@ -54,11 +54,11 @@ public class LegacyPromptFileImporter {
     public synchronized int importFiles() {
         int added = 0;
         if (Files.isDirectory(dir)) {
-            List<PromptVersion> found = new ArrayList<>();
+            List<PromptVersionState> found = new ArrayList<>();
             try (Stream<Path> s = Files.list(dir)) {
                 for (Path p : s.filter(f -> f.toString().endsWith(".json")).toList()) {
                     try {
-                        PromptVersion v = json.readValue(p.toFile(), PromptVersion.class);
+                        PromptVersionState v = json.readValue(p.toFile(), PromptVersionState.class);
                         if (v.id() != null && !v.id().isBlank()) found.add(v);
                     } catch (IOException | RuntimeException e) {
                         log.warn("프롬프트 버전 파일을 읽지 못했습니다: {} ({})", p.getFileName(), e.getMessage());
@@ -68,8 +68,8 @@ public class LegacyPromptFileImporter {
                 log.warn("프롬프트 버전 폴더를 읽지 못했습니다: {}", e.getMessage());
             }
             // 바탕 버전이 먼저 들어가야 parent 가 이어지므로 생성 시각 순으로
-            found.sort(Comparator.comparing(PromptVersion::createdAt, Comparator.nullsFirst(Comparator.naturalOrder())));
-            for (PromptVersion v : found) {
+            found.sort(Comparator.comparing(PromptVersionState::createdAt, Comparator.nullsFirst(Comparator.naturalOrder())));
+            for (PromptVersionState v : found) {
                 if (store.exists(v.id())) continue;
                 store.insert(v);
                 added++;

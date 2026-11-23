@@ -1,8 +1,8 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -11,8 +11,8 @@ import java.util.NoSuchElementException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.attempt.entity.CheckpointRecord;
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
+import com.pair.domain.attempt.entity.Checkpoint;
+import com.pair.domain.attempt.repository.CheckpointRepository;
 import com.pair.domain.credit.service.CreditService;
 
 /**
@@ -25,16 +25,16 @@ public class RollbackService {
 
     public record Result(String attemptId) {}
 
-    private final CheckpointRecordRepository checkpoints;
+    private final CheckpointRepository checkpoints;
     private final CheckpointService checkpointService;
-    private final AttemptRecordRepository records;
+    private final AttemptRepository records;
     private final AttemptRegistry registry;
-    private final AttemptStore store;
+    private final AttemptStoreRepository store;
     private final CreditService credits;
     private final ChatAttachmentService attachments;
 
-    public RollbackService(CheckpointRecordRepository checkpoints, CheckpointService checkpointService,
-                           AttemptRecordRepository records, AttemptRegistry registry, AttemptStore store, CreditService credits,
+    public RollbackService(CheckpointRepository checkpoints, CheckpointService checkpointService,
+                           AttemptRepository records, AttemptRegistry registry, AttemptStoreRepository store, CreditService credits,
                            ChatAttachmentService attachments) {
         this.checkpoints = checkpoints;
         this.checkpointService = checkpointService;
@@ -47,25 +47,25 @@ public class RollbackService {
 
     @Transactional
     public Result rollback(Long userId, Long checkpointId) {
-        CheckpointRecord cp = checkpoints.findById(checkpointId)
+        Checkpoint cp = checkpoints.findById(checkpointId)
                 .orElseThrow(() -> new NoSuchElementException("없는 체크포인트입니다."));
-        AttemptRecord source = records.findById(cp.getAttemptId())
+        Attempt source = records.findById(cp.getAttemptId())
                 .orElseThrow(() -> new NoSuchElementException("없는 체크포인트입니다."));
         // 남의 응시와 실전 응시는 있는지도 알려 주지 않는다
-        if (source.getMode() != AttemptRecord.Mode.SELF || !userId.equals(source.getUserId())) {
+        if (source.getMode() != Attempt.Mode.SELF || !userId.equals(source.getUserId())) {
             throw new NoSuchElementException("없는 체크포인트입니다.");
         }
         credits.checkRollback(userId);
         String sourceId = String.valueOf(source.getId());
-        Attempt original = store.load(sourceId);
+        AttemptState original = store.load(sourceId);
 
-        AttemptRecord fork = registry.save(AttemptRecord.forkedSelf(userId, source.getTaskId(),
+        Attempt fork = registry.save(Attempt.forkedSelf(userId, source.getTaskId(),
                 source.getAssistantModel(), cp.getId(), Instant.now()));
         String forkId = String.valueOf(fork.getId());
-        store.create(new Attempt(forkId, original.taskId(), source.getProvider(), source.getAssistantModel(),
-                        fork.getStartedAt(), null, null, null, Attempt.Status.SOLVING, List.of(), null, null),
+        store.create(new AttemptState(forkId, original.taskId(), source.getProvider(), source.getAssistantModel(),
+                        fork.getStartedAt(), null, null, null, AttemptState.Status.SOLVING, List.of(), null, null),
                 checkpointService.restore(sourceId, cp.getTurnNo()));
-        for (ChatTurn t : store.turns(sourceId)) {
+        for (ChatTurnState t : store.turns(sourceId)) {
             if (t.turn() < cp.getTurnNo()) store.appendTurn(forkId, t);
         }
         // 복사한 질문 턴의 첨부도 함께 복사한다 (크레딧은 다시 차감하지 않는다)

@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.exception.TooManyJobsException;
 import com.pair.global.config.TaskGenProperties;
 import java.time.Clock;
 import java.time.Duration;
@@ -16,14 +17,14 @@ import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.pair.infra.ai.AiUnavailableException;
 import com.pair.domain.scoring.service.Rubric;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.TaskRepository;
 
 /**
  * 과제 폼의 상황·함정을 AI(싼 모델)가 후보 3개로 추천한다.
@@ -31,7 +32,7 @@ import com.pair.domain.task.repository.TaskRecordRepository;
  * 주제를 주면 같은 호출에서 주제가 과제로 만들 만한지도 판정한다.
  * 이미 있는 과제·앞서 받은 주제와 겹치지 않게 하고, 3개가 안 되거나 유형이 겹치면 1번만 다시 요청한다.
  */
-@Service
+@Component
 public class TaskSuggestions {
 
     private static final Logger log = LoggerFactory.getLogger(TaskSuggestions.class);
@@ -82,11 +83,11 @@ public class TaskSuggestions {
 
     private final TaskGenAi ai;
     private final TaskGenProperties props;
-    private final TaskRecordRepository records;
+    private final TaskRepository records;
     private final Clock clock;
     private final Map<Long, Deque<Instant>> calls = new HashMap<>();
 
-    public TaskSuggestions(TaskGenAi ai, TaskGenProperties props, TaskRecordRepository records, Clock clock) {
+    public TaskSuggestions(TaskGenAi ai, TaskGenProperties props, TaskRepository records, Clock clock) {
         this.ai = ai;
         this.props = props;
         this.records = records;
@@ -181,13 +182,13 @@ public class TaskSuggestions {
         return out;
     }
 
-    static String user(Request req, List<TaskRecord> existing) {
+    static String user(Request req, List<Task> existing) {
         StringBuilder sb = new StringBuilder();
         sb.append("직군 구분: ").append(req.track().equals("DEV") ? "개발(DEV)" : "비개발(BIZ)").append('\n');
         sb.append("주제: ").append(req.topic().isEmpty() ? "정해지지 않음" : req.topic()).append('\n');
         if (!existing.isEmpty()) {
             sb.append("\n이미 있는 과제(이것들과 겹치지 않게):\n");
-            for (TaskRecord t : existing) {
+            for (Task t : existing) {
                 sb.append("- ").append(t.getTitle());
                 if (t.getSummary() != null && !t.getSummary().isBlank()) sb.append(": ").append(t.getSummary());
                 sb.append('\n');

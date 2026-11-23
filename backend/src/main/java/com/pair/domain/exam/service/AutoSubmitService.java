@@ -14,7 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.attempt.service.Attempt;
+import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
@@ -135,7 +135,7 @@ public class AutoSubmitService {
         progress.of(ps).values().stream()
                 .filter(ParticipantProgress.Progress::started)
                 .flatMap(pr -> pr.records().stream())
-                .filter(r -> r.getStatus() == Attempt.Status.SOLVING || r.getStatus() == Attempt.Status.FOLLOWUP)
+                .filter(r -> r.getStatus() == AttemptState.Status.SOLVING || r.getStatus() == AttemptState.Status.FOLLOWUP)
                 .forEach(r -> pending.add(String.valueOf(r.getId())));
         int failed = attempts.finishAll(pending);
         retries.remove(sessionId);

@@ -1,10 +1,10 @@
 package com.pair.domain.task.service;
 
-import com.pair.domain.task.entity.DocumentPageRecord;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
+import com.pair.domain.task.entity.DocumentPage;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -19,7 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
+import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.infra.storage.TaskFileStorage;
 
 /**
@@ -42,14 +42,14 @@ public class TaskMaterialService {
 
     public record PdfFile(String fileName, byte[] bytes) {}
 
-    private final AttemptRecordRepository attempts;
+    private final AttemptRepository attempts;
     private final TaskCatalog catalog;
-    private final TaskFileRecordRepository files;
-    private final DocumentPageRecordRepository pages;
+    private final TaskFileRepository files;
+    private final DocumentPageRepository pages;
     private final TaskFileStorage storage;
 
-    public TaskMaterialService(AttemptRecordRepository attempts, TaskCatalog catalog, TaskFileRecordRepository files,
-            DocumentPageRecordRepository pages, TaskFileStorage storage) {
+    public TaskMaterialService(AttemptRepository attempts, TaskCatalog catalog, TaskFileRepository files,
+            DocumentPageRepository pages, TaskFileStorage storage) {
         this.attempts = attempts;
         this.catalog = catalog;
         this.files = files;
@@ -80,7 +80,7 @@ public class TaskMaterialService {
     public AttachText attachForAttempt(long attemptId, String path, String pagesParam) {
         if (pagesParam == null || pagesParam.isBlank()) throw new IllegalArgumentException("PDF 는 첨부할 쪽을 지정해 주세요. 예: 1-2");
         long taskId = contentTaskId(attemptTask(attemptId));
-        TaskFileRecord f = require(taskId, path);
+        TaskFile f = require(taskId, path);
         List<PageText> texts = pageTexts(taskId, path, pagesParam);
         StringBuilder text = new StringBuilder();
         for (PageText p : texts) text.append("--- ").append(p.page()).append("쪽 ---\n").append(p.text()).append('\n');
@@ -121,34 +121,34 @@ public class TaskMaterialService {
     /** 응시의 작업 파일이 과제에서 읽기 전용(task_files.read_only)으로 정해졌는지. 과제에 없는 경로(새로 만든 파일)는 아니다 */
     @Transactional(readOnly = true)
     public boolean readOnlyForAttempt(long attemptId, String path) {
-        return files.findByTaskIdAndPath(contentTaskId(attemptTask(attemptId)), path).map(TaskFileRecord::isReadOnly).orElse(false);
+        return files.findByTaskIdAndPath(contentTaskId(attemptTask(attemptId)), path).map(TaskFile::isReadOnly).orElse(false);
     }
 
-    private TaskRecord attemptTask(long attemptId) {
+    private Task attemptTask(long attemptId) {
         var a = attempts.findById(attemptId).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + attemptId));
         return catalog.require(a.getTaskId());
     }
 
     /** 자료가 들어 있는 과제(실전 복사본이면 원본)의 번호 */
-    private long contentTaskId(TaskRecord t) {
+    private long contentTaskId(Task t) {
         return catalog.require(catalog.definitionCode(t)).getId();
     }
 
     private List<Material> list(long taskId) {
-        List<TaskFileRecord> pdfs = files.findByTaskIdAndVisibilityOrderByPathAsc(taskId, TaskFileRecord.VISIBLE).stream()
+        List<TaskFile> pdfs = files.findByTaskIdAndVisibilityOrderByPathAsc(taskId, TaskFile.VISIBLE).stream()
                 .filter(TaskMaterialService::isPdf).toList();
         if (pdfs.isEmpty()) return List.of();
         Map<Long, Integer> counts = new HashMap<>();
-        for (Object[] row : pages.countByFiles(pdfs.stream().map(TaskFileRecord::getId).toList())) {
+        for (Object[] row : pages.countByFiles(pdfs.stream().map(TaskFile::getId).toList())) {
             counts.put((Long) row[0], ((Number) row[1]).intValue());
         }
         List<Material> out = new ArrayList<>();
-        for (TaskFileRecord f : pdfs) out.add(new Material(f.getPath(), f.getMimeType(), f.getSizeBytes(), counts.getOrDefault(f.getId(), 0)));
+        for (TaskFile f : pdfs) out.add(new Material(f.getPath(), f.getMimeType(), f.getSizeBytes(), counts.getOrDefault(f.getId(), 0)));
         return out;
     }
 
     private PdfFile file(long taskId, String path) {
-        TaskFileRecord f = require(taskId, path);
+        TaskFile f = require(taskId, path);
         byte[] bytes = storage.get(f.getStorageKey()).orElseThrow(() -> {
             log.warn("PDF 자료가 저장소에 없습니다: task={} path={} key={}", taskId, f.getPath(), f.getStorageKey());
             return new NoSuchElementException("자료 파일을 찾을 수 없습니다.");
@@ -158,8 +158,8 @@ public class TaskMaterialService {
     }
 
     private List<PageText> pageTexts(long taskId, String path, String spec) {
-        TaskFileRecord f = require(taskId, path);
-        List<DocumentPageRecord> all = pages.findByTaskFileIdOrderByPageNoAsc(f.getId());
+        TaskFile f = require(taskId, path);
+        List<DocumentPage> all = pages.findByTaskFileIdOrderByPageNoAsc(f.getId());
         if (spec == null || spec.isBlank()) {
             if (all.size() > MAX_PAGES) throw new IllegalArgumentException("쪽이 " + MAX_PAGES + "쪽을 넘습니다. pages 로 쪽을 골라 주세요.");
             return all.stream().map(p -> new PageText(p.getPageNo(), p.getText())).toList();
@@ -192,13 +192,13 @@ public class TaskMaterialService {
     }
 
     /** 목록에 나오는 파일(보이는 PDF)만 허용. 경로 조작·숨은 파일·다른 과제 파일은 모두 여기서 404 */
-    private TaskFileRecord require(long taskId, String path) {
+    private TaskFile require(long taskId, String path) {
         if (path == null || path.isBlank()) throw new IllegalArgumentException("path 가 필요합니다.");
-        return files.findByTaskIdAndPath(taskId, path).filter(f -> TaskFileRecord.VISIBLE.equals(f.getVisibility()))
+        return files.findByTaskIdAndPath(taskId, path).filter(f -> TaskFile.VISIBLE.equals(f.getVisibility()))
                 .filter(TaskMaterialService::isPdf).orElseThrow(() -> new NoSuchElementException("없는 자료입니다: " + path));
     }
 
-    private static boolean isPdf(TaskFileRecord f) {
+    private static boolean isPdf(TaskFile f) {
         return f.getStorageKey() != null && PDF.equals(f.getMimeType());
     }
 }

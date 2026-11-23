@@ -19,7 +19,7 @@ class TestAiKeysBlankTest {
 
     @MockitoBean JavaMailSender mail;
 
-    @Autowired AiKeys keys;
+    @Autowired AiKeyProperties keys;
 
     @Test
     void 테스트에서는_AI_키가_비어_있다() {

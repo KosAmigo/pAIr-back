@@ -25,8 +25,8 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import com.pair.global.security.CurrentUser;
-import com.pair.domain.attempt.entity.ChatTurnRecord;
-import com.pair.domain.attempt.repository.ChatTurnRecordRepository;
+import com.pair.domain.attempt.entity.ChatTurn;
+import com.pair.domain.attempt.repository.ChatTurnRepository;
 
 @RestController
 @RequestMapping("/api/credits")
@@ -34,10 +34,10 @@ public class CreditController {
     private final CreditService credits;
     private final CreditPurchaseService purchases;
     private final CreditLedgerRepository ledger;
-    private final ChatTurnRecordRepository turns;
+    private final ChatTurnRepository turns;
 
     public CreditController(CreditService credits, CreditPurchaseService purchases, CreditLedgerRepository ledger,
-                            ChatTurnRecordRepository turns) {
+                            ChatTurnRepository turns) {
         this.credits = credits;
         this.purchases = purchases;
         this.ledger = ledger;
@@ -55,10 +55,10 @@ public class CreditController {
     public record ConfirmRequest(@NotBlank @Size(max = 200) String paymentKey, @Positive int amount) {}
     public record LedgerView(Long id, int amount, int balanceAfter, String reason, Long attemptId,
                              Long turnId, Long purchaseId, Instant createdAt) {
-        static LedgerView from(CreditLedger entry, Map<Long, ChatTurnRecord> turns) {
+        static LedgerView from(CreditLedger entry, Map<Long, ChatTurn> turns) {
             Long attemptId = entry.getAttemptId();
             if (attemptId == null && entry.getTurnId() != null) {
-                ChatTurnRecord turn = turns.get(entry.getTurnId());
+                ChatTurn turn = turns.get(entry.getTurnId());
                 if (turn != null) attemptId = turn.getAttemptId();
             }
             return new LedgerView(entry.getId(), entry.getAmount(), entry.getBalanceAfter(), entry.getReason(),
@@ -111,8 +111,8 @@ public class CreditController {
         Page<CreditLedger> entries = ledger.findByUserIdOrderByIdDesc(user.userId(), PageRequest.of(page, size));
         List<Long> turnIds = entries.getContent().stream().map(CreditLedger::getTurnId)
                 .filter(java.util.Objects::nonNull).distinct().toList();
-        Map<Long, ChatTurnRecord> turnMap = turns.findAllById(turnIds).stream()
-                .collect(Collectors.toMap(ChatTurnRecord::getId, Function.identity()));
+        Map<Long, ChatTurn> turnMap = turns.findAllById(turnIds).stream()
+                .collect(Collectors.toMap(ChatTurn::getId, Function.identity()));
         return entries.map(entry -> LedgerView.from(entry, turnMap));
     }
 

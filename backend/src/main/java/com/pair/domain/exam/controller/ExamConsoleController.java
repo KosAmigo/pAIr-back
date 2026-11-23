@@ -1,6 +1,10 @@
 package com.pair.domain.exam.controller;
 
-import com.pair.domain.exam.dto.ExamDtos;
+import com.pair.domain.exam.dto.ClipResponse;
+import com.pair.domain.exam.dto.EnvCheckResponse;
+import com.pair.domain.exam.dto.NoticeRequest;
+import com.pair.domain.exam.dto.NoticeResponse;
+import com.pair.domain.exam.dto.RetentionResponse;
 import com.pair.domain.exam.service.ConsoleAccess;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -31,15 +35,15 @@ import com.pair.domain.exam.service.ExamSessionService;
 import com.pair.domain.exam.service.ExamWorkbooks;
 import com.pair.domain.exam.service.ProctorService;
 import com.pair.domain.exam.service.SessionResultService;
-import com.pair.domain.exam.dto.ExamDtos.AddParticipantsRequest;
-import com.pair.domain.exam.dto.ExamDtos.AddParticipantsResult;
-import com.pair.domain.exam.dto.ExamDtos.EnvScanPhotoView;
-import com.pair.domain.exam.dto.ExamDtos.ParticipantView;
-import com.pair.domain.exam.dto.ExamDtos.ProctorEventView;
-import com.pair.domain.exam.dto.ExamDtos.ReviewRequest;
-import com.pair.domain.exam.dto.ExamDtos.SessionDetail;
-import com.pair.domain.exam.dto.ExamDtos.SessionRequest;
-import com.pair.domain.exam.dto.ExamDtos.SessionSummary;
+import com.pair.domain.exam.dto.AddParticipantsRequest;
+import com.pair.domain.exam.dto.AddParticipantsResponse;
+import com.pair.domain.exam.dto.EnvScanPhotoResponse;
+import com.pair.domain.exam.dto.ParticipantResponse;
+import com.pair.domain.exam.dto.ProctorEventResponse;
+import com.pair.domain.exam.dto.ReviewRequest;
+import com.pair.domain.exam.dto.SessionDetailResponse;
+import com.pair.domain.exam.dto.ExamSessionRequest;
+import com.pair.domain.exam.dto.SessionSummaryResponse;
 import com.pair.global.security.CurrentUser;
 
 import jakarta.validation.Valid;
@@ -88,7 +92,7 @@ public class ExamConsoleController {
 
     /** 내 회사 회차. 관리자는 companyId 를 넣으면 그 회사, 안 넣으면 전체 */
     @GetMapping
-    public List<SessionSummary> list(CurrentUser user, @RequestParam(required = false) Long companyId) {
+    public List<SessionSummaryResponse> list(CurrentUser user, @RequestParam(required = false) Long companyId) {
         access.requireConsole(user);
         if (user.isAdmin()) return companyId == null ? sessions.listAll() : sessions.list(companyId);
         return sessions.list(user.companyId());
@@ -96,19 +100,19 @@ public class ExamConsoleController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public SessionSummary create(CurrentUser user, @Valid @RequestBody SessionRequest req) {
+    public SessionSummaryResponse create(CurrentUser user, @Valid @RequestBody ExamSessionRequest req) {
         access.requireManager(user);
         return sessions.create(req.withCompany(access.companyFor(user, req.companyId())), user.userId());
     }
 
     @GetMapping("/{sessionId}")
-    public SessionDetail detail(CurrentUser user, @PathVariable Long sessionId) {
+    public SessionDetailResponse detail(CurrentUser user, @PathVariable Long sessionId) {
         access.requireSession(user, sessionId);
         return sessions.detail(sessionId);
     }
 
     @PutMapping("/{sessionId}")
-    public SessionSummary update(CurrentUser user, @PathVariable Long sessionId, @Valid @RequestBody SessionRequest req) {
+    public SessionSummaryResponse update(CurrentUser user, @PathVariable Long sessionId, @Valid @RequestBody ExamSessionRequest req) {
         access.requireManager(user);
         access.requireSession(user, sessionId);
         return sessions.update(sessionId, req.withCompany(access.companyFor(user, req.companyId())));
@@ -116,13 +120,13 @@ public class ExamConsoleController {
 
     /** 시작 전 취소. 지우지 않고 canceled_at 을 남기며 대상자에게 안내 메일을 보낸다 */
     @PostMapping("/{sessionId}/cancel")
-    public SessionSummary cancel(CurrentUser user, @PathVariable Long sessionId) {
+    public SessionSummaryResponse cancel(CurrentUser user, @PathVariable Long sessionId) {
         manage(user, sessionId);
         return sessions.cancel(sessionId);
     }
 
     @PostMapping("/{sessionId}/participants")
-    public AddParticipantsResult addParticipants(CurrentUser user, @PathVariable Long sessionId,
+    public AddParticipantsResponse addParticipants(CurrentUser user, @PathVariable Long sessionId,
             @Valid @RequestBody AddParticipantsRequest req) {
         manage(user, sessionId);
         return sessions.addParticipants(sessionId, req.participants());
@@ -130,7 +134,7 @@ public class ExamConsoleController {
 
     /** 대상자 CSV 업로드. dryRun=true 면 저장하지 않고 미리 보기(들어갈 인원, 거절 사유)만 돌려준다 */
     @PostMapping(value = "/{sessionId}/participants/csv", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public AddParticipantsResult importCsv(CurrentUser user, @PathVariable Long sessionId, @RequestParam("file") MultipartFile file,
+    public AddParticipantsResponse importCsv(CurrentUser user, @PathVariable Long sessionId, @RequestParam("file") MultipartFile file,
             @RequestParam(defaultValue = "false") boolean dryRun) {
         manage(user, sessionId);
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("파일이 비어 있습니다.");
@@ -178,27 +182,27 @@ public class ExamConsoleController {
      * 되살린 사람과 시각은 감독 이벤트(LINK_RESTORED)로 남는다.
      */
     @PostMapping("/{sessionId}/participants/{participantId}/restore-link")
-    public ParticipantView restoreLink(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+    public ParticipantResponse restoreLink(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
         return grace.restore(sessionId, participantId, user.userId());
     }
 
     /** 회차 전체 감독 이벤트 (시간순) */
     @GetMapping("/{sessionId}/events")
-    public List<ProctorEventView> sessionEvents(CurrentUser user, @PathVariable Long sessionId) {
+    public List<ProctorEventResponse> sessionEvents(CurrentUser user, @PathVariable Long sessionId) {
         access.requireSession(user, sessionId);
         return proctor.eventsOfSession(sessionId);
     }
 
     @GetMapping("/{sessionId}/participants/{participantId}/events")
-    public List<ProctorEventView> events(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+    public List<ProctorEventResponse> events(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
         return proctor.eventsOf(sessionId, participantId);
     }
 
     /** 담당자 판정 (OK 문제 없음 / SUSPECT 부정 의심). 판정자는 로그인한 사람. 자동 탈락은 없다 */
     @PutMapping("/{sessionId}/events/{eventId}/review")
-    public ProctorEventView review(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId,
+    public ProctorEventResponse review(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId,
             @Valid @RequestBody ReviewRequest req) {
         access.requireSession(user, sessionId);
         return proctor.review(sessionId, eventId, req.review(), req.note(), user.userId());
@@ -212,7 +216,7 @@ public class ExamConsoleController {
 
     /** 이벤트의 증거 구간 (앞 8초·뒤 4초 사진 목록, 시간순). 완료된 회차에서도 볼 수 있다 */
     @GetMapping("/{sessionId}/events/{eventId}/clip")
-    public ExamDtos.ClipView clip(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId) {
+    public ClipResponse clip(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId) {
         access.requireSession(user, sessionId);
         return clips.clipOf(sessionId, eventId);
     }
@@ -233,14 +237,14 @@ public class ExamConsoleController {
 
     /** 감독 사진 보관 현황 (삭제 예정 시각, 연장 가능 여부, 연장 이력). 감독관도 볼 수 있다 */
     @GetMapping("/{sessionId}/retention")
-    public ExamDtos.RetentionView retention(CurrentUser user, @PathVariable Long sessionId) {
+    public RetentionResponse retention(CurrentUser user, @PathVariable Long sessionId) {
         access.requireSession(user, sessionId);
         return retention.view(sessionId);
     }
 
     /** 감독 사진 보관 연장: 삭제 예정 2일 전부터 7일씩 최대 2번. 감독관·매니저 모두 가능, 누가 했는지 이력에 남는다 */
     @PostMapping("/{sessionId}/retention/extend")
-    public ExamDtos.RetentionView extendRetention(CurrentUser user, @PathVariable Long sessionId) {
+    public RetentionResponse extendRetention(CurrentUser user, @PathVariable Long sessionId) {
         access.requireSession(user, sessionId);
         return retention.extend(sessionId, user.userId());
     }
@@ -254,31 +258,31 @@ public class ExamConsoleController {
 
     /** 대상자의 환경 점검 사진 목록 (방 360도 방향별, 책상 위). 감독관도 볼 수 있다 */
     @GetMapping("/{sessionId}/participants/{participantId}/env-scan")
-    public List<EnvScanPhotoView> envScanPhotos(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+    public List<EnvScanPhotoResponse> envScanPhotos(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
         return envScan.photosOf(sessionId, participantId);
     }
 
     /** 대상자의 환경 점검 결과 (진행 중이면 실시간, 아니면 저장된 결과). 아직 없으면 204. 감독관도 볼 수 있다 */
     @GetMapping("/{sessionId}/participants/{participantId}/env-check")
-    public ResponseEntity<ExamDtos.EnvCheckView> envCheck(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+    public ResponseEntity<EnvCheckResponse> envCheck(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
-        ExamDtos.EnvCheckView view = envCheck.view(sessionId, participantId);
+        EnvCheckResponse view = envCheck.view(sessionId, participantId);
         return view == null ? ResponseEntity.noContent().build() : ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(view);
     }
 
     /** 응시자에게 안내 메시지 보내기 (시험 전·중). 감독관도 보낼 수 있다 */
     @PostMapping("/{sessionId}/participants/{participantId}/notices")
     @ResponseStatus(HttpStatus.CREATED)
-    public ExamDtos.NoticeView sendNotice(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId,
-            @Valid @RequestBody ExamDtos.NoticeRequest req) {
+    public NoticeResponse sendNotice(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId,
+            @Valid @RequestBody NoticeRequest req) {
         access.requireSession(user, sessionId);
         return notices.send(sessionId, participantId, req.message(), user.userId());
     }
 
     /** 보낸 안내 메시지와 읽음 여부 */
     @GetMapping("/{sessionId}/participants/{participantId}/notices")
-    public List<ExamDtos.NoticeView> noticesOf(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
+    public List<NoticeResponse> noticesOf(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
         return notices.listOf(sessionId, participantId);
     }

@@ -1,6 +1,6 @@
 package com.pair.global.config;
 
-import com.pair.domain.exam.controller.ProctorRelayHandler;
+import com.pair.domain.exam.service.ProctorRelayHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;

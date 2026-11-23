@@ -1,7 +1,11 @@
 package com.pair.domain.company.service;
 
-import com.pair.domain.company.dto.CompanyInquiryDtos;
-import com.pair.domain.company.dto.CompanyMemberDtos;
+import com.pair.domain.company.dto.CompanyDetailResponse;
+import com.pair.domain.company.dto.CompanyMemberResponse;
+import com.pair.domain.company.dto.CompanyResponse;
+import com.pair.domain.company.dto.ManagerReplacementResponse;
+import com.pair.domain.company.dto.MemberListResponse;
+import com.pair.domain.company.dto.ReplaceManagerRequest;
 import com.pair.domain.company.entity.Company;
 import com.pair.domain.company.entity.CompanyAccountEvent;
 import com.pair.domain.company.repository.CompanyAccountEventRepository;
@@ -46,9 +50,9 @@ public class CompanyMemberService {
     }
 
     @Transactional(readOnly = true)
-    public CompanyMemberDtos.MemberList membersForManager(CurrentUser user) {
+    public MemberListResponse membersForManager(CurrentUser user) {
         requireManager(user);
-        return new CompanyMemberDtos.MemberList(user.companyId(), accountViews(user.companyId()));
+        return new MemberListResponse(user.companyId(), accountViews(user.companyId()));
     }
 
     @Transactional
@@ -76,20 +80,20 @@ public class CompanyMemberService {
     }
 
     @Transactional(readOnly = true)
-    public List<CompanyInquiryDtos.CompanyView> allCompanies() {
-        return companies.findAll().stream().map(CompanyInquiryDtos.CompanyView::from).toList();
+    public List<CompanyResponse> allCompanies() {
+        return companies.findAll().stream().map(CompanyResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
-    public CompanyMemberDtos.CompanyDetail company(Long companyId) {
+    public CompanyDetailResponse company(Long companyId) {
         Company company = companies.findById(companyId)
                 .orElseThrow(() -> new NoSuchElementException("회사를 찾을 수 없습니다."));
-        return new CompanyMemberDtos.CompanyDetail(CompanyInquiryDtos.CompanyView.from(company), accountViews(companyId));
+        return new CompanyDetailResponse(CompanyResponse.from(company), accountViews(companyId));
     }
 
     @Transactional
-    public CompanyMemberDtos.ManagerReplacement replaceManager(long companyId, CurrentUser admin,
-            CompanyMemberDtos.ReplaceManagerRequest request) {
+    public ManagerReplacementResponse replaceManager(long companyId, CurrentUser admin,
+            ReplaceManagerRequest request) {
         requireAdmin(admin);
         if (companies.findById(companyId).isEmpty()) throw new NoSuchElementException("회사를 찾을 수 없습니다.");
         String email = request.email().trim().toLowerCase(Locale.ROOT);
@@ -110,7 +114,7 @@ public class CompanyMemberService {
         events.save(new CompanyAccountEvent(companyId, "ADMIN_MANAGER_REPLACED", admin.userId(),
                 newManager.getId(), oldManager == null ? "no active former manager" :
                         "formerManagerUserId=" + oldManager.getId(), Instant.now()));
-        return new CompanyMemberDtos.ManagerReplacement(companyId, newManager.getId(),
+        return new ManagerReplacementResponse(companyId, newManager.getId(),
                 "새 매니저 계정을 생성하고 인증 안내 메일을 발송했습니다.");
     }
 
@@ -126,9 +130,9 @@ public class CompanyMemberService {
         return updated;
     }
 
-    private List<CompanyMemberDtos.MemberView> accountViews(Long companyId) {
+    private List<CompanyMemberResponse> accountViews(Long companyId) {
         return accounts.findByCompanyIdOrderByRoleAscNameAsc(companyId).stream()
-                .map(CompanyMemberDtos.MemberView::from).toList();
+                .map(CompanyMemberResponse::from).toList();
     }
 
     private static void requireManager(CurrentUser user) {

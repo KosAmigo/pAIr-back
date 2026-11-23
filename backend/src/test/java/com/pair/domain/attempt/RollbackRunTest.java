@@ -1,11 +1,11 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.attempt.service.Attempt;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.service.ChatTurn;
+import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.RollbackService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,14 +31,13 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
+import com.pair.domain.attempt.repository.CheckpointRepository;
 import com.pair.infra.sandbox.CodeRunner;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
 import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.domain.task.TestTasks;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -64,15 +63,15 @@ class RollbackRunTest {
     @MockitoBean JavaMailSender mail;
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AttemptRegistry registry;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
-    @Autowired TaskRepository tasks;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
+    @Autowired TaskDefRepository tasks;
     @Autowired CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
-    @Autowired CheckpointRecordRepository checkpointRecords;
+    @Autowired CheckpointRepository checkpointRecords;
     @Autowired AuthService auth;
 
     Long userId;
@@ -91,15 +90,15 @@ class RollbackRunTest {
         original = files.get(javaPath);
         edited = original + "\n// 고침";
 
-        id = String.valueOf(registry.save(AttemptRecord.self(userId, 1L, "gpt-test", Instant.now())).getId());
-        store.create(new Attempt(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
-                Attempt.Status.SOLVING, List.of(), null, null), files);
-        checkpoints.appendQuestion(id, new ChatTurn(1, "user", Instant.now(), "질문1", null, null, null, null, null, null), files);
-        store.appendTurn(id, new ChatTurn(2, "ai", Instant.now(), "답1", null, null, null, null, null, null));
+        id = String.valueOf(registry.save(Attempt.self(userId, 1L, "gpt-test", Instant.now())).getId());
+        store.create(new AttemptState(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptState.Status.SOLVING, List.of(), null, null), files);
+        checkpoints.appendQuestion(id, new ChatTurnState(1, "user", Instant.now(), "질문1", null, null, null, null, null, null), files);
+        store.appendTurn(id, new ChatTurnState(2, "ai", Instant.now(), "답1", null, null, null, null, null, null));
         Map<String, String> after = new TreeMap<>(files);
         after.put(javaPath, edited);
         store.writeWorkspaceFile(id, javaPath, edited);
-        checkpoints.appendQuestion(id, new ChatTurn(3, "user", Instant.now(), "질문3", null, null, null, null, null, null), after);
+        checkpoints.appendQuestion(id, new ChatTurnState(3, "user", Instant.now(), "질문3", null, null, null, null, null, null), after);
 
         when(runner.run(anyMap())).thenReturn(new CodeRunner.RunResult(true, List.of(), 0, 0, List.of(), List.of(), 0));
     }

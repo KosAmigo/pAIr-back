@@ -1,18 +1,18 @@
 package com.pair.domain.task;
 
-import com.pair.domain.task.entity.QuestionChoiceRecord;
-import com.pair.domain.task.entity.QuestionSourceRecord;
-import com.pair.domain.task.entity.ShortAnswerKeyRecord;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.entity.TaskQuestionRecord;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.repository.QuestionChoiceRecordRepository;
-import com.pair.domain.task.repository.QuestionSourceRecordRepository;
-import com.pair.domain.task.repository.ShortAnswerKeyRecordRepository;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.QuestionChoice;
+import com.pair.domain.task.entity.QuestionSource;
+import com.pair.domain.task.entity.ShortAnswerKey;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.entity.TaskQuestion;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.repository.QuestionChoiceRepository;
+import com.pair.domain.task.repository.QuestionSourceRepository;
+import com.pair.domain.task.repository.ShortAnswerKeyRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -55,23 +55,23 @@ class TaskReviewConsoleTest {
     }
 
     @Autowired MockMvc mvc;
-    @Autowired TaskRecordRepository tasks;
-    @Autowired TaskFileRecordRepository files;
-    @Autowired DocumentPageRecordRepository pages;
+    @Autowired TaskRepository tasks;
+    @Autowired TaskFileRepository files;
+    @Autowired DocumentPageRepository pages;
     @Autowired TaskFileStorage storage;
-    @Autowired TaskQuestionRecordRepository questions;
-    @Autowired QuestionChoiceRecordRepository choices;
-    @Autowired ShortAnswerKeyRecordRepository keys;
-    @Autowired QuestionSourceRecordRepository sources;
+    @Autowired TaskQuestionRepository questions;
+    @Autowired QuestionChoiceRepository choices;
+    @Autowired ShortAnswerKeyRepository keys;
+    @Autowired QuestionSourceRepository sources;
     @MockitoBean JavaMailSender mail;
 
     @BeforeEach
     void setUp() {
         MaterialFixtures.seed(tasks, files, pages, storage);
-        files.save(new TaskFileRecord(2L, "answer.md", "정답 설명", "text/markdown", 9, TaskFileRecord.HIDDEN, true));
-        files.save(new TaskFileRecord(2L, "README.md", "안내", "text/markdown", 6, TaskFileRecord.VISIBLE, true));
-        TaskRecord t = tasks.findByCode(TestTasks.SELF_BIZ).orElseThrow();
-        t.changeStatus(TaskRecord.Status.HIDDEN, Instant.now());
+        files.save(new TaskFile(2L, "answer.md", "정답 설명", "text/markdown", 9, TaskFile.HIDDEN, true));
+        files.save(new TaskFile(2L, "README.md", "안내", "text/markdown", 6, TaskFile.VISIBLE, true));
+        Task t = tasks.findByCode(TestTasks.SELF_BIZ).orElseThrow();
+        t.changeStatus(Task.Status.HIDDEN, Instant.now());
         tasks.save(t);
 
         for (long task : new long[] {1L, 2L}) {
@@ -84,22 +84,22 @@ class TaskReviewConsoleTest {
                 });
             }
         }
-        TaskQuestionRecord single = question("TASK", "SINGLE", 1, 5);
-        choices.save(new QuestionChoiceRecord(single.getId(), 1, "A안", false));
-        choices.save(new QuestionChoiceRecord(single.getId(), 2, "B안", true));
-        sources.save(new QuestionSourceRecord(single.getId(),
+        TaskQuestion single = question("TASK", "SINGLE", 1, 5);
+        choices.save(new QuestionChoice(single.getId(), 1, "A안", false));
+        choices.save(new QuestionChoice(single.getId(), 2, "B안", true));
+        sources.save(new QuestionSource(single.getId(),
                 files.findByTaskIdAndPath(2L, MaterialFixtures.PDF_PATH).orElseThrow().getId(), "1,2"));
-        TaskQuestionRecord shortQ = question("TASK", "SHORT", 2, 3);
-        keys.save(new ShortAnswerKeyRecord(shortQ.getId(), "8430"));
-        keys.save(new ShortAnswerKeyRecord(shortQ.getId(), "8,430"));
+        TaskQuestion shortQ = question("TASK", "SHORT", 2, 3);
+        keys.save(new ShortAnswerKey(shortQ.getId(), "8430"));
+        keys.save(new ShortAnswerKey(shortQ.getId(), "8,430"));
         question("FOLLOWUP", "ESSAY", 1, null);
-        TaskQuestionRecord off = question("TASK", "SHORT", 3, 3);
+        TaskQuestion off = question("TASK", "SHORT", 3, 3);
         off.setActive(false);
         questions.save(off);
     }
 
-    private TaskQuestionRecord question(String stage, String type, int seq, Integer points) {
-        TaskQuestionRecord q = new TaskQuestionRecord(2L, stage, type, seq, type + " 문항 " + seq);
+    private TaskQuestion question(String stage, String type, int seq, Integer points) {
+        TaskQuestion q = new TaskQuestion(2L, stage, type, seq, type + " 문항 " + seq);
         q.setPoints(points);
         return questions.save(q);
     }

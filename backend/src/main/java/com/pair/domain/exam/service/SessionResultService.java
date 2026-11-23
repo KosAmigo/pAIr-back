@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
@@ -64,12 +64,12 @@ public class SessionResultService {
     private final ExamSessionService sessions;
     private final ExamParticipantRepository participants;
     private final ProctorEventRepository events;
-    private final AttemptStore attempts;
+    private final AttemptStoreRepository attempts;
     private final ParticipantProgress progress;
     private final Clock clock;
 
     public SessionResultService(ExamSessionService sessions, ExamParticipantRepository participants,
-            ProctorEventRepository events, AttemptStore attempts, ParticipantProgress progress, Clock clock) {
+            ProctorEventRepository events, AttemptStoreRepository attempts, ParticipantProgress progress, Clock clock) {
         this.sessions = sessions;
         this.participants = participants;
         this.events = events;

@@ -16,28 +16,28 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.pair.domain.attempt.dto.AttemptDtos.CheckpointLabelRequest;
-import com.pair.domain.attempt.dto.AttemptDtos.StartRequest;
-import com.pair.domain.attempt.dto.AttemptDtos.SaveRequest;
-import com.pair.domain.attempt.dto.AttemptDtos.ChatRequest;
-import com.pair.domain.attempt.dto.AttemptDtos.FollowUpRequest;
-import com.pair.domain.attempt.dto.AttemptDtos.TurnView;
-import com.pair.domain.attempt.dto.AttemptDtos.EditRequest;
-import com.pair.domain.attempt.dto.AttemptDtos.DiagnosticsRequest;
-import com.pair.domain.attempt.dto.AttemptDtos.CursorRequest;
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
+import com.pair.domain.attempt.dto.CheckpointLabelRequest;
+import com.pair.domain.attempt.dto.StartAttemptRequest;
+import com.pair.domain.attempt.dto.SaveFileRequest;
+import com.pair.domain.attempt.dto.ChatRequest;
+import com.pair.domain.attempt.dto.FollowUpRequest;
+import com.pair.domain.attempt.dto.TurnResponse;
+import com.pair.domain.attempt.dto.EditDecisionRequest;
+import com.pair.domain.attempt.dto.DiagnosticsRequest;
+import com.pair.domain.attempt.dto.CursorRequest;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import com.pair.domain.attempt.service.ChatAttachmentService;
-import com.pair.domain.attempt.service.ChatTurn;
+import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.JavaDiagnostics;
 import com.pair.domain.task.service.TaskCatalog;
 import com.pair.domain.task.service.TaskDef;
 import com.pair.global.security.CurrentUser;
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -45,11 +45,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 @RequestMapping("/api")
 public class AttemptController {
 
-    private final TaskRepository tasks;
+    private final TaskDefRepository tasks;
     private final AttemptService attempts;
-    private final AttemptStore store;
+    private final AttemptStoreRepository store;
     private final com.pair.global.config.PairProperties props;
-    private final AttemptRecordRepository records;
+    private final AttemptRepository records;
     private final TaskCatalog catalog;
     private final com.pair.domain.question.service.QuestionService questions;
     private final com.pair.domain.attempt.service.CheckpointService checkpoints;
@@ -58,8 +58,8 @@ public class AttemptController {
     private final com.pair.domain.attempt.service.ReplayCompareService replayCompare;
     private final ChatAttachmentService chatAttachments;
 
-    public AttemptController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.global.config.PairProperties props,
-            AttemptRecordRepository records, TaskCatalog catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
+    public AttemptController(TaskDefRepository tasks, AttemptService attempts, AttemptStoreRepository store, com.pair.global.config.PairProperties props,
+            AttemptRepository records, TaskCatalog catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
             com.pair.domain.attempt.service.RollbackService rollbacks, com.pair.domain.attempt.service.ReplayTreeService replayTree,
             com.pair.domain.question.service.QuestionService questions, com.pair.domain.attempt.service.ReplayCompareService replayCompare,
             ChatAttachmentService chatAttachments) {
@@ -78,22 +78,22 @@ public class AttemptController {
     }
 
     @PostMapping("/attempts")
-    public Map<String, Object> start(CurrentUser user, @RequestBody StartRequest req) {
-        Attempt a = attempts.startSelf(req.taskId(), user.userId());
+    public Map<String, Object> start(CurrentUser user, @RequestBody StartAttemptRequest req) {
+        AttemptState a = attempts.startSelf(req.taskId(), user.userId());
         return Map.of("attemptId", a.id());
     }
 
     /** 내 기록: 내 자가진단 응시 목록 (DB attempts, 최근 순). 채점이 끝난 응시는 항목 점수를 함께 준다. */
     @GetMapping("/attempts")
     public List<Map<String, Object>> list(CurrentUser user) {
-        List<AttemptRecord> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), AttemptRecord.Mode.SELF);
-        Map<Long, String> codes = catalog.codes(rows.stream().map(AttemptRecord::getTaskId).distinct().toList());
+        List<Attempt> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), Attempt.Mode.SELF);
+        Map<Long, String> codes = catalog.codes(rows.stream().map(Attempt::getTaskId).distinct().toList());
         List<Map<String, Object>> out = new java.util.ArrayList<>();
         // 같은 과제를 여러 번 푼 응시가 많아서 과제 정의는 한 번만 만든다 (응시마다 DB 에서 다시 읽지 않는다)
         Map<String, TaskDef> definitions = new java.util.HashMap<>();
-        for (AttemptRecord r : rows) {
+        for (Attempt r : rows) {
             String id = String.valueOf(r.getId());
-            if (r.getStatus() == Attempt.Status.SOLVING && isEmpty(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
+            if (r.getStatus() == AttemptState.Status.SOLVING && isEmpty(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
             TaskDef task = definitions.computeIfAbsent(codes.get(r.getTaskId()), catalog::definition);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", id);
@@ -102,7 +102,7 @@ public class AttemptController {
             m.put("taskType", task.type());
             m.put("startedAt", r.getStartedAt());
             m.put("status", r.getStatus());
-            if (r.getStatus() == Attempt.Status.DONE) {
+            if (r.getStatus() == AttemptState.Status.DONE) {
                 JsonNode rep = readReportSafely(id);
                 if (rep != null) {
                     // version 2(감점식)만 총점이 있다. 이전 형식은 다시 채점해야 한다.
@@ -140,7 +140,7 @@ public class AttemptController {
 
     @GetMapping("/attempts/{id}")
     public Map<String, Object> attempt(@PathVariable String id) {
-        Attempt a = store.load(id);
+        AttemptState a = store.load(id);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("attempt", a);
         m.put("task", tasks.get(a.taskId()));
@@ -161,7 +161,7 @@ public class AttemptController {
     }
 
     @PutMapping("/attempts/{id}/file")
-    public Map<String, Object> save(@PathVariable String id, @RequestParam String path, @RequestBody SaveRequest req) {
+    public Map<String, Object> save(@PathVariable String id, @RequestParam String path, @RequestBody SaveFileRequest req) {
         attempts.saveFile(id, path, req.content() == null ? "" : req.content());
         return Map.of("saved", true);
     }
@@ -197,10 +197,10 @@ public class AttemptController {
     }
 
     @PostMapping("/attempts/{id}/chat")
-    public List<TurnView> chat(@PathVariable String id, @RequestBody ChatRequest req) {
+    public List<TurnResponse> chat(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
-        Attempt a = store.load(id);
-        List<ChatTurn> added = attempts.chat(id, req.message(), req.attachments(), null);
+        AttemptState a = store.load(id);
+        List<ChatTurnState> added = attempts.chat(id, req.message(), req.attachments(), null);
         var edits = attempts.edits(id);
         var attached = chatAttachments.views(Long.parseLong(id));
         return added.stream().map(t -> view(a, t, edits.getOrDefault(t.turn(), List.of()), attached)).toList();
@@ -215,11 +215,11 @@ public class AttemptController {
     @PostMapping(value = "/attempts/{id}/chat/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
     public org.springframework.web.servlet.mvc.method.annotation.SseEmitter chatStream(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
-        Attempt a = store.load(id);
+        AttemptState a = store.load(id);
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(6 * 60 * 1000L);
         streams.submit(() -> {
             try {
-                List<ChatTurn> added = attempts.chat(id, req.message(), req.attachments(), delta -> {
+                List<ChatTurnState> added = attempts.chat(id, req.message(), req.attachments(), delta -> {
                     try {
                         emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event().name("delta").data(Map.of("t", delta)));
                     } catch (java.io.IOException e) {
@@ -252,7 +252,7 @@ public class AttemptController {
 
     /** AI 수정 제안 적용(apply) 또는 거절(reject). */
     @PostMapping("/attempts/{id}/edits")
-    public AttemptService.EditDecision decideEdit(@PathVariable String id, @RequestBody EditRequest req) {
+    public AttemptService.EditDecision decideEdit(@PathVariable String id, @RequestBody EditDecisionRequest req) {
         if (!"apply".equals(req.action()) && !"reject".equals(req.action())) throw new IllegalArgumentException("action 은 apply 또는 reject 입니다.");
         return attempts.decideEdit(id, req.turn(), req.index(), "apply".equals(req.action()));
     }
@@ -296,30 +296,30 @@ public class AttemptController {
     }
 
     @PostMapping("/attempts/{id}/submit")
-    public Attempt submit(@PathVariable String id) {
+    public AttemptState submit(@PathVariable String id) {
         return attempts.submit(id);
     }
 
     @PostMapping("/attempts/{id}/followups")
-    public Attempt followUps(@PathVariable String id, @RequestBody FollowUpRequest req) {
+    public AttemptState followUps(@PathVariable String id, @RequestBody FollowUpRequest req) {
         return attempts.followUps(id, req.answers());
     }
 
     @PostMapping("/attempts/{id}/rescore")
-    public Attempt rescore(@PathVariable String id) {
+    public AttemptState rescore(@PathVariable String id) {
         return attempts.rescore(id);
     }
 
     @GetMapping("/attempts/{id}/report")
     public Map<String, Object> report(@PathVariable String id) {
-        Attempt a = store.load(id);
+        AttemptState a = store.load(id);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("status", a.status());
         m.put("error", a.error());
-        JsonNode report = a.status() == Attempt.Status.DONE ? withAttachments(store.readReport(id), Long.parseLong(id)) : null;
+        JsonNode report = a.status() == AttemptState.Status.DONE ? withAttachments(store.readReport(id), Long.parseLong(id)) : null;
         m.put("report", report);
         // 문항(객관식·단답형) 점수는 6개 역량 점수와 따로 보여 준다. 문항이 없으면 null. 정답은 제출 뒤 리포트에서만 나간다.
-        m.put("questions", a.status() == Attempt.Status.DONE ? questions.report(Long.parseLong(id)) : null);
+        m.put("questions", a.status() == AttemptState.Status.DONE ? questions.report(Long.parseLong(id)) : null);
         return m;
     }
 
@@ -340,10 +340,10 @@ public class AttemptController {
         return copy;
     }
 
-    private static TurnView view(Attempt a, ChatTurn t, List<AttemptService.EditView> edits,
+    private static TurnResponse view(AttemptState a, ChatTurnState t, List<AttemptService.EditView> edits,
             Map<Integer, List<ChatAttachmentService.View>> attached) {
         long s = Math.max(0, Duration.between(a.startedAt(), t.at()).toSeconds());
-        return new TurnView(t.turn(), t.role(), String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60), t.text(), edits,
+        return new TurnResponse(t.turn(), t.role(), String.format("%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60), t.text(), edits,
                 attached.getOrDefault(t.turn(), List.of()));
     }
 }

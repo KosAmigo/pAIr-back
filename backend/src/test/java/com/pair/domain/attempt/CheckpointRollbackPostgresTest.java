@@ -1,12 +1,12 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.attempt.service.Attempt;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.domain.attempt.service.ChatAttachmentService;
-import com.pair.domain.attempt.service.ChatTurn;
+import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.ReplayTreeService;
 import com.pair.domain.attempt.service.RollbackService;
@@ -31,11 +31,10 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.mail.javamail.JavaMailSender;
 
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.attempt.repository.CheckpointRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.repository.AuthAccountRepository;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 import com.pair.domain.credit.service.CreditService;
@@ -67,20 +66,20 @@ class CheckpointRollbackPostgresTest {
         r.add("spring.ai.anthropic.api-key", () -> "");
     }
 
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AttemptRegistry registry;
-    @Autowired AttemptRecordRepository records;
-    @Autowired TaskRepository tasks;
+    @Autowired AttemptRepository records;
+    @Autowired TaskDefRepository tasks;
     @Autowired CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
     @Autowired ReplayTreeService replayTree;
-    @Autowired CheckpointRecordRepository checkpointRecords;
+    @Autowired CheckpointRepository checkpointRecords;
     @Autowired AuthAccountRepository accounts;
     @Autowired AuthService auth;
     @Autowired CreditService credits;
     @Autowired CreditLedgerRepository ledger;
     @Autowired ChatAttachmentService attachmentService;
-    @Autowired com.pair.domain.attempt.repository.ChatTurnRecordRepository chatRecords;
+    @Autowired com.pair.domain.attempt.repository.ChatTurnRepository chatRecords;
     @MockitoBean JavaMailSender mail;
 
     @Test
@@ -92,7 +91,7 @@ class CheckpointRollbackPostgresTest {
         String path = files.keySet().iterator().next();
         String edited = files.get(path) + "\n// 고침";
 
-        AttemptRecord r = registry.save(AttemptRecord.self(userId, 1L, "gpt-test", Instant.now()));
+        Attempt r = registry.save(Attempt.self(userId, 1L, "gpt-test", Instant.now()));
         String id = String.valueOf(r.getId());
         store.create(attempt(id), files);
         checkpoints.appendQuestion(id, turn(1, "user"), files);
@@ -117,10 +116,10 @@ class CheckpointRollbackPostgresTest {
         var charge = ledger.findFirstByUserIdOrderByIdDesc(userId).orElseThrow();
         assertThat(charge.getReason()).isEqualTo("ROLLBACK");
         assertThat(charge.getAttemptId()).isEqualTo(Long.valueOf(forkId));
-        AttemptRecord fork = records.findById(Long.valueOf(forkId)).orElseThrow();
+        Attempt fork = records.findById(Long.valueOf(forkId)).orElseThrow();
         assertThat(fork.getForkedFromCheckpointId()).isEqualTo(cp3);
         assertThat(store.readFiles(forkId).get(path)).isEqualTo(edited);
-        assertThat(store.turns(forkId)).extracting(ChatTurn::turn).containsExactly(1, 2);
+        assertThat(store.turns(forkId)).extracting(ChatTurnState::turn).containsExactly(1, 2);
         assertThat(store.turns(id)).hasSize(4);
         // 롤백으로 복사된 앞 턴(1, 2)의 첨부도 새 응시로 복사된다
         assertThat(attachmentService.views(Long.parseLong(forkId)).get(1)).extracting(ChatAttachmentService.View::path).containsExactly(path);
@@ -139,12 +138,12 @@ class CheckpointRollbackPostgresTest {
         assertThatThrownBy(() -> rollbacks.rollback(other, cp3)).isInstanceOf(NoSuchElementException.class);
     }
 
-    static ChatTurn turn(int no, String role) {
-        return new ChatTurn(no, role, Instant.now(), role + no, null, null, null, null, null, null);
+    static ChatTurnState turn(int no, String role) {
+        return new ChatTurnState(no, role, Instant.now(), role + no, null, null, null, null, null, null);
     }
 
-    static Attempt attempt(String id) {
-        return new Attempt(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
-                Attempt.Status.SOLVING, List.of(), null, null);
+    static AttemptState attempt(String id) {
+        return new AttemptState(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptState.Status.SOLVING, List.of(), null, null);
     }
 }

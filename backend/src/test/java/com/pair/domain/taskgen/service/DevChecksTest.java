@@ -17,7 +17,7 @@ class DevChecksTest {
     private final TaskGenFixtures.FakeRunner runner = new TaskGenFixtures.FakeRunner();
 
     private List<String> failedNames(DevDraft d) {
-        return DevChecks.forDraft(runner, d).stream().map(c -> c.run(d)).filter(r -> !r.ok()).map(CheckResult::name).toList();
+        return DevChecks.forDraft(runner, d).stream().map(c -> c.run(d)).filter(r -> !r.ok()).map(GenCheckResult::name).toList();
     }
 
     @Test
@@ -90,10 +90,10 @@ class DevChecksTest {
                         + "class HiddenCalcTest { @Test void negative() { assertEquals(3, Calc.abs(-3)); } }\n")),
                 List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return n < 0 ? -n : n; } }\n")));
         var results = DevChecks.forDraft(local, d).stream().map(c -> c.run(d)).toList();
-        assertThat(results).allMatch(CheckResult::ok, results.toString());
+        assertThat(results).allMatch(GenCheckResult::ok, results.toString());
 
         DevDraft wrongSolution = TaskGenFixtures.withSolution(d, "package calc;\npublic class Calc { public static int abs(int n) { return n; } }\n");
-        assertThat(DevChecks.forDraft(local, wrongSolution).stream().map(c -> c.run(wrongSolution)).filter(r -> !r.ok()).map(CheckResult::name))
+        assertThat(DevChecks.forDraft(local, wrongSolution).stream().map(c -> c.run(wrongSolution)).filter(r -> !r.ok()).map(GenCheckResult::name))
                 .containsExactly(DevChecks.SOLVED_PASSES);
     }
 }

@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.service;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
@@ -18,7 +18,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.repository.TaskRepository;
 
 /**
  * 실제 OpenAI 와 실제 LocalJvmRunner 로 과제 1개를 만든다 (H2 테스트 DB, 비용 발생).
@@ -45,12 +45,12 @@ class TaskGenLiveTest {
     @Autowired DevTaskGenerator generator;
     @Autowired BizTaskGenerator bizGenerator;
     @Autowired GeneratedTaskWriter writer;
-    @Autowired TaskRecordRepository records;
+    @Autowired TaskRepository records;
     @Autowired ObjectMapper json;
 
     @Test
     void realGeneration() throws Exception {
-        TaskGenForm form = new TaskGenForm("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹쳐 쓰면 할인이 중복 적용됨", "SELF", 60).validated();
+        TaskGenRequest form = new TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹쳐 쓰면 할인이 중복 적용됨", "SELF", 60).validated();
         long t = System.nanoTime();
         var o = generator.generate(form, 1L, step -> System.out.println("[live] " + step));
         long sec = Math.round((System.nanoTime() - t) / 1e9);
@@ -67,7 +67,7 @@ class TaskGenLiveTest {
     /** 비개발: 실제 OpenAI 생성 + 실제 Claude 풀이 + 실제 PDF (로컬 파일 저장소). 결과는 build/taskgen-live-biz.json */
     @Test
     void realBizGeneration() throws Exception {
-        TaskGenForm form = new TaskGenForm("BIZ", "저가 요금제 출시 여부", "설문의 전환 의향을 실제 전환율로 보정하지 않음", "SELF", 60).validated();
+        TaskGenRequest form = new TaskGenRequest("BIZ", "저가 요금제 출시 여부", "설문의 전환 의향을 실제 전환율로 보정하지 않음", "SELF", 60).validated();
         long t = System.nanoTime();
         var o = bizGenerator.generate(form, 1L, step -> System.out.println("[live-biz] " + step));
         long sec = Math.round((System.nanoTime() - t) / 1e9);

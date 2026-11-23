@@ -1,6 +1,6 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,10 +26,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.ChatAttachmentService.Ref;
-import com.pair.domain.attempt.service.ChatTurn.AssistantRequest;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.attempt.service.ChatTurnState.AssistantRequest;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
@@ -48,11 +48,11 @@ class ChatAttachmentContextLimitTest {
     }
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AuthService auth;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
     @MockitoBean AssistantClient assistant;
     @MockitoBean JavaMailSender mail;
 

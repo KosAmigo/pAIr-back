@@ -14,8 +14,8 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.task.service.TaskCatalog;
 
@@ -31,7 +31,7 @@ public class ParticipantProgress {
      * attempts: 과제 code → 응시 ID, submitted: 과제 code → 제출했는지, records: 응시 행 (과제 순서)
      */
     public record Progress(Instant startedAt, Instant submittedAt, Map<String, String> attempts, Map<String, Boolean> submitted,
-            List<AttemptRecord> records) {
+            List<Attempt> records) {
 
         static final Progress NONE = new Progress(null, null, Map.of(), Map.of(), List.of());
 
@@ -44,10 +44,10 @@ public class ParticipantProgress {
         }
     }
 
-    private final AttemptRecordRepository records;
+    private final AttemptRepository records;
     private final TaskCatalog catalog;
 
-    public ParticipantProgress(AttemptRecordRepository records, TaskCatalog catalog) {
+    public ParticipantProgress(AttemptRepository records, TaskCatalog catalog) {
         this.records = records;
         this.catalog = catalog;
     }
@@ -61,31 +61,31 @@ public class ParticipantProgress {
     @Transactional(readOnly = true)
     public Map<Long, Progress> of(Collection<ExamParticipant> ps) {
         if (ps.isEmpty()) return Map.of();
-        List<AttemptRecord> all = records.findByParticipantIdIn(ps.stream().map(ExamParticipant::getId).toList());
-        Map<Long, String> codes = catalog.codes(all.stream().map(AttemptRecord::getTaskId).distinct().toList());
-        Map<Long, List<AttemptRecord>> byParticipant = all.stream().collect(Collectors.groupingBy(AttemptRecord::getParticipantId));
+        List<Attempt> all = records.findByParticipantIdIn(ps.stream().map(ExamParticipant::getId).toList());
+        Map<Long, String> codes = catalog.codes(all.stream().map(Attempt::getTaskId).distinct().toList());
+        Map<Long, List<Attempt>> byParticipant = all.stream().collect(Collectors.groupingBy(Attempt::getParticipantId));
         Map<Long, Progress> out = new HashMap<>();
         for (ExamParticipant p : ps) {
-            List<AttemptRecord> rs = byParticipant.getOrDefault(p.getId(), List.of());
+            List<Attempt> rs = byParticipant.getOrDefault(p.getId(), List.of());
             out.put(p.getId(), rs.isEmpty() ? Progress.NONE : build(rs, codes, p.getSession().getTaskIds()));
         }
         return out;
     }
 
-    private static Progress build(List<AttemptRecord> rs, Map<Long, String> codes, List<Long> sessionTasks) {
-        List<AttemptRecord> sorted = rs.stream()
-                .sorted(Comparator.comparingInt((AttemptRecord r) -> order(sessionTasks, r.getTaskId())).thenComparing(AttemptRecord::getId))
+    private static Progress build(List<Attempt> rs, Map<Long, String> codes, List<Long> sessionTasks) {
+        List<Attempt> sorted = rs.stream()
+                .sorted(Comparator.comparingInt((Attempt r) -> order(sessionTasks, r.getTaskId())).thenComparing(Attempt::getId))
                 .toList();
         Map<String, String> attempts = new LinkedHashMap<>();
         Map<String, Boolean> submitted = new LinkedHashMap<>();
-        for (AttemptRecord r : sorted) {
+        for (Attempt r : sorted) {
             String code = codes.get(r.getTaskId());
             attempts.put(code, String.valueOf(r.getId()));
             submitted.put(code, r.isSubmitted());
         }
-        Instant started = sorted.stream().map(AttemptRecord::getStartedAt).filter(Objects::nonNull).min(Comparator.naturalOrder()).orElse(null);
-        boolean all = sorted.size() >= sessionTasks.size() && sorted.stream().allMatch(AttemptRecord::isSubmitted);
-        Instant done = all ? sorted.stream().map(AttemptRecord::getSubmittedAt).max(Comparator.naturalOrder()).orElse(null) : null;
+        Instant started = sorted.stream().map(Attempt::getStartedAt).filter(Objects::nonNull).min(Comparator.naturalOrder()).orElse(null);
+        boolean all = sorted.size() >= sessionTasks.size() && sorted.stream().allMatch(Attempt::isSubmitted);
+        Instant done = all ? sorted.stream().map(Attempt::getSubmittedAt).max(Comparator.naturalOrder()).orElse(null) : null;
         return new Progress(started, done, Collections.unmodifiableMap(attempts), Collections.unmodifiableMap(submitted), sorted);
     }
 

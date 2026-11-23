@@ -10,14 +10,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import com.pair.domain.grader.service.PromptVersion;
+import com.pair.domain.grader.service.PromptVersionState;
 import com.pair.domain.scoring.service.Rubric.Check;
-import com.pair.domain.scoring.entity.PromptVersionRecord;
-import com.pair.domain.scoring.repository.PromptVersionRecordRepository;
-import com.pair.domain.scoring.entity.RubricCheckRecord;
-import com.pair.domain.scoring.repository.RubricCheckRecordRepository;
-import com.pair.domain.scoring.entity.RubricItemRecord;
-import com.pair.domain.scoring.repository.RubricItemRecordRepository;
+import com.pair.domain.scoring.entity.PromptVersion;
+import com.pair.domain.scoring.repository.PromptVersionRepository;
+import com.pair.domain.scoring.entity.RubricCheck;
+import com.pair.domain.scoring.repository.RubricCheckRepository;
+import com.pair.domain.scoring.entity.RubricItem;
+import com.pair.domain.scoring.repository.RubricItemRepository;
 
 /**
  * 코드의 채점 기준(Rubric)을 DB 의 채점 기준 테이블에 맞춘다. 항목, 체크는 시작할 때 한 번 upsert 한다.
@@ -26,16 +26,16 @@ import com.pair.domain.scoring.repository.RubricItemRecordRepository;
 @Component
 public class ScoringCatalog {
 
-    private final RubricItemRecordRepository items;
-    private final RubricCheckRecordRepository checks;
-    private final PromptVersionRecordRepository versions;
+    private final RubricItemRepository items;
+    private final RubricCheckRepository checks;
+    private final PromptVersionRepository versions;
     private final TransactionTemplate tx;
 
     /** Rubric.key(check) → check_id */
     private Map<String, Long> checkIds;
 
-    public ScoringCatalog(RubricItemRecordRepository items, RubricCheckRecordRepository checks,
-                          PromptVersionRecordRepository versions,
+    public ScoringCatalog(RubricItemRepository items, RubricCheckRepository checks,
+                          PromptVersionRepository versions,
                           PlatformTransactionManager txManager) {
         this.items = items;
         this.checks = checks;
@@ -54,16 +54,16 @@ public class ScoringCatalog {
         checkIds = tx.execute(status -> {
             for (int i = 0; i < Rubric.ITEMS.size(); i++) {
                 Rubric.Item it = Rubric.ITEMS.get(i);
-                RubricItemRecord rec = items.findById(it.key()).orElse(null);
-                if (rec == null) items.save(new RubricItemRecord(it.key(), it.name(), it.max(), i));
+                RubricItem rec = items.findById(it.key()).orElse(null);
+                if (rec == null) items.save(new RubricItem(it.key(), it.name(), it.max(), i));
                 else rec.update(it.name(), it.max(), i);
             }
             items.flush();
             Map<String, Long> map = new HashMap<>();
             for (Check c : Rubric.CHECKS) {
                 String track = c.track().name();
-                RubricCheckRecord rec = checks.findByCodeAndTrack(c.code(), track).orElse(null);
-                if (rec == null) rec = new RubricCheckRecord(c.item(), c.code(), track, c.method().name(), c.points(), c.label());
+                RubricCheck rec = checks.findByCodeAndTrack(c.code(), track).orElse(null);
+                if (rec == null) rec = new RubricCheck(c.item(), c.code(), track, c.method().name(), c.points(), c.label());
                 else rec.update(c.item(), c.method().name(), c.points(), c.label());
                 map.put(Rubric.key(c), checks.save(rec).getId());
             }
@@ -80,8 +80,8 @@ public class ScoringCatalog {
     }
 
     /** 프롬프트 버전의 DB version_id. 버전은 PromptStore 가 DB 에 저장하므로 name(버전 id)으로 행 id 만 찾는다. */
-    public long versionId(PromptVersion v) {
-        return versions.findFirstByNameOrderByIdAsc(v.id()).map(PromptVersionRecord::getId)
+    public long versionId(PromptVersionState v) {
+        return versions.findFirstByNameOrderByIdAsc(v.id()).map(PromptVersion::getId)
                 .orElseThrow(() -> new IllegalStateException("DB 에 없는 프롬프트 버전입니다: " + v.id()));
     }
 }

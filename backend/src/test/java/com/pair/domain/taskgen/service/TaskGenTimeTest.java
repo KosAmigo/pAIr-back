@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.service;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
 /** 제한 시간(20/40/60)에 따른 폼 검사, 프롬프트 깊이 문구, d4 시점, 난이도 정리 */
 class TaskGenTimeTest {
 
-    private static TaskGenForm form(String track, Integer minutes) {
-        return new TaskGenForm(track, "주제", "함정", "SELF", minutes);
+    private static TaskGenRequest form(String track, Integer minutes) {
+        return new TaskGenRequest(track, "주제", "함정", "SELF", minutes);
     }
 
     @Test

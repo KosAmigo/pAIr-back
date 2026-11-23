@@ -1,6 +1,7 @@
 package com.pair.domain.taskgen.service;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.exception.TooManyJobsException;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import com.pair.global.config.TaskGenProperties;
 import com.pair.infra.storage.TaskFileStorageGuard;
 import java.time.Duration;
@@ -33,7 +34,7 @@ public class TaskGenJobs {
 
     /** GET /api/admin/task-gen/{jobId} 응답. DONE 이어도 passed 가 false 면 확인에 실패한 채 검수 전으로 저장된 것 */
     public record JobStatus(String jobId, State status, String step, String taskCode, Boolean passed,
-            List<CheckResult> checks, String error) {}
+            List<GenCheckResult> checks, String error) {}
 
     private static final class Job {
         final String id = UUID.randomUUID().toString();
@@ -43,7 +44,7 @@ public class TaskGenJobs {
         volatile String step = "대기 중";
         volatile String taskCode;
         volatile Boolean passed;
-        volatile List<CheckResult> checks = List.of();
+        volatile List<GenCheckResult> checks = List.of();
         volatile String error;
 
         JobStatus view() {
@@ -66,7 +67,7 @@ public class TaskGenJobs {
     }
 
     /** 폼은 검증이 끝난 것이어야 한다. 작업을 시작하고 jobId 를 돌려준다 */
-    public String start(TaskGenForm form, long adminId) {
+    public String start(TaskGenRequest form, long adminId) {
         storageGuard.requireSafe(form.track()); // AI 를 부르기 전에 막는다
         Job job = new Job();
         synchronized (this) {
@@ -87,7 +88,7 @@ public class TaskGenJobs {
         return j.view();
     }
 
-    private void run(Job job, TaskGenForm form, long adminId) {
+    private void run(Job job, TaskGenRequest form, long adminId) {
         try {
             TaskGenerator<?> generator = "BIZ".equals(form.track()) ? biz : dev;
             TaskGenerator.Outcome o = generator.generate(form, adminId, step -> job.step = step);

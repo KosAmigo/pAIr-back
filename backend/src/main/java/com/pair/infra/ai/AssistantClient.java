@@ -17,8 +17,8 @@ import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.stereotype.Component;
 
-import com.pair.domain.attempt.service.ChatTurn.AssistantRequest;
-import com.pair.global.config.AiKeys;
+import com.pair.domain.attempt.service.ChatTurnState.AssistantRequest;
+import com.pair.global.config.AiKeyProperties;
 
 /** 응시자가 쓰는 AI 어시스턴트 (Spring AI OpenAI). */
 @Component
@@ -27,10 +27,10 @@ public class AssistantClient {
     /** finishReason: stop, length(한도에 걸려 잘림) 등. reasoningTokens: 추론에 쓴 토큰(출력 토큰에 포함, 출력 가격으로 과금). */
     public record Reply(String text, String model, long inputTokens, long outputTokens, long reasoningTokens, String finishReason, long latencyMs) {}
 
-    private final AiKeys keys;
+    private final AiKeyProperties keys;
     private volatile OpenAiChatModel chatModel;
 
-    public AssistantClient(AiKeys keys) {
+    public AssistantClient(AiKeyProperties keys) {
         this.keys = keys;
     }
 
@@ -93,7 +93,7 @@ public class AssistantClient {
     private Prompt prompt(AssistantRequest req, boolean streamUsage) {
         List<Message> messages = new ArrayList<>();
         messages.add(new SystemMessage(req.systemPrompt()));
-        for (com.pair.domain.attempt.service.ChatTurn.Message m : req.messages()) {
+        for (com.pair.domain.attempt.service.ChatTurnState.Message m : req.messages()) {
             messages.add("user".equals(m.role()) ? new UserMessage(m.content()) : new AssistantMessage(m.content()));
         }
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
@@ -107,7 +107,7 @@ public class AssistantClient {
     public Reply send(AssistantRequest req) {
         List<Message> messages = new ArrayList<>();
         messages.add(new SystemMessage(req.systemPrompt()));
-        for (com.pair.domain.attempt.service.ChatTurn.Message m : req.messages()) {
+        for (com.pair.domain.attempt.service.ChatTurnState.Message m : req.messages()) {
             messages.add("user".equals(m.role()) ? new UserMessage(m.content()) : new AssistantMessage(m.content()));
         }
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()

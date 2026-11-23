@@ -1,8 +1,9 @@
 package com.pair.domain.task;
 
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.auth.dto.AuthResponse;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -28,12 +29,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.infra.storage.TaskFileStorage;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
@@ -55,15 +55,15 @@ class TaskMaterialApiTest {
     @Autowired MockMvc mvc;
     @Autowired AuthService auth;
     @Autowired AttemptService attempts;
-    @Autowired AttemptRecordRepository attemptRecords;
-    @Autowired TaskRecordRepository tasks;
-    @Autowired TaskFileRecordRepository files;
-    @Autowired DocumentPageRecordRepository pages;
+    @Autowired AttemptRepository attemptRecords;
+    @Autowired TaskRepository tasks;
+    @Autowired TaskFileRepository files;
+    @Autowired DocumentPageRepository pages;
     @Autowired TaskFileStorage storage;
     @MockitoBean JavaMailSender mail;
 
-    AuthDtos.AuthResponse owner;
-    AuthDtos.AuthResponse other;
+    AuthResponse owner;
+    AuthResponse other;
     String id;
 
     @BeforeEach
@@ -74,7 +74,7 @@ class TaskMaterialApiTest {
         id = attempts.startSelf(TestTasks.SELF_BIZ, owner.user().id()).id();
     }
 
-    private ResultActions call(String sub, AuthDtos.AuthResponse who, String path, String pagesSpec) throws Exception {
+    private ResultActions call(String sub, AuthResponse who, String path, String pagesSpec) throws Exception {
         var req = get("/api/attempts/{id}/materials" + sub, id);
         if (who != null) req.header("Authorization", "Bearer " + who.token());
         if (path != null) req.param("path", path);
@@ -105,7 +105,7 @@ class TaskMaterialApiTest {
     @Test
     void 실전_응시는_원본_과제의_자료를_쓴다() throws Exception {
         // 과제 4(실전 복사본, 원본 2). 실전 응시는 로그인 없이 들어온다
-        AttemptRecord live = attemptRecords.save(AttemptRecord.live(null, 4L, "m", Instant.now()));
+        Attempt live = attemptRecords.save(Attempt.live(null, 4L, "m", Instant.now()));
         mvc.perform(get("/api/attempts/{id}/materials", live.getId())).andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)));
         mvc.perform(get("/api/attempts/{id}/materials/pages", live.getId()).param("path", MaterialFixtures.PDF2_PATH))
@@ -164,8 +164,8 @@ class TaskMaterialApiTest {
 
     @Test
     void 제출_뒤에도_읽을_수_있다() throws Exception {
-        AttemptRecord r = attemptRecords.findById(Long.parseLong(id)).orElseThrow();
-        r.sync(Attempt.Status.FOLLOWUP, Instant.now(), null);
+        Attempt r = attemptRecords.findById(Long.parseLong(id)).orElseThrow();
+        r.sync(AttemptState.Status.FOLLOWUP, Instant.now(), null);
         attemptRecords.save(r);
         call("", owner, null, null).andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(2)));
     }

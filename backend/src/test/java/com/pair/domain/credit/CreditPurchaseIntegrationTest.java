@@ -4,7 +4,7 @@ import com.pair.domain.credit.entity.CreditPurchase;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
 import com.pair.domain.credit.service.CreditPurchaseService;
 import com.pair.domain.credit.service.CreditService;
-import com.pair.domain.credit.service.InsufficientCreditException;
+import com.pair.domain.credit.exception.InsufficientCreditException;
 import com.pair.infra.payment.PaymentUnavailableException;
 import com.pair.infra.payment.TossPaymentClient;
 import static org.assertj.core.api.Assertions.*;

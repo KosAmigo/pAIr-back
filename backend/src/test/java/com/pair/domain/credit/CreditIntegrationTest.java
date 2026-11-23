@@ -1,9 +1,10 @@
 package com.pair.domain.credit;
 
+import com.pair.domain.auth.dto.AuthResponse;
 import com.pair.domain.credit.entity.CreditLedger;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
 import com.pair.domain.credit.service.CreditService;
-import com.pair.domain.credit.service.InsufficientCreditException;
+import com.pair.domain.credit.exception.InsufficientCreditException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,16 +42,15 @@ import org.springframework.mail.javamail.JavaMailSender;
 import com.pair.infra.ai.AiUnavailableException;
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.entity.AttemptRecord;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.domain.attempt.service.CheckpointService;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.repository.AuthAccountRepository;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
@@ -64,9 +64,9 @@ class CreditIntegrationTest {
     @Autowired CreditLedgerRepository ledger;
     @Autowired AttemptService attempts;
     @Autowired AttemptRegistry registry;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired CheckpointService checkpoints;
-    @Autowired TaskRecordRepository tasks;
+    @Autowired TaskRepository tasks;
     @Autowired MockMvc mvc;
     @MockitoBean AssistantClient assistant;
     @MockitoBean JavaMailSender mail;
@@ -76,7 +76,7 @@ class CreditIntegrationTest {
         TestTasks.seed(tasks);
     }
 
-    private AuthDtos.AuthResponse signup() {
+    private AuthResponse signup() {
         return AuthTestSupport.signup(auth, mail, "Test", UUID.randomUUID() + "@example.com");
     }
 
@@ -202,10 +202,10 @@ class CreditIntegrationTest {
     @Test
     void liveAttemptChatRemainsUncharged() {
         Instant now = Instant.now();
-        AttemptRecord record = registry.save(AttemptRecord.live(1L, 3L, "test", now));
+        Attempt record = registry.save(Attempt.live(1L, 3L, "test", now));
         String id = record.getId().toString();
-        store.create(new Attempt(id, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
-                Attempt.Status.SOLVING, List.of(), null, null), Map.of());
+        store.create(new AttemptState(id, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
+                AttemptState.Status.SOLVING, List.of(), null, null), Map.of());
         when(assistant.send(any())).thenReturn(new AssistantClient.Reply("answer", "test", 10, 20, 0, "stop", 1));
         long before = ledger.count();
         attempts.chat(id, "hello");

@@ -1,10 +1,10 @@
 package com.pair.domain.task;
 
-import com.pair.domain.task.entity.DocumentPageRecord;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.DocumentPage;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import java.nio.charset.StandardCharsets;
 
 import com.pair.infra.storage.TaskFileStorage;
@@ -20,23 +20,23 @@ final class MaterialFixtures {
 
     private MaterialFixtures() {}
 
-    static void seed(TaskRecordRepository tasks, TaskFileRecordRepository files, DocumentPageRecordRepository pages, TaskFileStorage storage) {
+    static void seed(TaskRepository tasks, TaskFileRepository files, DocumentPageRepository pages, TaskFileStorage storage) {
         TestTasks.seed(tasks);
         pages.deleteAll(pages.findAll());
         files.deleteAll(files.findAll().stream().filter(f -> f.getTaskId() <= 2).toList());
-        files.save(new TaskFileRecord(2L, "자료/표.csv", "a,b\n1,2\n", "text/csv", 8, TaskFileRecord.VISIBLE, true));
-        pdf(files, storage, 2L, PDF_PATH, 1, TaskFileRecord.VISIBLE);
-        pdf(files, storage, 2L, PDF2_PATH, 2, TaskFileRecord.VISIBLE);
-        pdf(files, storage, 2L, HIDDEN_PATH, 3, TaskFileRecord.HIDDEN);
-        pdf(files, storage, 1L, OTHER_PATH, 1, TaskFileRecord.VISIBLE);
-        TaskFileRecord f = files.findByTaskIdAndPath(2L, PDF_PATH).orElseThrow();
-        for (int i = 1; i <= 25; i++) pages.save(new DocumentPageRecord(f.getId(), i, i + "쪽 글"));
-        pages.save(new DocumentPageRecord(files.findByTaskIdAndPath(2L, PDF2_PATH).orElseThrow().getId(), 1, "비교 1쪽"));
-        pages.save(new DocumentPageRecord(files.findByTaskIdAndPath(2L, HIDDEN_PATH).orElseThrow().getId(), 1, "숨은 글"));
+        files.save(new TaskFile(2L, "자료/표.csv", "a,b\n1,2\n", "text/csv", 8, TaskFile.VISIBLE, true));
+        pdf(files, storage, 2L, PDF_PATH, 1, TaskFile.VISIBLE);
+        pdf(files, storage, 2L, PDF2_PATH, 2, TaskFile.VISIBLE);
+        pdf(files, storage, 2L, HIDDEN_PATH, 3, TaskFile.HIDDEN);
+        pdf(files, storage, 1L, OTHER_PATH, 1, TaskFile.VISIBLE);
+        TaskFile f = files.findByTaskIdAndPath(2L, PDF_PATH).orElseThrow();
+        for (int i = 1; i <= 25; i++) pages.save(new DocumentPage(f.getId(), i, i + "쪽 글"));
+        pages.save(new DocumentPage(files.findByTaskIdAndPath(2L, PDF2_PATH).orElseThrow().getId(), 1, "비교 1쪽"));
+        pages.save(new DocumentPage(files.findByTaskIdAndPath(2L, HIDDEN_PATH).orElseThrow().getId(), 1, "숨은 글"));
     }
 
-    private static void pdf(TaskFileRecordRepository files, TaskFileStorage storage, long task, String path, int index, String visibility) {
-        TaskFileRecord r = new TaskFileRecord(task, path, null, "application/pdf", BYTES.length, visibility, true);
+    private static void pdf(TaskFileRepository files, TaskFileStorage storage, long task, String path, int index, String visibility) {
+        TaskFile r = new TaskFile(task, path, null, "application/pdf", BYTES.length, visibility, true);
         r.setStorageKey(TaskFileStorage.keyOf(task, index));
         files.save(r);
         storage.put(r.getStorageKey(), BYTES);

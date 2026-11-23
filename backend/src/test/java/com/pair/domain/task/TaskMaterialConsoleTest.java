@@ -1,9 +1,9 @@
 package com.pair.domain.task;
 
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -47,17 +47,17 @@ class TaskMaterialConsoleTest {
     }
 
     @Autowired MockMvc mvc;
-    @Autowired TaskRecordRepository tasks;
-    @Autowired TaskFileRecordRepository files;
-    @Autowired DocumentPageRecordRepository pages;
+    @Autowired TaskRepository tasks;
+    @Autowired TaskFileRepository files;
+    @Autowired DocumentPageRepository pages;
     @Autowired TaskFileStorage storage;
     @MockitoBean JavaMailSender mail;
 
     @BeforeEach
     void setUp() {
         MaterialFixtures.seed(tasks, files, pages, storage);
-        TaskRecord t = tasks.findByCode(TestTasks.SELF_BIZ).orElseThrow();
-        t.changeStatus(TaskRecord.Status.HIDDEN, Instant.now());
+        Task t = tasks.findByCode(TestTasks.SELF_BIZ).orElseThrow();
+        t.changeStatus(Task.Status.HIDDEN, Instant.now());
         tasks.save(t);
     }
 

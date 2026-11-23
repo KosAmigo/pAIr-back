@@ -1,5 +1,6 @@
 package com.pair.domain.exam;
 
+import com.pair.domain.exam.dto.EnvCheckResponse;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
@@ -34,11 +35,10 @@ import com.pair.domain.exam.service.ExamEntryService;
 import com.pair.domain.exam.service.ExamSessionService;
 import com.pair.domain.exam.service.InvitesCreated;
 import com.pair.domain.exam.service.NoticeService;
-import com.pair.domain.exam.dto.ExamDtos.ConsentRequest;
-import com.pair.domain.exam.dto.ExamDtos.EnvCheckSource;
-import com.pair.domain.exam.dto.ExamDtos.ParticipantInput;
-import com.pair.domain.exam.dto.ExamDtos.SessionRequest;
-import com.pair.domain.exam.dto.ExamDtos.SessionSummary;
+import com.pair.domain.exam.dto.ConsentRequest;
+import com.pair.domain.exam.dto.ParticipantInputDto;
+import com.pair.domain.exam.dto.ExamSessionRequest;
+import com.pair.domain.exam.dto.SessionSummaryResponse;
 
 import jakarta.mail.internet.MimeMessage;
 
@@ -75,9 +75,9 @@ class EnvNoticeIntegrationTest {
     @Autowired ExamParticipantRepository participants;
     @Autowired ObjectMapper json;
     @Autowired ApplicationEvents appEvents;
-    @Autowired com.pair.domain.task.repository.TaskRecordRepository taskRecords;
-    @Autowired com.pair.domain.task.repository.TaskFileRecordRepository taskFiles;
-    @Autowired com.pair.domain.task.repository.TaskQuestionRecordRepository taskQuestions;
+    @Autowired com.pair.domain.task.repository.TaskRepository taskRecords;
+    @Autowired com.pair.domain.task.repository.TaskFileRepository taskFiles;
+    @Autowired com.pair.domain.task.repository.TaskQuestionRepository taskQuestions;
 
     @MockitoBean com.pair.domain.exam.service.AttemptSubmitter attempts;
     @MockitoBean JavaMailSender mail;
@@ -92,7 +92,7 @@ class EnvNoticeIntegrationTest {
     @Test
     @DisplayName("점검 진행 상태를 올리면 콘솔이 실시간(LIVE)으로 보고, 동의로 저장되면 저장 결과(SAVED)를 본다")
     void liveThenSaved() {
-        SessionSummary s = createSession(301L, true);
+        SessionSummaryResponse s = createSession(301L, true);
         String token = invite(s.id(), "live@test.dev");
         Long pid = pid(s.id(), "live@test.dev");
 
@@ -100,7 +100,7 @@ class EnvNoticeIntegrationTest {
 
         envCheck.saveProgress(token, json.createObjectNode().put("light", "warn"));
         var live = envCheck.view(s.id(), pid);
-        assertThat(live.source()).isEqualTo(EnvCheckSource.LIVE);
+        assertThat(live.source()).isEqualTo(EnvCheckResponse.Source.LIVE);
         assertThat(live.result().get("light").asText()).isEqualTo("warn");
         assertThat(live.updatedAt()).isEqualTo(T0);
 
@@ -111,14 +111,14 @@ class EnvNoticeIntegrationTest {
         clock.advance(Duration.ofSeconds(30));
         entry.consent(token, new ConsentRequest("v1", json.createObjectNode().put("light", "fail")));
         var saved = envCheck.view(s.id(), pid);
-        assertThat(saved.source()).isEqualTo(EnvCheckSource.SAVED);
+        assertThat(saved.source()).isEqualTo(EnvCheckResponse.Source.SAVED);
         assertThat(saved.result().get("light").asText()).isEqualTo("fail");
     }
 
     @Test
     @DisplayName("저장 뒤 다시 점검하며 올린 진행 상태가 더 최근이면 실시간 값을 보여 준다")
     void newerProgressWinsOverSaved() {
-        SessionSummary s = createSession(302L, true);
+        SessionSummaryResponse s = createSession(302L, true);
         String token = invite(s.id(), "again@test.dev");
         Long pid = pid(s.id(), "again@test.dev");
         entry.consent(token, new ConsentRequest("v1", json.createObjectNode().put("light", "fail")));
@@ -126,13 +126,13 @@ class EnvNoticeIntegrationTest {
         clock.advance(Duration.ofSeconds(10));
         envCheck.saveProgress(token, json.createObjectNode().put("light", "pass"));
 
-        assertThat(envCheck.view(s.id(), pid).source()).isEqualTo(EnvCheckSource.LIVE);
+        assertThat(envCheck.view(s.id(), pid).source()).isEqualTo(EnvCheckResponse.Source.LIVE);
     }
 
     @Test
     @DisplayName("진행 상태: 잘못된 링크·감독 안 쓰는 회차·너무 큰 값·끝난 회차는 거절하고, 다른 회차 번호로는 볼 수 없다")
     void progressRejects() {
-        SessionSummary s = createSession(303L, true);
+        SessionSummaryResponse s = createSession(303L, true);
         String token = invite(s.id(), "rej@test.dev");
         Long pid = pid(s.id(), "rej@test.dev");
 
@@ -141,11 +141,11 @@ class EnvNoticeIntegrationTest {
         var big = json.createObjectNode().put("blob", "a".repeat(EnvCheckService.MAX_CHARS + 1));
         assertThatThrownBy(() -> envCheck.saveProgress(token, big)).hasMessageContaining("너무 깁니다");
 
-        SessionSummary plain = createSession(304L, false);
+        SessionSummaryResponse plain = createSession(304L, false);
         String plainToken = invite(plain.id(), "plain@test.dev");
         assertThatThrownBy(() -> envCheck.saveProgress(plainToken, json.createObjectNode())).hasMessageContaining("감독");
 
-        SessionSummary other = createSession(305L, true);
+        SessionSummaryResponse other = createSession(305L, true);
         assertThatThrownBy(() -> envCheck.view(other.id(), pid)).isInstanceOf(NoSuchElementException.class);
 
         clock.set(s.endsAt().plus(Duration.ofHours(2)));
@@ -155,7 +155,7 @@ class EnvNoticeIntegrationTest {
     @Test
     @DisplayName("안내 메시지: 보내면 응시자가 받고, 확인하면 콘솔 목록에 읽은 시각이 남는다")
     void sendReadFlow() {
-        SessionSummary s = createSession(310L, true);
+        SessionSummaryResponse s = createSession(310L, true);
         String token = invite(s.id(), "msg@test.dev");
         Long pid = pid(s.id(), "msg@test.dev");
 
@@ -177,7 +177,7 @@ class EnvNoticeIntegrationTest {
     @Test
     @DisplayName("안내 메시지는 시험 중에도 보낼 수 있고, 새로 보낸 것이 목록 맨 뒤에 온다")
     void sendDuringExam() {
-        SessionSummary s = createSession(311L, true);
+        SessionSummaryResponse s = createSession(311L, true);
         String token = invite(s.id(), "during@test.dev");
         Long pid = pid(s.id(), "during@test.dev");
         var first = notices.send(s.id(), pid, "첫째", 7L);
@@ -191,7 +191,7 @@ class EnvNoticeIntegrationTest {
     @Test
     @DisplayName("안내 메시지 검증: 빈 내용·500자 초과·끝난/취소 회차는 거절하고, 남의 메시지는 읽음 처리할 수 없다")
     void noticeRejects() {
-        SessionSummary s = createSession(312L, true);
+        SessionSummaryResponse s = createSession(312L, true);
         String token = invite(s.id(), "nrej@test.dev");
         Long pid = pid(s.id(), "nrej@test.dev");
 
@@ -200,7 +200,7 @@ class EnvNoticeIntegrationTest {
                 .isInstanceOf(IllegalArgumentException.class);
         notices.send(s.id(), pid, "가".repeat(NoticeService.MAX_LENGTH), 7L); // 정확히 한도는 허용
 
-        SessionSummary other = createSession(313L, true);
+        SessionSummaryResponse other = createSession(313L, true);
         assertThatThrownBy(() -> notices.send(other.id(), pid, "x", 7L)).isInstanceOf(NoSuchElementException.class);
         assertThatThrownBy(() -> notices.listOf(other.id(), pid)).isInstanceOf(NoSuchElementException.class);
 
@@ -217,13 +217,13 @@ class EnvNoticeIntegrationTest {
         assertThat(notices.forEntry(token)).hasSize(1); // 끝난 뒤에도 받은 메시지는 읽을 수 있다
     }
 
-    private SessionSummary createSession(Long company, boolean proctoring) {
-        return sessions.create(new SessionRequest(company, "점검 회차", clock.instant().plus(Duration.ofMinutes(10)),
+    private SessionSummaryResponse createSession(Long company, boolean proctoring) {
+        return sessions.create(new ExamSessionRequest(company, "점검 회차", clock.instant().plus(Duration.ofMinutes(10)),
                 clock.instant().plus(Duration.ofMinutes(70)), proctoring, List.of(com.pair.domain.task.TestTasks.LIVE_DEV)), 1L);
     }
 
     private String invite(Long sessionId, String email) {
-        sessions.addParticipants(sessionId, List.of(new ParticipantInput("응시자", email)));
+        sessions.addParticipants(sessionId, List.of(new ParticipantInputDto("응시자", email)));
         Long id = pid(sessionId, email);
         return appEvents.stream(InvitesCreated.class).flatMap(e -> e.invites().stream())
                 .filter(i -> i.participantId().equals(id)).reduce((a, b) -> b).orElseThrow().token();

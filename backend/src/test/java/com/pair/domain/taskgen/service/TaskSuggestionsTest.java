@@ -32,8 +32,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.pair.infra.ai.AiUnavailableException;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.global.security.HeaderCurrentUserResolver;
 
 /** 주제·함정 추천 API: 가짜 AI 로 개수·겹침 재요청·프롬프트 내용·권한·분당 한도를 확인한다 */
@@ -79,7 +79,7 @@ class TaskSuggestionsTest {
     @Autowired MockMvc mvc;
     @MockitoBean JavaMailSender mail;
     @Autowired FakeAi ai;
-    @Autowired TaskRecordRepository records;
+    @Autowired TaskRepository records;
 
     private static int nextAdmin = 100; // 분당 한도가 테스트끼리 섞이지 않게 테스트마다 다른 관리자 번호
     private int admin;
@@ -175,8 +175,8 @@ class TaskSuggestionsTest {
     @Test
     @DisplayName("이미 있는 과제 제목·소개와 exclude 가 프롬프트에 들어가고, jobRole·difficulty 를 보내도 무시한다")
     void promptHasExisting() throws Exception {
-        TaskRecord t = new TaskRecord(9001L, "sug-existing", "겹치면 안 되는 제목", "DEV", 60, TaskRecord.Usage.SELF,
-                TaskRecord.Status.HIDDEN, null, 1L, Instant.parse("2026-11-20T00:00:00Z"));
+        Task t = new Task(9001L, "sug-existing", "겹치면 안 되는 제목", "DEV", 60, Task.Usage.SELF,
+                Task.Status.HIDDEN, null, 1L, Instant.parse("2026-11-20T00:00:00Z"));
         t.setCard("겹치면 안 되는 소개", "기능 구현", "중급");
         records.save(t);
         ai.script.add(three());

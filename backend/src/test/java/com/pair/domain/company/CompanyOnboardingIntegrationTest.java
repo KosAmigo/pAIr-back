@@ -1,7 +1,7 @@
 package com.pair.domain.company;
 
-import com.pair.domain.company.dto.CompanyInviteDtos;
-import com.pair.domain.company.dto.CompanyMemberDtos;
+import com.pair.domain.company.dto.InviteAcceptRequest;
+import com.pair.domain.company.dto.ReplaceManagerRequest;
 import com.pair.domain.company.service.CompanyAccountMailer;
 import com.pair.domain.company.service.CompanyInquiryService;
 import com.pair.domain.company.service.CompanyInviteService;
@@ -103,7 +103,7 @@ class CompanyOnboardingIntegrationTest {
         verify(mail).send(message.capture());
         String code = verificationCode(message.getValue());
 
-        var session = invites.accept(new CompanyInviteDtos.AcceptRequest(token, "감독관", "new-password-123", code));
+        var session = invites.accept(new InviteAcceptRequest(token, "감독관", "new-password-123", code));
         assertThat(session.user().role()).isEqualTo(CurrentUser.Role.PROCTOR);
         assertThat(session.user().companyId()).isEqualTo(companyId);
         assertThat(session.user().emailVerified()).isTrue();
@@ -121,7 +121,7 @@ class CompanyOnboardingIntegrationTest {
         ArgumentCaptor<String> temporaryPassword = ArgumentCaptor.forClass(String.class);
         verify(mailer).sendCredentials(org.mockito.ArgumentMatchers.any(AuthAccount.class),
                 temporaryPassword.capture());
-        var login = auth.login(new com.pair.domain.auth.dto.AuthDtos.Credentials(manager.getEmail(), temporaryPassword.getValue()));
+        var login = auth.login(new com.pair.domain.auth.dto.LoginRequest(manager.getEmail(), temporaryPassword.getValue()));
 
         mvc.perform(get("/api/console/sessions").header("Authorization", "Bearer " + login.token()))
                 .andExpect(status().isUnauthorized());
@@ -145,7 +145,7 @@ class CompanyOnboardingIntegrationTest {
                         .content("{\"currentPassword\":\"" + temporaryPassword.getValue()
                                 + "\",\"newPassword\":\"changed-password-123\"}"))
                 .andExpect(status().isNoContent());
-        var completed = auth.login(new com.pair.domain.auth.dto.AuthDtos.Credentials(manager.getEmail(), "changed-password-123"));
+        var completed = auth.login(new com.pair.domain.auth.dto.LoginRequest(manager.getEmail(), "changed-password-123"));
         assertThat(completed.user().passwordChangeRequired()).isFalse();
         mvc.perform(get("/api/console/sessions").header("Authorization", "Bearer " + completed.token()))
                 .andExpect(status().isOk());
@@ -183,7 +183,7 @@ class CompanyOnboardingIntegrationTest {
         long oldTokenVersion = oldManager.getTokenVersion();
 
         var replaced = members.replaceManager(companyId, new CurrentUser(admin.getId(), CurrentUser.Role.ADMIN, null),
-                new CompanyMemberDtos.ReplaceManagerRequest("새 매니저", "replacement-" + suffix + "@test.dev"));
+                new ReplaceManagerRequest("새 매니저", "replacement-" + suffix + "@test.dev"));
 
         AuthAccount withdrawn = accounts.findById(oldManager.getId()).orElseThrow();
         AuthAccount newManager = accounts.findById(replaced.managerUserId()).orElseThrow();

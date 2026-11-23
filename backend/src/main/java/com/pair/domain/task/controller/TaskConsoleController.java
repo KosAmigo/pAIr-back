@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.pair.domain.task.service.TaskCatalog;
 import com.pair.domain.task.service.TaskDef;
 import com.pair.domain.task.service.TaskMaterialService;
-import com.pair.domain.task.entity.TaskRecord;
+import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.service.TaskConsoleService.TaskSummary;
 import com.pair.global.security.CurrentUser;
 import com.pair.global.error.ForbiddenException;
@@ -49,7 +49,7 @@ public class TaskConsoleController {
         if (user.isAdmin()) return console.list();
         if (user.role() != CurrentUser.Role.MANAGER) throw new ForbiddenException("과제 목록 권한이 없습니다.");
         return console.list().stream()
-                .filter(t -> t.status() == TaskRecord.Status.OPEN && t.usage() == TaskRecord.Usage.LIVE).toList();
+                .filter(t -> t.status() == Task.Status.OPEN && t.usage() == Task.Usage.LIVE).toList();
     }
 
     @GetMapping("/{taskId}")
@@ -61,16 +61,16 @@ public class TaskConsoleController {
     @PostMapping("/{taskId}/publish")
     public TaskSummary publish(CurrentUser user, @PathVariable String taskId) {
         requireAdmin(user);
-        return console.changeStatus(taskId, TaskRecord.Status.OPEN);
+        return console.changeStatus(taskId, Task.Status.OPEN);
     }
 
     @PostMapping("/{taskId}/hide")
     public TaskSummary hide(CurrentUser user, @PathVariable String taskId) {
         requireAdmin(user);
-        return console.changeStatus(taskId, TaskRecord.Status.HIDDEN);
+        return console.changeStatus(taskId, Task.Status.HIDDEN);
     }
 
-    public record UsageRequest(TaskRecord.Usage usage) {}
+    public record UsageRequest(Task.Usage usage) {}
 
     /** 검수 전(HIDDEN) 원본 과제의 용도(SELF/LIVE) 바꾸기. 공개한 과제·실전 복사본은 409 */
     @PatchMapping("/{taskId}/usage")
@@ -105,7 +105,7 @@ public class TaskConsoleController {
     public org.springframework.http.ResponseEntity<byte[]> materialFile(CurrentUser user, @PathVariable String taskId,
             @org.springframework.web.bind.annotation.RequestParam String path) {
         requireAdmin(user);
-        return com.pair.domain.task.dto.MaterialResponses.pdf(materials.fileForTask(taskId, path));
+        return com.pair.domain.task.service.MaterialResponses.pdf(materials.fileForTask(taskId, path));
     }
 
     @GetMapping("/{taskId}/materials/pages")

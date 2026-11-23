@@ -1,6 +1,7 @@
 package com.pair.domain.company.service;
 
-import com.pair.domain.company.dto.CompanyInviteDtos;
+import com.pair.domain.company.dto.InviteAcceptRequest;
+import com.pair.domain.company.dto.InviteInfoResponse;
 import com.pair.domain.company.entity.Company;
 import com.pair.domain.company.entity.CompanyInvite;
 import com.pair.domain.company.repository.CompanyInviteRepository;
@@ -77,11 +78,11 @@ public class CompanyInviteService {
     }
 
     @Transactional(readOnly = true)
-    public CompanyInviteDtos.InviteInfo inspect(String token) {
+    public InviteInfoResponse inspect(String token) {
         CompanyInvite invite = findUsable(token);
         String companyName = companies.findById(invite.getCompanyId())
                 .orElseThrow(() -> new NoSuchElementException("회사를 찾을 수 없습니다.")).getName();
-        return new CompanyInviteDtos.InviteInfo(invite.getEmail(), invite.getRole().name(), companyName, invite.getExpiresAt());
+        return new InviteInfoResponse(invite.getEmail(), invite.getRole().name(), companyName, invite.getExpiresAt());
     }
 
     @Transactional
@@ -92,7 +93,7 @@ public class CompanyInviteService {
     }
 
     @Transactional
-    public com.pair.domain.auth.dto.AuthDtos.AuthResponse accept(CompanyInviteDtos.AcceptRequest request) {
+    public com.pair.domain.auth.dto.AuthResponse accept(InviteAcceptRequest request) {
         CompanyInvite invite = findUsableForUpdate(request.token());
         if (accounts.existsByEmailIgnoreCase(invite.getEmail())) throw new ConflictException("이미 가입된 이메일입니다.");
         var result = emailVerification.consume(invite.getEmail(), request.code());
@@ -101,7 +102,7 @@ public class CompanyInviteService {
         }
         var account = corporateAccounts.signupProctor(invite.getEmail(), request.name(), request.password(), invite.getCompanyId());
         invite.accept(account.getId(), Instant.now());
-        return auth.login(new com.pair.domain.auth.dto.AuthDtos.Credentials(invite.getEmail(), request.password()));
+        return auth.login(new com.pair.domain.auth.dto.LoginRequest(invite.getEmail(), request.password()));
     }
 
     private CompanyInvite findUsable(String rawToken) {

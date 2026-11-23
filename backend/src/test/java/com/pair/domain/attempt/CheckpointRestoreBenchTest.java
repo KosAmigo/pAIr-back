@@ -1,10 +1,10 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.attempt.service.Attempt;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.service.ChatTurn;
+import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.RollbackService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,8 +30,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.attempt.repository.CheckpointRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
@@ -64,12 +64,12 @@ class CheckpointRestoreBenchTest {
         r.add("spring.ai.anthropic.api-key", () -> "");
     }
 
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AttemptRegistry registry;
-    @Autowired TaskRepository tasks;
+    @Autowired TaskDefRepository tasks;
     @Autowired CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
-    @Autowired CheckpointRecordRepository checkpointRecords;
+    @Autowired CheckpointRepository checkpointRecords;
     @Autowired AuthService auth;
     @MockitoBean JavaMailSender mail;
 
@@ -101,7 +101,7 @@ class CheckpointRestoreBenchTest {
     record Row(int storedRows, double median, double p95, double max, double rollbackMs) {}
 
     Row run(Long userId, Map<String, String> original, int questions, boolean allFiles) {
-        AttemptRecord r = registry.save(AttemptRecord.self(userId, 1L, "gpt-test", Instant.now()));
+        Attempt r = registry.save(Attempt.self(userId, 1L, "gpt-test", Instant.now()));
         String id = String.valueOf(r.getId());
         store.create(attempt(id), original);
         List<String> paths = new ArrayList<>(original.keySet());
@@ -132,12 +132,12 @@ class CheckpointRestoreBenchTest {
         return new Row(stored, ms.get(ms.size() / 2), ms.get((int) Math.ceil(ms.size() * 0.95) - 1), ms.get(ms.size() - 1), rollbackMs);
     }
 
-    static ChatTurn turn(int no, String role) {
-        return new ChatTurn(no, role, Instant.now(), role + no, null, null, null, null, null, null);
+    static ChatTurnState turn(int no, String role) {
+        return new ChatTurnState(no, role, Instant.now(), role + no, null, null, null, null, null, null);
     }
 
-    static Attempt attempt(String id) {
-        return new Attempt(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
-                Attempt.Status.SOLVING, List.of(), null, null);
+    static AttemptState attempt(String id) {
+        return new AttemptState(id, "order-deadlock", "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptState.Status.SOLVING, List.of(), null, null);
     }
 }

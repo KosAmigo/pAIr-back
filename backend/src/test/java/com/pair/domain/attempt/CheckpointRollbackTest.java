@@ -1,11 +1,11 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.attempt.service.Attempt;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.service.ChatTurn;
+import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.domain.attempt.service.CheckpointService;
 import com.pair.domain.attempt.service.ReplayTreeService;
 import com.pair.domain.attempt.service.RollbackService;
@@ -38,20 +38,19 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.mail.javamail.JavaMailSender;
 
-import com.pair.domain.attempt.repository.CheckpointFileRecordRepository;
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
+import com.pair.domain.attempt.repository.CheckpointFileRepository;
+import com.pair.domain.attempt.repository.CheckpointRepository;
 import com.pair.domain.credit.entity.CreditLedger;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
 import com.pair.domain.credit.service.CreditService;
-import com.pair.domain.credit.service.InsufficientCreditException;
-import com.pair.domain.task.repository.TaskRecordRepository;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
+import com.pair.domain.credit.exception.InsufficientCreditException;
 import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.repository.AuthAccountRepository;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
@@ -68,17 +67,17 @@ class CheckpointRollbackTest {
         r.add("pair.data-dir", () -> dataDir.toString());
     }
 
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AttemptRegistry registry;
-    @Autowired AttemptRecordRepository records;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
-    @Autowired TaskRepository tasks;
+    @Autowired AttemptRepository records;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
+    @Autowired TaskDefRepository tasks;
     @MockitoSpyBean CheckpointService checkpoints;
     @Autowired RollbackService rollbacks;
-    @Autowired CheckpointRecordRepository checkpointRecords;
-    @Autowired CheckpointFileRecordRepository checkpointFiles;
+    @Autowired CheckpointRepository checkpointRecords;
+    @Autowired CheckpointFileRepository checkpointFiles;
     @Autowired AuthAccountRepository accounts;
     @Autowired ReplayTreeService replayTree;
     @Autowired AuthService auth;
@@ -102,7 +101,7 @@ class CheckpointRollbackTest {
         original = files.get(path);
         edited = original + "\n// 고침";
 
-        AttemptRecord r = registry.save(AttemptRecord.self(userId, 1L, "gpt-test", Instant.now()));
+        Attempt r = registry.save(Attempt.self(userId, 1L, "gpt-test", Instant.now()));
         id = String.valueOf(r.getId());
         store.create(attempt(id), files);
         // 질문 1(파일 그대로) → 답 2 → 파일을 고침 → 질문 3 → 답 4
@@ -136,13 +135,13 @@ class CheckpointRollbackTest {
         RollbackService.Result res = rollbacks.rollback(userId, cp3);
 
         assertThat(res.attemptId()).isNotEqualTo(id);
-        AttemptRecord fork = records.findById(Long.valueOf(res.attemptId())).orElseThrow();
+        Attempt fork = records.findById(Long.valueOf(res.attemptId())).orElseThrow();
         assertThat(fork.getForkedFromCheckpointId()).isEqualTo(cp3);
-        assertThat(fork.getMode()).isEqualTo(AttemptRecord.Mode.SELF);
-        assertThat(fork.getStatus()).isEqualTo(Attempt.Status.SOLVING);
+        assertThat(fork.getMode()).isEqualTo(Attempt.Mode.SELF);
+        assertThat(fork.getStatus()).isEqualTo(AttemptState.Status.SOLVING);
         assertThat(store.readFiles(res.attemptId()).get(path)).isEqualTo(edited);
         // 질문 3 앞의 대화(1, 2)만 같은 번호로 복사된다
-        assertThat(store.turns(res.attemptId())).extracting(ChatTurn::turn).containsExactly(1, 2);
+        assertThat(store.turns(res.attemptId())).extracting(ChatTurnState::turn).containsExactly(1, 2);
         // 원래 응시는 그대로
         assertThat(store.turns(id)).hasSize(4);
         assertThat(credits.balance(userId)).isEqualTo(190);
@@ -208,9 +207,9 @@ class CheckpointRollbackTest {
         String fork = rollbacks.rollback(userId, cp3).attemptId();
 
         // 원래 응시만 채점이 끝났다
-        Attempt a = store.load(id);
+        AttemptState a = store.load(id);
         Instant t = Instant.now();
-        store.save(a.withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+        store.save(a.withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
         store.writeReport(id, java.util.Map.of("version", 2, "total", 80, "max", 100,
                 "items", List.of(java.util.Map.of("key", "usage", "name", "AI 활용력", "max", 20, "score", 16))));
 
@@ -252,23 +251,23 @@ class CheckpointRollbackTest {
     void 잔액_부족이면_응시와_원장을_만들지_않는다() {
         Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
         for (int i = 0; i < 20; i++) rollbacks.rollback(userId, cp);
-        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF).size();
+        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, Attempt.Mode.SELF).size();
         long ledgerCount = ledger.count();
         assertThatThrownBy(() -> rollbacks.rollback(userId, cp)).isInstanceOf(InsufficientCreditException.class);
         assertThat(credits.balance(userId)).isZero();
-        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(before);
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, Attempt.Mode.SELF)).hasSize(before);
         assertThat(ledger.count()).isEqualTo(ledgerCount);
     }
 
     @Test
     void 복원_실패시_응시와_차감이_모두_취소된다() {
         Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(0).getId();
-        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF).size();
+        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, Attempt.Mode.SELF).size();
         long ledgerCount = ledger.count();
         doThrow(new IllegalStateException("restore failed")).when(checkpoints).restore(eq(id), anyInt());
         assertThatThrownBy(() -> rollbacks.rollback(userId, cp))
                 .isInstanceOf(IllegalStateException.class).hasMessage("restore failed");
-        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(before);
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, Attempt.Mode.SELF)).hasSize(before);
         assertThat(ledger.count()).isEqualTo(ledgerCount);
         assertThat(credits.balance(userId)).isEqualTo(200);
     }
@@ -276,12 +275,12 @@ class CheckpointRollbackTest {
     @Test
     void 원장_저장_실패시_만들어진_응시와_대화도_취소된다() {
         Long cp = checkpointRecords.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(id)).get(1).getId();
-        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF).size();
+        int before = records.findByUserIdAndModeOrderByStartedAtDesc(userId, Attempt.Mode.SELF).size();
         long ledgerCount = ledger.count();
         doThrow(new IllegalStateException("ledger failed")).when(ledger).save(any(CreditLedger.class));
         assertThatThrownBy(() -> rollbacks.rollback(userId, cp))
                 .isInstanceOf(IllegalStateException.class).hasMessage("ledger failed");
-        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(before);
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, Attempt.Mode.SELF)).hasSize(before);
         assertThat(ledger.count()).isEqualTo(ledgerCount);
         assertThat(credits.balance(userId)).isEqualTo(200);
         assertThat(store.turns(id)).hasSize(4);
@@ -309,7 +308,7 @@ class CheckpointRollbackTest {
             assertThat(results.get(0).get(30, TimeUnit.SECONDS) ^ results.get(1).get(30, TimeUnit.SECONDS)).isTrue();
         }
         assertThat(credits.balance(userId)).isZero();
-        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, AttemptRecord.Mode.SELF)).hasSize(21);
+        assertThat(records.findByUserIdAndModeOrderByStartedAtDesc(userId, Attempt.Mode.SELF)).hasSize(21);
     }
 
     // ── 도우미 ───────────────────────────
@@ -318,12 +317,12 @@ class CheckpointRollbackTest {
         checkpoints.appendQuestion(attemptId, turn(turn, "user", "질문" + turn), files);
     }
 
-    static ChatTurn turn(int no, String role, String text) {
-        return new ChatTurn(no, role, Instant.now(), text, null, null, null, null, null, null);
+    static ChatTurnState turn(int no, String role, String text) {
+        return new ChatTurnState(no, role, Instant.now(), text, null, null, null, null, null, null);
     }
 
-    static Attempt attempt(String id) {
-        return new Attempt(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
-                Attempt.Status.SOLVING, List.of(), null, null);
+    static AttemptState attempt(String id) {
+        return new AttemptState(id, TestTasks.SELF_DEV, "openai", "gpt-test", Instant.now(), null, null, null,
+                AttemptState.Status.SOLVING, List.of(), null, null);
     }
 }

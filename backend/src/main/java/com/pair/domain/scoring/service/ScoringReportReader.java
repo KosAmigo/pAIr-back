@@ -16,19 +16,19 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.pair.domain.scoring.entity.CheckResultRecord;
-import com.pair.domain.scoring.repository.CheckResultRecordRepository;
-import com.pair.domain.scoring.entity.JudgeCallRecord;
-import com.pair.domain.scoring.repository.JudgeCallRecordRepository;
-import com.pair.domain.scoring.entity.JudgeVerdictRecord;
-import com.pair.domain.scoring.repository.JudgeVerdictRecordRepository;
-import com.pair.domain.scoring.repository.PromptVersionRecordRepository;
-import com.pair.domain.scoring.entity.RubricCheckRecord;
-import com.pair.domain.scoring.repository.RubricCheckRecordRepository;
-import com.pair.domain.scoring.entity.RubricItemRecord;
-import com.pair.domain.scoring.repository.RubricItemRecordRepository;
-import com.pair.domain.scoring.entity.ScoringRecord;
-import com.pair.domain.scoring.repository.ScoringRecordRepository;
+import com.pair.domain.scoring.entity.CheckResult;
+import com.pair.domain.scoring.repository.CheckResultRepository;
+import com.pair.domain.scoring.entity.JudgeCall;
+import com.pair.domain.scoring.repository.JudgeCallRepository;
+import com.pair.domain.scoring.entity.JudgeVerdict;
+import com.pair.domain.scoring.repository.JudgeVerdictRepository;
+import com.pair.domain.scoring.repository.PromptVersionRepository;
+import com.pair.domain.scoring.entity.RubricCheck;
+import com.pair.domain.scoring.repository.RubricCheckRepository;
+import com.pair.domain.scoring.entity.RubricItem;
+import com.pair.domain.scoring.repository.RubricItemRepository;
+import com.pair.domain.scoring.entity.Scoring;
+import com.pair.domain.scoring.repository.ScoringRepository;
 
 /**
  * 채점 결과를 채점 테이블에서 읽어 리포트 JSON 의 점수 부분(items, total, max, promptVersion, judgeCalls)을 채운다.
@@ -38,19 +38,19 @@ import com.pair.domain.scoring.repository.ScoringRecordRepository;
 @Component
 public class ScoringReportReader {
 
-    private final ScoringRecordRepository scorings;
-    private final CheckResultRecordRepository results;
-    private final JudgeCallRecordRepository calls;
-    private final JudgeVerdictRecordRepository verdicts;
-    private final RubricItemRecordRepository items;
-    private final RubricCheckRecordRepository checks;
-    private final PromptVersionRecordRepository versions;
+    private final ScoringRepository scorings;
+    private final CheckResultRepository results;
+    private final JudgeCallRepository calls;
+    private final JudgeVerdictRepository verdicts;
+    private final RubricItemRepository items;
+    private final RubricCheckRepository checks;
+    private final PromptVersionRepository versions;
     private final ObjectMapper json;
 
-    public ScoringReportReader(ScoringRecordRepository scorings, CheckResultRecordRepository results,
-                               JudgeCallRecordRepository calls, JudgeVerdictRecordRepository verdicts,
-                               RubricItemRecordRepository items, RubricCheckRecordRepository checks,
-                               PromptVersionRecordRepository versions, ObjectMapper json) {
+    public ScoringReportReader(ScoringRepository scorings, CheckResultRepository results,
+                               JudgeCallRepository calls, JudgeVerdictRepository verdicts,
+                               RubricItemRepository items, RubricCheckRepository checks,
+                               PromptVersionRepository versions, ObjectMapper json) {
         this.scorings = scorings;
         this.results = results;
         this.calls = calls;
@@ -64,34 +64,34 @@ public class ScoringReportReader {
     /** @param stored attempt_reports 의 JSON (없으면 null) */
     @Transactional(readOnly = true)
     public JsonNode overlay(long attemptId, JsonNode stored) {
-        ScoringRecord scoring = scorings.findFirstByAttemptIdAndStatusOrderByIdDesc(attemptId, "DONE").orElse(null);
+        Scoring scoring = scorings.findFirstByAttemptIdAndStatusOrderByIdDesc(attemptId, "DONE").orElse(null);
         if (scoring == null) return stored;
 
-        List<CheckResultRecord> rs = results.findByScoringId(scoring.getId());
-        Map<Long, RubricCheckRecord> checkById = checks.findAllById(rs.stream().map(CheckResultRecord::getCheckId).toList())
-                .stream().collect(Collectors.toMap(RubricCheckRecord::getId, c -> c));
-        List<JudgeCallRecord> cs = calls.findByScoringId(scoring.getId()).stream()
-                .sorted(Comparator.comparing(JudgeCallRecord::getId)).toList();
+        List<CheckResult> rs = results.findByScoringId(scoring.getId());
+        Map<Long, RubricCheck> checkById = checks.findAllById(rs.stream().map(CheckResult::getCheckId).toList())
+                .stream().collect(Collectors.toMap(RubricCheck::getId, c -> c));
+        List<JudgeCall> cs = calls.findByScoringId(scoring.getId()).stream()
+                .sorted(Comparator.comparing(JudgeCall::getId)).toList();
         Map<Long, String> judgeNames = judgeNames(cs);
-        Map<Long, List<JudgeVerdictRecord>> verdictsByResult = verdicts
-                .findByResultIdIn(rs.stream().map(CheckResultRecord::getId).toList()).stream()
-                .sorted(Comparator.comparing(JudgeVerdictRecord::getId))
-                .collect(Collectors.groupingBy(JudgeVerdictRecord::getResultId));
-        Map<Long, JudgeCallRecord> callById = cs.stream().collect(Collectors.toMap(JudgeCallRecord::getId, c -> c));
+        Map<Long, List<JudgeVerdict>> verdictsByResult = verdicts
+                .findByResultIdIn(rs.stream().map(CheckResult::getId).toList()).stream()
+                .sorted(Comparator.comparing(JudgeVerdict::getId))
+                .collect(Collectors.groupingBy(JudgeVerdict::getResultId));
+        Map<Long, JudgeCall> callById = cs.stream().collect(Collectors.toMap(JudgeCall::getId, c -> c));
 
         // 항목별 체크 결과 (체크 id 순 = 기준표 순서)
-        Map<String, List<CheckResultRecord>> byItem = new HashMap<>();
-        rs.stream().sorted(Comparator.comparing(CheckResultRecord::getCheckId)).forEach(r ->
+        Map<String, List<CheckResult>> byItem = new HashMap<>();
+        rs.stream().sorted(Comparator.comparing(CheckResult::getCheckId)).forEach(r ->
                 byItem.computeIfAbsent(checkById.get(r.getCheckId()).getItemKey(), k -> new ArrayList<>()).add(r));
 
         ObjectNode report = stored != null && stored.isObject() ? ((ObjectNode) stored).deepCopy() : json.createObjectNode();
         ArrayNode itemArr = json.createArrayNode();
         int total = 0;
         int max = 0;
-        List<RubricItemRecord> itemRows = items.findAll().stream().sorted(Comparator.comparing(RubricItemRecord::getSortOrder)).toList();
-        for (RubricItemRecord it : itemRows) {
-            List<CheckResultRecord> list = byItem.getOrDefault(it.getKey(), List.of());
-            int deducted = list.stream().mapToInt(CheckResultRecord::getDeducted).sum();
+        List<RubricItem> itemRows = items.findAll().stream().sorted(Comparator.comparing(RubricItem::getSortOrder)).toList();
+        for (RubricItem it : itemRows) {
+            List<CheckResult> list = byItem.getOrDefault(it.getKey(), List.of());
+            int deducted = list.stream().mapToInt(CheckResult::getDeducted).sum();
             int score = Math.max(0, it.getMaxScore() - deducted);
             total += score;
             max += it.getMaxScore();
@@ -101,7 +101,7 @@ public class ScoringReportReader {
             itemNode.put("max", it.getMaxScore());
             itemNode.put("score", score);
             ArrayNode checkArr = itemNode.putArray("checks");
-            for (CheckResultRecord r : list) {
+            for (CheckResult r : list) {
                 checkArr.add(checkNode(r, checkById.get(r.getCheckId()), verdictsByResult.getOrDefault(r.getId(), List.of()),
                         callById, judgeNames));
             }
@@ -113,7 +113,7 @@ public class ScoringReportReader {
         report.put("max", max);
         versions.findById(scoring.getVersionId()).ifPresent(v -> report.put("promptVersion", v.getName()));
         ArrayNode callArr = report.putArray("judgeCalls");
-        for (JudgeCallRecord c : cs) {
+        for (JudgeCall c : cs) {
             ObjectNode n = callArr.addObject();
             n.put("judge", judgeNames.get(c.getId()));
             n.put("model", c.getModel());
@@ -124,8 +124,8 @@ public class ScoringReportReader {
         return report;
     }
 
-    private ObjectNode checkNode(CheckResultRecord r, RubricCheckRecord c, List<JudgeVerdictRecord> vs,
-                                 Map<Long, JudgeCallRecord> callById, Map<Long, String> judgeNames) {
+    private ObjectNode checkNode(CheckResult r, RubricCheck c, List<JudgeVerdict> vs,
+                                 Map<Long, JudgeCall> callById, Map<Long, String> judgeNames) {
         ObjectNode n = json.createObjectNode();
         n.put("code", c.getCode());
         n.put("label", c.getLabel());
@@ -137,7 +137,7 @@ public class ScoringReportReader {
         Set<String> evidence = new LinkedHashSet<>();
         boolean violatedOnly = r.getStatus().equals("DEDUCTED") || r.getStatus().equals("SPLIT");
         if (violatedOnly || r.getStatus().equals("PASSED")) {
-            for (JudgeVerdictRecord v : vs) {
+            for (JudgeVerdict v : vs) {
                 if (!violatedOnly || (v.isViolated() && !v.getEvidences().isEmpty())) evidence.addAll(v.getEvidences());
             }
         }
@@ -146,7 +146,7 @@ public class ScoringReportReader {
         if (r.getReason() == null) n.putNull("reason");
         else n.put("reason", r.getReason());
         ArrayNode judges = n.putArray("judges");
-        for (JudgeVerdictRecord v : vs) {
+        for (JudgeVerdict v : vs) {
             ObjectNode j = judges.addObject();
             j.put("judge", judgeNames.get(v.getJudgeCallId()));
             j.put("model", callById.get(v.getJudgeCallId()).getModel());
@@ -161,11 +161,11 @@ public class ScoringReportReader {
     }
 
     /** 호출 id → 화면에 쓰는 채점 모델 이름. 같은 모델을 여러 번 불렀으면 model#1, model#2 처럼 구분한다. */
-    private static Map<Long, String> judgeNames(List<JudgeCallRecord> sortedCalls) {
-        Map<String, Long> perModel = sortedCalls.stream().collect(Collectors.groupingBy(JudgeCallRecord::getModel, Collectors.counting()));
+    private static Map<Long, String> judgeNames(List<JudgeCall> sortedCalls) {
+        Map<String, Long> perModel = sortedCalls.stream().collect(Collectors.groupingBy(JudgeCall::getModel, Collectors.counting()));
         Map<String, Integer> seen = new HashMap<>();
         Map<Long, String> names = new HashMap<>();
-        for (JudgeCallRecord c : sortedCalls) {
+        for (JudgeCall c : sortedCalls) {
             int n = seen.merge(c.getModel(), 1, Integer::sum);
             names.put(c.getId(), perModel.get(c.getModel()) > 1 ? c.getModel() + "#" + n : c.getModel());
         }

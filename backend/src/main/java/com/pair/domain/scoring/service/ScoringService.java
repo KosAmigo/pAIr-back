@@ -20,20 +20,20 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.pair.infra.ai.AiUnavailableException;
-import com.pair.infra.ai.ClaudeJudge;
+import com.pair.infra.ai.ClaudeJudgeClient;
 import com.pair.infra.ai.Judge;
-import com.pair.infra.ai.OpenAiJudge;
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.attempt.service.ChatTurn;
+import com.pair.infra.ai.OpenAiJudgeClient;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.grader.service.PromptStore;
-import com.pair.domain.grader.service.PromptVersion;
+import com.pair.domain.grader.service.PromptVersionState;
 import com.pair.infra.sandbox.CodeRunner;
 import com.pair.domain.scoring.service.Rubric.Check;
 import com.pair.domain.scoring.service.Rubric.Method;
 import com.pair.domain.task.service.TaskDef;
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 
 import jakarta.annotation.PreDestroy;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -49,8 +49,8 @@ public class ScoringService {
     private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
     static final int D5_LATE_MINUTES = 30;
 
-    private final AttemptStore store;
-    private final TaskRepository tasks;
+    private final AttemptStoreRepository store;
+    private final TaskDefRepository tasks;
     private final CodeRunner runner;
     private final List<Judge> judges;
     private final PairProperties props;
@@ -67,8 +67,8 @@ public class ScoringService {
         return t;
     });
 
-    public ScoringService(AttemptStore store, TaskRepository tasks, CodeRunner runner,
-                          ClaudeJudge claudeJudge, OpenAiJudge openAiJudge, PairProperties props,
+    public ScoringService(AttemptStoreRepository store, TaskDefRepository tasks, CodeRunner runner,
+                          ClaudeJudgeClient claudeJudge, OpenAiJudgeClient openAiJudge, PairProperties props,
                           PromptStore prompts, ReferenceDocs referenceDocs, ScoringRecords records,
                           com.pair.domain.question.service.QuestionService questions) {
         this.store = store;
@@ -99,7 +99,7 @@ public class ScoringService {
      * @param version 프롬프트 버전 (판정 기준, 공통 규칙)
      * @param judgeRepeat 채점 툴 실험용 배수. 모델마다 calls × judgeRepeat 번 부른다
      */
-    public record Options(PromptVersion version, int judgeRepeat) {}
+    public record Options(PromptVersionState version, int judgeRepeat) {}
 
     /** 실제 응시 채점 설정: 채점 툴에서 지정한 버전, 채점 모델 1번씩. */
     public Options defaultOptions() {
@@ -136,9 +136,9 @@ public class ScoringService {
      *               SPLIT(판정 엇갈림: 일부 호출만 걸렸다고 봄. 호출이 홀수면 다수결, 짝수면 평균만큼 감점)
      * @param judges 판정 체크에서 채점 모델별 판정 (자동 체크는 빈 목록)
      */
-    public record CheckResult(String code, String label, String method, int points, int deducted,
+    public record CheckOutcome(String code, String label, String method, int points, int deducted,
                               String status, List<String> evidence, String reason, List<JudgeView> judges) {
-        CheckResult(String code, String label, String method, int points, int deducted, String status, List<String> evidence, String reason) {
+        CheckOutcome(String code, String label, String method, int points, int deducted, String status, List<String> evidence, String reason) {
             this(code, label, method, points, deducted, status, evidence, reason, List.of());
         }
     }
@@ -147,9 +147,9 @@ public class ScoringService {
     public record JudgeView(String judge, String model, boolean violated, int count, List<String> evidence, String reason) {}
 
     /** 채점 모델 호출 한 번의 토큰. judge 는 JudgeView.judge() 와 같은 이름(예: openai#2). */
-    public record JudgeCall(String judge, String model, long input, long output, long cached) {}
+    public record JudgeUsage(String judge, String model, long input, long output, long cached) {}
 
-    public record ItemResult(String key, String name, int max, int score, List<CheckResult> checks) {}
+    public record ItemResult(String key, String name, int max, int score, List<CheckOutcome> checks) {}
 
     /** 실제 응시 채점: 지정한 버전으로 채점하고 DB(채점 표, 리포트 JSON)에 저장한다. */
     public void score(String attemptId) {
@@ -171,13 +171,13 @@ public class ScoringService {
      */
     @SuppressWarnings("unchecked")
     void saveResult(long scoringId, String attemptId, Map<String, Object> report) {
-        Attempt a = store.load(attemptId);
+        AttemptState a = store.load(attemptId);
         List<ItemResult> items = (List<ItemResult>) report.get("items");
         try {
             store.writeReport(a.id(), report);
             questions.grade(scoringId, Long.parseLong(a.id())); // 문항 채점: 코드로만, 6개 역량 점수와 따로
-            records.finish(scoringId, tasks.get(a.taskId()).isDev(), items, (List<JudgeCall>) report.get("judgeCalls"));
-            store.save(store.load(a.id()).withStatus(Attempt.Status.DONE));
+            records.finish(scoringId, tasks.get(a.taskId()).isDev(), items, (List<JudgeUsage>) report.get("judgeCalls"));
+            store.save(store.load(a.id()).withStatus(AttemptState.Status.DONE));
         } catch (RuntimeException | Error e) {
             records.fail(scoringId, e.getMessage() == null ? e.toString() : e.getMessage());
             throw e;
@@ -189,7 +189,7 @@ public class ScoringService {
      * 채점해서 리포트를 돌려준다. 저장하지 않는다(채점 툴 실험 채점은 결과를 따로 저장).
      * @param src 응시 기록을 읽을 곳 (실제 응시 또는 샘플 응시)
      */
-    public Map<String, Object> evaluate(AttemptStore src, String attemptId, Options opt) {
+    public Map<String, Object> evaluate(AttemptStoreRepository src, String attemptId, Options opt) {
         return evaluate(src, attemptId, opt, live());
     }
 
@@ -210,21 +210,21 @@ public class ScoringService {
         return judges;
     }
 
-    public Map<String, Object> evaluate(AttemptStore src, String attemptId, Options opt, Calls calls) {
-        Attempt a = src.load(attemptId);
+    public Map<String, Object> evaluate(AttemptStoreRepository src, String attemptId, Options opt, Calls calls) {
+        AttemptState a = src.load(attemptId);
         TaskDef task = tasks.get(a.taskId());
         boolean dev = task.isDev();
         List<Check> checks = opt.version().apply(Rubric.checksFor(dev));
-        List<ChatTurn> turns = src.turns(attemptId);
+        List<ChatTurnState> turns = src.turns(attemptId);
         Map<String, String> files = src.readFiles(attemptId);
         List<JsonNode> events = src.events(attemptId);
         Map<String, long[]> judgeTokens = new LinkedHashMap<>(); // 모델별 {입력, 출력, 캐시 입력}
         for (Judge j : judges) judgeTokens.put(j.name(), new long[3]);
-        Map<String, CheckResult> results = new LinkedHashMap<>();
+        Map<String, CheckOutcome> results = new LinkedHashMap<>();
         List<String> notes = new ArrayList<>();
         Map<String, Object> extras = new LinkedHashMap<>();
         // 빈 AI 답변은 시스템 오류(추론 모델이 한도 안에서 답을 끝내지 못함)라 채점에서 뺀다
-        List<ChatTurn> aiTurns = turns.stream().filter(t -> "ai".equals(t.role()) && t.request() != null && !t.text().isBlank()).toList();
+        List<ChatTurnState> aiTurns = turns.stream().filter(t -> "ai".equals(t.role()) && t.request() != null && !t.text().isBlank()).toList();
         long emptyAi = turns.stream().filter(t -> "ai".equals(t.role()) && t.text().isBlank()).count();
         if (emptyAi > 0) notes.add("시스템 오류로 비어 있는 AI 답변 " + emptyAi + "건은 응시자 책임으로 보지 않음");
         boolean usedAi = !aiTurns.isEmpty();
@@ -342,13 +342,13 @@ public class ScoringService {
             }
         }
         Map<Judge, Map<String, CheckVerdict>> byJudge = new LinkedHashMap<>();
-        List<JudgeCall> judgeCallList = new ArrayList<>();
+        List<JudgeUsage> judgeCallList = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         for (var e : judgeCalls.entrySet()) {
             try {
                 Judge.Result<JudgeResult> jr = e.getValue().join();
                 addTokens(judgeTokens, e.getKey(), jr);
-                judgeCallList.add(new JudgeCall(e.getKey().name(), e.getKey().model(), jr.inputTokens(), jr.outputTokens(), jr.cachedInputTokens()));
+                judgeCallList.add(new JudgeUsage(e.getKey().name(), e.getKey().model(), jr.inputTokens(), jr.outputTokens(), jr.cachedInputTokens()));
                 Map<String, CheckVerdict> m = new HashMap<>();
                 for (CheckVerdict v : jr.value().verdicts()) m.put(v.code(), v);
                 byJudge.put(e.getKey(), m);
@@ -366,11 +366,11 @@ public class ScoringService {
         List<ItemResult> items = new ArrayList<>();
         int total = 0;
         for (Rubric.Item item : Rubric.ITEMS) {
-            List<CheckResult> list = new ArrayList<>();
+            List<CheckOutcome> list = new ArrayList<>();
             int deducted = 0;
             for (Check c : checks) {
                 if (!c.item().equals(item.key())) continue;
-                CheckResult r = results.get(c.code());
+                CheckOutcome r = results.get(c.code());
                 if (r == null) continue;
                 list.add(r);
                 deducted += r.deducted();
@@ -406,8 +406,8 @@ public class ScoringService {
         report.put("items", items);
         report.put("notes", notes);
         report.putAll(extras);
-        long assistantIn = turns.stream().filter(t -> t.inputTokens() != null).mapToLong(ChatTurn::inputTokens).sum();
-        long assistantOut = turns.stream().filter(t -> t.outputTokens() != null).mapToLong(ChatTurn::outputTokens).sum();
+        long assistantIn = turns.stream().filter(t -> t.inputTokens() != null).mapToLong(ChatTurnState::inputTokens).sum();
+        long assistantOut = turns.stream().filter(t -> t.outputTokens() != null).mapToLong(ChatTurnState::outputTokens).sum();
         Map<String, Object> tokens = new LinkedHashMap<>();
         tokens.put("assistant", Map.of("input", assistantIn, "output", assistantOut));
         for (Judge j : judges) {
@@ -544,7 +544,7 @@ public class ScoringService {
      * 호출이 실패해 빠지면 남은 호출만으로 같은 규칙을 쓴다.
      * 판정이 빠진 모델은 "안 걸림"(감점 0)으로 본다.
      */
-    static CheckResult combine(Check c, Map<? extends Judge, Map<String, CheckVerdict>> byJudge) {
+    static CheckOutcome combine(Check c, Map<? extends Judge, Map<String, CheckVerdict>> byJudge) {
         List<JudgeView> views = new ArrayList<>();
         for (var e : byJudge.entrySet()) {
             CheckVerdict v = e.getValue().get(c.code());
@@ -553,7 +553,7 @@ public class ScoringService {
                     v.evidence() == null ? List.of() : v.evidence(), v.reason()));
         }
         if (views.isEmpty()) {
-            return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), 0, "SKIPPED", List.of(), "채점 모델이 판정하지 않음", views);
+            return new CheckOutcome(c.code(), c.label(), "JUDGE", c.points(), 0, "SKIPPED", List.of(), "채점 모델이 판정하지 않음", views);
         }
         List<JudgeView> withEvidence = views.stream().filter(v -> v.violated() && !v.evidence().isEmpty()).toList();
         List<Integer> each = new ArrayList<>();
@@ -567,21 +567,21 @@ public class ScoringService {
                 : each.stream().mapToInt(Integer::intValue).sum() / each.size();
         List<String> ev = withEvidence.stream().flatMap(v -> v.evidence().stream()).distinct().toList();
         if (withEvidence.size() == byJudge.size()) {
-            return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), deducted, "DEDUCTED", ev, withEvidence.get(0).reason(), views);
+            return new CheckOutcome(c.code(), c.label(), "JUDGE", c.points(), deducted, "DEDUCTED", ev, withEvidence.get(0).reason(), views);
         }
         if (!withEvidence.isEmpty()) {
             JudgeView v = withEvidence.get(0);
-            return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), deducted, "SPLIT", ev,
+            return new CheckOutcome(c.code(), c.label(), "JUDGE", c.points(), deducted, "SPLIT", ev,
                     "판정 엇갈림: " + withEvidence.size() + "/" + byJudge.size() + " 판정만 걸렸다고 봐서 "
                             + (majority ? "다수결로 " + deducted + "점 감점. " : "평균(" + deducted + "점) 감점. ") + v.reason(), views);
         }
         var noEvidence = views.stream().filter(JudgeView::violated).findFirst();
         if (noEvidence.isPresent()) {
-            return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), 0, "NO_EVIDENCE", List.of(),
+            return new CheckOutcome(c.code(), c.label(), "JUDGE", c.points(), 0, "NO_EVIDENCE", List.of(),
                     "근거가 없어 감점하지 않음: " + noEvidence.get().reason(), views);
         }
         List<String> pev = views.stream().flatMap(v -> v.evidence().stream()).distinct().toList();
-        return new CheckResult(c.code(), c.label(), "JUDGE", c.points(), 0, "PASSED", pev, views.get(0).reason(), views);
+        return new CheckOutcome(c.code(), c.label(), "JUDGE", c.points(), 0, "PASSED", pev, views.get(0).reason(), views);
     }
 
     private static void addTokens(Map<String, long[]> acc, Judge j, Judge.Result<?> r) {
@@ -597,19 +597,19 @@ public class ScoringService {
         return checks.stream().filter(c -> c.code().equals(code)).findFirst().orElseThrow();
     }
 
-    private static CheckResult auto(List<Check> checks, String code, int deducted, String reason) {
+    private static CheckOutcome auto(List<Check> checks, String code, int deducted, String reason) {
         Check c = check(checks, code);
-        return new CheckResult(code, c.label(), "AUTO", c.points(), deducted, deducted > 0 ? "DEDUCTED" : "PASSED", List.of(), reason);
+        return new CheckOutcome(code, c.label(), "AUTO", c.points(), deducted, deducted > 0 ? "DEDUCTED" : "PASSED", List.of(), reason);
     }
 
-    private static CheckResult skipped(List<Check> checks, String code, String reason) {
+    private static CheckOutcome skipped(List<Check> checks, String code, String reason) {
         Check c = check(checks, code);
-        return new CheckResult(code, c.label(), c.method().name(), c.points(), 0, "SKIPPED", List.of(), reason);
+        return new CheckOutcome(code, c.label(), c.method().name(), c.points(), 0, "SKIPPED", List.of(), reason);
     }
 
-    static String transcript(List<ChatTurn> turns, Instant start) {
+    static String transcript(List<ChatTurnState> turns, Instant start) {
         StringBuilder sb = new StringBuilder();
-        for (ChatTurn t : turns) {
+        for (ChatTurnState t : turns) {
             String text = "ai".equals(t.role()) && t.text().isBlank()
                     ? "[시스템 오류] AI 답변이 비어 있음 (추론 모델이 출력 한도 안에서 답을 끝내지 못함. 응시자 책임 아님)"
                     : t.text();
@@ -649,13 +649,13 @@ public class ScoringService {
         return Math.round(v * 10) / 10.0;
     }
 
-    private void logSummary(Attempt a, TaskDef task, int total, List<ItemResult> items) {
+    private void logSummary(AttemptState a, TaskDef task, int total, List<ItemResult> items) {
         StringBuilder sb = new StringBuilder("\n========== pAIr 채점 결과 ==========\n");
         sb.append("응시 ").append(a.id()).append(" | ").append(task.title()).append("\n");
         sb.append("총점 ").append(total).append(" / ").append(Rubric.total()).append("\n");
         for (ItemResult it : items) {
             sb.append(String.format("%s %d / %d%n", it.name(), it.score(), it.max()));
-            for (CheckResult c : it.checks()) {
+            for (CheckOutcome c : it.checks()) {
                 if (c.deducted() > 0) sb.append(String.format("  %s -%d  %s%n", c.code(), c.deducted(), c.reason()));
             }
         }

@@ -1,11 +1,11 @@
 package com.pair.domain.task;
 
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.entity.TaskQuestionRecord;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.entity.TaskQuestion;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.service.TaskDef;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -40,38 +40,38 @@ public final class TestTasks {
     private TestTasks() {}
 
     /** 과제 행만 (설명·settings 포함). 파일·후속 질문이 필요 없는 테스트용 */
-    public static void seed(TaskRecordRepository repo) {
+    public static void seed(TaskRepository repo) {
         Instant at = Instant.parse("2026-11-19T00:00:00Z");
-        TaskRecord devSelf = new TaskRecord(1L, SELF_DEV, "주문 처리 장애 원인 분석", "DEV", 60, TaskRecord.Usage.SELF, TaskRecord.Status.OPEN, null, 1L, at);
-        TaskRecord bizSelf = new TaskRecord(2L, SELF_BIZ, "신규 저가 요금제 출시 기획안", "BIZ", 60, TaskRecord.Usage.SELF, TaskRecord.Status.OPEN, null, 1L, at);
+        Task devSelf = new Task(1L, SELF_DEV, "주문 처리 장애 원인 분석", "DEV", 60, Task.Usage.SELF, Task.Status.OPEN, null, 1L, at);
+        Task bizSelf = new Task(2L, SELF_BIZ, "신규 저가 요금제 출시 기획안", "BIZ", 60, Task.Usage.SELF, Task.Status.OPEN, null, 1L, at);
         fillContent(devSelf, SELF_DEV);
         fillContent(bizSelf, SELF_BIZ);
         repo.save(devSelf);
         repo.save(bizSelf);
-        repo.save(new TaskRecord(3L, LIVE_DEV, "주문 처리 장애 원인 분석", "DEV", 60, TaskRecord.Usage.LIVE, TaskRecord.Status.OPEN, 1L, 1L, at));
-        repo.save(new TaskRecord(4L, LIVE_BIZ, "신규 저가 요금제 출시 기획안", "BIZ", 60, TaskRecord.Usage.LIVE, TaskRecord.Status.OPEN, 2L, 1L, at));
+        repo.save(new Task(3L, LIVE_DEV, "주문 처리 장애 원인 분석", "DEV", 60, Task.Usage.LIVE, Task.Status.OPEN, 1L, 1L, at));
+        repo.save(new Task(4L, LIVE_BIZ, "신규 저가 요금제 출시 기획안", "BIZ", 60, Task.Usage.LIVE, Task.Status.OPEN, 2L, 1L, at));
     }
 
     /** 과제 행 + 파일 + 후속 질문 */
-    public static void seed(TaskRecordRepository repo, TaskFileRecordRepository files, TaskQuestionRecordRepository questions) {
+    public static void seed(TaskRepository repo, TaskFileRepository files, TaskQuestionRepository questions) {
         seed(repo);
         seedContent(files, questions, 1L, SELF_DEV);
         seedContent(files, questions, 2L, SELF_BIZ);
     }
 
     /** 이 task_id 의 파일·후속 질문을 픽스처 폴더 내용으로 다시 넣는다 */
-    public static void seedContent(TaskFileRecordRepository files, TaskQuestionRecordRepository questions, long taskId, String code) {
+    public static void seedContent(TaskFileRepository files, TaskQuestionRepository questions, long taskId, String code) {
         files.deleteAll(files.findAll().stream().filter(f -> f.getTaskId() == taskId).toList());
         questions.deleteAll(questions.findAll().stream().filter(q -> q.getTaskId() == taskId).toList());
         for (var e : fixtureFiles(code, "files").entrySet()) {
-            files.save(new TaskFileRecord(taskId, e.getKey(), e.getValue(), "text/plain", e.getValue().getBytes(StandardCharsets.UTF_8).length, TaskFileRecord.VISIBLE, false));
+            files.save(new TaskFile(taskId, e.getKey(), e.getValue(), "text/plain", e.getValue().getBytes(StandardCharsets.UTF_8).length, TaskFile.VISIBLE, false));
         }
         for (var e : fixtureFiles(code, "hidden").entrySet()) {
-            files.save(new TaskFileRecord(taskId, e.getKey(), e.getValue(), "text/plain", e.getValue().getBytes(StandardCharsets.UTF_8).length, TaskFileRecord.HIDDEN, true));
+            files.save(new TaskFile(taskId, e.getKey(), e.getValue(), "text/plain", e.getValue().getBytes(StandardCharsets.UTF_8).length, TaskFile.HIDDEN, true));
         }
         List<String> followUps = fixture(code).followUps();
         for (int i = 0; i < followUps.size(); i++) {
-            questions.save(new TaskQuestionRecord(taskId, TaskQuestionRecord.FOLLOWUP, "ESSAY", i + 1, followUps.get(i)));
+            questions.save(new TaskQuestion(taskId, TaskQuestion.FOLLOWUP, "ESSAY", i + 1, followUps.get(i)));
         }
     }
 
@@ -99,7 +99,7 @@ public final class TestTasks {
         return out;
     }
 
-    private static void fillContent(TaskRecord t, String code) {
+    private static void fillContent(Task t, String code) {
         TaskDef d = fixture(code);
         Map<String, Object> settings = new LinkedHashMap<>();
         settings.put("openFile", d.openFile());

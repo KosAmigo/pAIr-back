@@ -17,8 +17,8 @@ import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.repository.EnvScanPhotoRepository;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
-import com.pair.domain.exam.dto.ExamDtos.EnvScanPhotoView;
-import com.pair.domain.exam.dto.ExamDtos.EnvScanRequest;
+import com.pair.domain.exam.dto.EnvScanPhotoResponse;
+import com.pair.domain.exam.dto.EnvScanRequest;
 
 /**
  * 환경 점검 사진: 휴대폰으로 방을 한 바퀴(360도) 돌며 방향별로 찍은 사진과 책상 위 사진을 파일 저장소에 올린다.
@@ -51,7 +51,7 @@ public class EnvScanService {
     }
 
     @Transactional
-    public EnvScanPhotoView upload(String token, EnvScanRequest req) {
+    public EnvScanPhotoResponse upload(String token, EnvScanRequest req) {
         Instant now = clock.instant();
         ExamParticipant p = findParticipant(token);
         ExamSession s = p.getSession();
@@ -68,16 +68,16 @@ public class EnvScanService {
         String key = SnapshotStorage.envScanKeyOf(s.getId(), f.getId());
         storage.put(key, jpeg);
         f.attachFile(key, jpeg.length);
-        return EnvScanPhotoView.from(f);
+        return EnvScanPhotoResponse.from(f);
     }
 
     /** 콘솔: 대상자의 점검 사진 목록 (찍은 순서) */
     @Transactional(readOnly = true)
-    public List<EnvScanPhotoView> photosOf(Long sessionId, Long participantId) {
+    public List<EnvScanPhotoResponse> photosOf(Long sessionId, Long participantId) {
         ExamParticipant p = participants.findById(participantId)
                 .filter(x -> x.getSession().getId().equals(sessionId))
                 .orElseThrow(() -> new NoSuchElementException("없는 대상자입니다."));
-        return photos.findByParticipantIdOrderByIdAsc(p.getId()).stream().map(EnvScanPhotoView::from).toList();
+        return photos.findByParticipantIdOrderByIdAsc(p.getId()).stream().map(EnvScanPhotoResponse::from).toList();
     }
 
     /** 콘솔: 사진 보기. 다른 회차 번호로는 볼 수 없고, 보관 기간이 지나 지운 사진은 IllegalStateException */

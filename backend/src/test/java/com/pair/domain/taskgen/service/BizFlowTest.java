@@ -40,20 +40,20 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.infra.ai.AiUnavailableException;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.entity.QuestionChoiceRecord;
-import com.pair.domain.task.repository.QuestionChoiceRecordRepository;
-import com.pair.domain.task.repository.QuestionSourceRecordRepository;
-import com.pair.domain.task.entity.ShortAnswerKeyRecord;
-import com.pair.domain.task.repository.ShortAnswerKeyRecordRepository;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.entity.QuestionChoice;
+import com.pair.domain.task.repository.QuestionChoiceRepository;
+import com.pair.domain.task.repository.QuestionSourceRepository;
+import com.pair.domain.task.entity.ShortAnswerKey;
+import com.pair.domain.task.repository.ShortAnswerKeyRepository;
 import com.pair.domain.task.service.TaskDef;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.entity.TaskQuestionRecord;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.entity.TaskQuestion;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.global.security.HeaderCurrentUserResolver;
 
 /** 비개발 생성 흐름: 가짜 AI + 가짜 풀이 모델, 실제 PDF 와 로컬 파일 저장소, H2 DB */
@@ -108,14 +108,14 @@ class BizFlowTest {
     @Autowired BizTaskGenerator generator;
     @Autowired GeneratedTaskWriter writer;
     @Autowired TaskFileStorage storage;
-    @Autowired TaskRepository tasks;
-    @Autowired TaskRecordRepository records;
-    @Autowired TaskFileRecordRepository files;
-    @Autowired TaskQuestionRecordRepository questions;
-    @Autowired QuestionChoiceRecordRepository choices;
-    @Autowired ShortAnswerKeyRecordRepository answerKeys;
-    @Autowired QuestionSourceRecordRepository sources;
-    @Autowired DocumentPageRecordRepository pages;
+    @Autowired TaskDefRepository tasks;
+    @Autowired TaskRepository records;
+    @Autowired TaskFileRepository files;
+    @Autowired TaskQuestionRepository questions;
+    @Autowired QuestionChoiceRepository choices;
+    @Autowired ShortAnswerKeyRepository answerKeys;
+    @Autowired QuestionSourceRepository sources;
+    @Autowired DocumentPageRepository pages;
     @Autowired ObjectMapper json;
 
     private final List<String> steps = new ArrayList<>();
@@ -163,15 +163,15 @@ class BizFlowTest {
         assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
 
-        TaskRecord t = records.findByCode("biz-pass").orElseThrow();
+        Task t = records.findByCode("biz-pass").orElseThrow();
         long id = t.getId();
-        assertThat(t.getStatus()).isEqualTo(TaskRecord.Status.HIDDEN);
+        assertThat(t.getStatus()).isEqualTo(Task.Status.HIDDEN);
         assertThat(t.getPublishedAt()).isNull();
         assertThat(t.getTrack()).isEqualTo("BIZ");
         assertThat(t.getCategory()).isEqualTo("기획안 작성");
         assertThat(t.getSettings()).contains("\"openFile\":\"기획안.md\"").contains("\"editableFile\":\"기획안.md\"").contains("## 결론").contains("[20,30,40,50]");
 
-        // TaskRepository 로 다시 읽기
+        // TaskDefRepository 로 다시 읽기
         TaskDef def = tasks.get("biz-pass");
         assertThat(def.type()).isEqualTo("biz");
         assertThat(def.description()).containsExactlyElementsOf(d.description());
@@ -183,10 +183,10 @@ class BizFlowTest {
         assertThat(tasks.hiddenFiles("biz-pass")).containsOnlyKeys("checklist.md", "_gen/report.json").containsEntry("checklist.md", d.checklist());
 
         // PDF: storage_key 만, 내용은 비움
-        TaskFileRecord pdf = files.findByTaskIdAndPath(id, BizFixtures.DOC1).orElseThrow();
+        TaskFile pdf = files.findByTaskIdAndPath(id, BizFixtures.DOC1).orElseThrow();
         assertThat(pdf.getContent()).isNull();
         assertThat(pdf.getMimeType()).isEqualTo("application/pdf");
-        assertThat(pdf.getVisibility()).isEqualTo(TaskFileRecord.VISIBLE);
+        assertThat(pdf.getVisibility()).isEqualTo(TaskFile.VISIBLE);
         assertThat(pdf.getStorageKey()).isEqualTo("task-files/" + id + "/1.pdf");
         byte[] bytes = storage.get(pdf.getStorageKey()).orElseThrow();
         assertThat(pdf.getSizeBytes()).isEqualTo(bytes.length);
@@ -198,13 +198,13 @@ class BizFlowTest {
 
         // 문항
         var qs = questions.findByTaskIdAndStageOrderBySeqAsc(id, "TASK");
-        assertThat(qs).extracting(TaskQuestionRecord::getQuestionType).containsExactly("SINGLE", "SINGLE", "SHORT", "SHORT");
-        assertThat(qs).extracting(TaskQuestionRecord::getPoints).containsExactly(5, 5, 3, 3);
-        assertThat(qs).extracting(TaskQuestionRecord::getContent).containsExactlyElementsOf(d.questions().stream().map(BizDraft.QuestionDraft::content).toList());
+        assertThat(qs).extracting(TaskQuestion::getQuestionType).containsExactly("SINGLE", "SINGLE", "SHORT", "SHORT");
+        assertThat(qs).extracting(TaskQuestion::getPoints).containsExactly(5, 5, 3, 3);
+        assertThat(qs).extracting(TaskQuestion::getContent).containsExactlyElementsOf(d.questions().stream().map(BizDraft.QuestionDraft::content).toList());
         var c1 = choices.findByQuestionIdOrderByIdAsc(qs.get(0).getId());
-        assertThat(c1).extracting(QuestionChoiceRecord::getContent).containsExactly("34%", "38%", "41%", "50%");
-        assertThat(c1).extracting(QuestionChoiceRecord::isCorrect).containsExactly(true, false, false, false);
-        assertThat(answerKeys.findByQuestionIdOrderByIdAsc(qs.get(2).getId())).extracting(ShortAnswerKeyRecord::getAccepted).containsExactly("21080");
+        assertThat(c1).extracting(QuestionChoice::getContent).containsExactly("34%", "38%", "41%", "50%");
+        assertThat(c1).extracting(QuestionChoice::isCorrect).containsExactly(true, false, false, false);
+        assertThat(answerKeys.findByQuestionIdOrderByIdAsc(qs.get(2).getId())).extracting(ShortAnswerKey::getAccepted).containsExactly("21080");
         assertThat(answerKeys.findByQuestionIdOrderByIdAsc(qs.get(0).getId())).isEmpty();
 
         // 근거: 문항마다 2개 이상, 쪽 번호
@@ -217,7 +217,7 @@ class BizFlowTest {
         assertThat(src3).filteredOn(s -> s.getTaskFileId().equals(csvId)).extracting(s -> s.getPages()).containsOnlyNulls();
 
         // 후속 질문
-        assertThat(questions.findByTaskIdAndStageOrderBySeqAsc(id, "FOLLOWUP")).extracting(TaskQuestionRecord::getContent).containsExactlyElementsOf(d.followUps());
+        assertThat(questions.findByTaskIdAndStageOrderBySeqAsc(id, "FOLLOWUP")).extracting(TaskQuestion::getContent).containsExactlyElementsOf(d.followUps());
 
         // report.json: 함정, 검사 7개
         var report = json.readTree(writer.report("biz-pass"));
@@ -286,8 +286,8 @@ class BizFlowTest {
         assertThat(o.passed()).isFalse();
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(ai.users).hasSize(2);
-        assertThat(o.checks().stream().filter(c -> !c.ok()).map(CheckResult::name)).contains(BizChecks.CALC);
-        assertThat(records.findByCode("biz-fail-2").orElseThrow().getStatus()).isEqualTo(TaskRecord.Status.HIDDEN);
+        assertThat(o.checks().stream().filter(c -> !c.ok()).map(GenCheckResult::name)).contains(BizChecks.CALC);
+        assertThat(records.findByCode("biz-fail-2").orElseThrow().getStatus()).isEqualTo(Task.Status.HIDDEN);
         assertThat(json.readTree(writer.report("biz-fail-2")).get("passed").asBoolean()).isFalse();
     }
 
@@ -297,7 +297,7 @@ class BizFlowTest {
         solver.error = new AiUnavailableException("Claude 요청 한도 (429)");
         ai.script.add(BizFixtures.good("biz-solver-err"));
         var o = generate();
-        assertThat(o.checks().stream().filter(c -> !c.ok()).map(CheckResult::name)).containsExactly(BizChecks.SOLVE);
+        assertThat(o.checks().stream().filter(c -> !c.ok()).map(GenCheckResult::name)).containsExactly(BizChecks.SOLVE);
 
         long before = records.count();
         ai.script.clear();

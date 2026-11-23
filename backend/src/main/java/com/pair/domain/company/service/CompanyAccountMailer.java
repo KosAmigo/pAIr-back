@@ -7,7 +7,7 @@ import org.springframework.mail.MailException;
 import org.springframework.mail.MailPreparationException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import com.pair.infra.mail.MailLayout;
 import com.pair.domain.auth.entity.AuthAccount;
@@ -16,7 +16,7 @@ import com.pair.global.error.MailDeliveryException;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 
-@Service
+@Component
 public class CompanyAccountMailer {
 
     private final JavaMailSender mail;

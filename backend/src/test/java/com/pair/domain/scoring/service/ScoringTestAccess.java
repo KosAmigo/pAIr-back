@@ -11,12 +11,12 @@ public final class ScoringTestAccess {
 
     /** 역량 항목 하나짜리 가짜 리포트로 saveResult 를 돌린다 */
     public static void saveFakeResult(ScoringService scoring, long scoringId, String attemptId) {
-        var u0 = new ScoringService.CheckResult("U0", "라벨", "AUTO", 20, 0, "PASSED", List.of(), null);
+        var u0 = new ScoringService.CheckOutcome("U0", "라벨", "AUTO", 20, 0, "PASSED", List.of(), null);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("version", 2);
         m.put("total", 100);
         m.put("items", List.of(new ScoringService.ItemResult("usage", "AI 활용력", 20, 20, List.of(u0))));
-        m.put("judgeCalls", List.<ScoringService.JudgeCall>of());
+        m.put("judgeCalls", List.<ScoringService.JudgeUsage>of());
         scoring.saveResult(scoringId, attemptId, m);
     }
 }

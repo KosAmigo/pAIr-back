@@ -29,11 +29,11 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.global.security.HeaderCurrentUserResolver;
 
 /** 검수 전 과제 용도 바꾸기와, 목록 응답의 탭·배지용 필드 */
@@ -52,9 +52,9 @@ class TaskUsageTest {
 
     @Autowired MockMvc mvc;
     @MockitoBean JavaMailSender mail;
-    @Autowired TaskRecordRepository records;
-    @Autowired TaskFileRecordRepository files;
-    @Autowired TaskQuestionRecordRepository questions;
+    @Autowired TaskRepository records;
+    @Autowired TaskFileRepository files;
+    @Autowired TaskQuestionRepository questions;
 
     private static final Instant AT = Instant.parse("2026-11-20T00:00:00Z");
 
@@ -63,22 +63,22 @@ class TaskUsageTest {
         TestTasks.seed(records, files, questions);
         files.deleteAll(files.findAll().stream().filter(f -> f.getTaskId() >= 9100).toList());
         records.deleteAll(records.findAll().stream().filter(t -> t.getId() >= 9100).toList());
-        row(9100, "usage-hidden", TaskRecord.Status.HIDDEN, null);
-        row(9101, "usage-open", TaskRecord.Status.OPEN, null);
-        row(9102, "usage-closed", TaskRecord.Status.CLOSED, null);
-        row(9103, "usage-copy", TaskRecord.Status.HIDDEN, 9100L);
+        row(9100, "usage-hidden", Task.Status.HIDDEN, null);
+        row(9101, "usage-open", Task.Status.OPEN, null);
+        row(9102, "usage-closed", Task.Status.CLOSED, null);
+        row(9103, "usage-copy", Task.Status.HIDDEN, 9100L);
         report(9100, "{\"checks\":[{\"name\":\"a\",\"ok\":true,\"detail\":\"\"},{\"name\":\"b\",\"ok\":true,\"detail\":\"\"}]}");
         report(9101, "{\"checks\":[{\"name\":\"a\",\"ok\":true,\"detail\":\"\"},{\"name\":\"b\",\"ok\":false,\"detail\":\"\"}]}");
     }
 
-    private void row(long id, String code, TaskRecord.Status status, Long parent) {
-        TaskRecord t = new TaskRecord(id, code, "제목 " + code, "DEV", 60, TaskRecord.Usage.SELF, status, parent, 1L, AT);
+    private void row(long id, String code, Task.Status status, Long parent) {
+        Task t = new Task(id, code, "제목 " + code, "DEV", 60, Task.Usage.SELF, status, parent, 1L, AT);
         t.setCard("소개 " + code, "장애 분석", "중급");
         records.save(t);
     }
 
     private void report(long taskId, String json) {
-        files.save(new TaskFileRecord(taskId, "_gen/report.json", json, "application/json", json.length(), TaskFileRecord.HIDDEN, true));
+        files.save(new TaskFile(taskId, "_gen/report.json", json, "application/json", json.length(), TaskFile.HIDDEN, true));
     }
 
     private static MockHttpServletRequestBuilder as(MockHttpServletRequestBuilder b, String role) {

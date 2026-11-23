@@ -1,5 +1,6 @@
 package com.pair.domain.credit.service;
 
+import com.pair.domain.credit.exception.InsufficientCreditException;
 import com.pair.domain.credit.entity.CreditLedger;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
 import org.springframework.beans.factory.annotation.Value;

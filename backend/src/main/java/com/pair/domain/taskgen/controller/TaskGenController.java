@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.controller;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import com.pair.domain.taskgen.service.GeneratedTaskWriter;
 import com.pair.domain.taskgen.service.TaskGenJobs;
 import com.pair.domain.taskgen.service.TaskSuggestions;
@@ -35,7 +35,7 @@ public class TaskGenController {
 
     /** 폼을 받아 생성 작업을 시작한다. 202 {jobId}. 입력이 잘못되면 400, 동시 상한을 넘으면 429 */
     @PostMapping("/task-gen")
-    public ResponseEntity<Map<String, String>> start(CurrentUser user, @RequestBody TaskGenForm form) {
+    public ResponseEntity<Map<String, String>> start(CurrentUser user, @RequestBody TaskGenRequest form) {
         requireAdmin(user);
         String jobId = jobs.start(form.validated(), user.userId());
         return ResponseEntity.accepted().body(Map.of("jobId", jobId));

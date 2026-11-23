@@ -9,8 +9,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.HandlerMapping;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -24,10 +24,10 @@ import jakarta.servlet.http.HttpServletResponse;
 @Component
 public class AttemptOwnerInterceptor implements HandlerInterceptor {
 
-    private final AttemptRecordRepository records;
+    private final AttemptRepository records;
     private final CurrentUserResolver currentUser;
 
-    public AttemptOwnerInterceptor(AttemptRecordRepository records, CurrentUserResolver currentUser) {
+    public AttemptOwnerInterceptor(AttemptRepository records, CurrentUserResolver currentUser) {
         this.records = records;
         this.currentUser = currentUser;
     }
@@ -38,7 +38,7 @@ public class AttemptOwnerInterceptor implements HandlerInterceptor {
         var vars = (Map<String, String>) request.getAttribute(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
         String id = vars == null ? null : vars.get("id");
         if (id == null) return true;
-        AttemptRecord record = find(id);
+        Attempt record = find(id);
         if (record.getUserId() != null) {
             CurrentUser user = currentUser.resolve(request).orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
             if (!record.getUserId().equals(user.userId())) throw new ForbiddenException("다른 회원의 응시입니다.");
@@ -46,7 +46,7 @@ public class AttemptOwnerInterceptor implements HandlerInterceptor {
         return true;
     }
 
-    private AttemptRecord find(String id) {
+    private Attempt find(String id) {
         try {
             return records.findById(Long.parseLong(id)).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + id));
         } catch (NumberFormatException e) {

@@ -39,7 +39,7 @@ public class ApiExceptionHandler {
         return body(HttpStatus.CONFLICT, e.getMessage());
     }
 
-    @ExceptionHandler(com.pair.domain.credit.service.InsufficientCreditException.class)
+    @ExceptionHandler(com.pair.domain.credit.exception.InsufficientCreditException.class)
     ResponseEntity<Map<String, String>> insufficientCredit(RuntimeException e) {
         return body(HttpStatus.PAYMENT_REQUIRED, e.getMessage());
     }
@@ -56,7 +56,7 @@ public class ApiExceptionHandler {
     }
 
     /** 동시 실행 상한 초과 (AI 과제 생성) */
-    @ExceptionHandler(com.pair.domain.taskgen.service.TooManyJobsException.class)
+    @ExceptionHandler(com.pair.domain.taskgen.exception.TooManyJobsException.class)
     ResponseEntity<Map<String, String>> tooManyJobs(RuntimeException e) {
         return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
     }

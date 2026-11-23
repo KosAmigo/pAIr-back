@@ -1,6 +1,6 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,18 +35,18 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.ChatAttachmentService.Ref;
-import com.pair.domain.attempt.service.ChatTurn.AssistantRequest;
-import com.pair.domain.attempt.entity.ChatAttachmentRecord;
-import com.pair.domain.attempt.repository.ChatAttachmentRecordRepository;
-import com.pair.domain.attempt.repository.CheckpointRecordRepository;
+import com.pair.domain.attempt.service.ChatTurnState.AssistantRequest;
+import com.pair.domain.attempt.entity.ChatAttachment;
+import com.pair.domain.attempt.repository.ChatAttachmentRepository;
+import com.pair.domain.attempt.repository.CheckpointRepository;
 import com.pair.domain.credit.service.CreditService;
-import com.pair.domain.credit.service.InsufficientCreditException;
-import com.pair.domain.task.entity.DocumentPageRecord;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.credit.exception.InsufficientCreditException;
+import com.pair.domain.task.entity.DocumentPage;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
@@ -69,18 +69,18 @@ class ChatAttachmentTest {
     }
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AttemptRegistry registry;
     @Autowired AuthService auth;
     @Autowired CreditService credits;
     @Autowired RollbackService rollbacks;
-    @Autowired CheckpointRecordRepository checkpointRecords;
-    @Autowired ChatAttachmentRecordRepository attachmentRecords;
+    @Autowired CheckpointRepository checkpointRecords;
+    @Autowired ChatAttachmentRepository attachmentRecords;
     @Autowired ChatAttachmentService attachmentService;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
-    @Autowired DocumentPageRecordRepository pages;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
+    @Autowired DocumentPageRepository pages;
     @Autowired MockMvc mvc;
     @MockitoBean AssistantClient assistant;
     @MockitoBean JavaMailSender mail;
@@ -97,8 +97,8 @@ class ChatAttachmentTest {
         TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         pages.deleteAll(pages.findAll());
         taskFiles.deleteAll(taskFiles.findAll().stream().filter(f -> f.getTaskId() == 2L && f.getStorageKey() != null).toList());
-        pdf(PDF, TaskFileRecord.VISIBLE, "요금 1쪽", "요금 2쪽", "요금 3쪽");
-        pdf(HIDDEN_PDF, TaskFileRecord.HIDDEN, "숨은 글");
+        pdf(PDF, TaskFile.VISIBLE, "요금 1쪽", "요금 2쪽", "요금 3쪽");
+        pdf(HIDDEN_PDF, TaskFile.HIDDEN, "숨은 글");
         var signup = AuthTestSupport.signup(auth, mail, "응시자", UUID.randomUUID() + "@pair.test");
         userId = signup.user().id();
         token = signup.token();
@@ -111,10 +111,10 @@ class ChatAttachmentTest {
     }
 
     private void pdf(String path, String visibility, String... texts) {
-        TaskFileRecord f = new TaskFileRecord(2L, path, null, "application/pdf", 10, visibility, true);
+        TaskFile f = new TaskFile(2L, path, null, "application/pdf", 10, visibility, true);
         f.setStorageKey("test/" + UUID.randomUUID());
         taskFiles.save(f);
-        for (int i = 0; i < texts.length; i++) pages.save(new DocumentPageRecord(f.getId(), i + 1, texts[i]));
+        for (int i = 0; i < texts.length; i++) pages.save(new DocumentPage(f.getId(), i + 1, texts[i]));
     }
 
     private AssistantRequest lastRequest() {
@@ -148,7 +148,7 @@ class ChatAttachmentTest {
         assertThat(store.turns(bizId).get(0).text()).isEqualTo("자료를 보고 설명해 주세요");
         var saved = attachmentService.views(Long.parseLong(bizId)).get(1);
         assertThat(saved).extracting(ChatAttachmentService.View::path).containsExactly(PDF, store.readFiles(bizId).keySet().iterator().next());
-        var rows = attachmentRecords.findAll().stream().filter(a -> a.getSourceType().equals(ChatAttachmentRecord.TASK_FILE))
+        var rows = attachmentRecords.findAll().stream().filter(a -> a.getSourceType().equals(ChatAttachment.TASK_FILE))
                 .filter(a -> a.getSentText().contains("요금 1쪽")).toList();
         assertThat(rows).isNotEmpty();
         assertThat(rows.get(0).getSentText()).contains("요금 1쪽").contains("요금 2쪽");
@@ -243,7 +243,7 @@ class ChatAttachmentTest {
 
         // 질문 2 시점으로 갈라지면 앞 턴(질문 1·답 1)만 복사되고 그 첨부도 따라온다
         assertThat(before - credits.balance(userId)).isEqualTo(10);
-        assertThat(store.turns(forkId)).extracting(ChatTurn::turn).containsExactly(1, 2);
+        assertThat(store.turns(forkId)).extracting(ChatTurnState::turn).containsExactly(1, 2);
         var views = attachmentService.views(Long.parseLong(forkId));
         assertThat(views.get(1)).extracting(ChatAttachmentService.View::path).containsExactly(devFile);
         assertThat(attachmentService.views(Long.parseLong(devId)).get(1)).hasSize(1);
@@ -306,7 +306,7 @@ class ChatAttachmentTest {
         store.writeReport(devId, Map.of("transcript", List.of(
                 Map.of("turn", 1, "role", "user", "text", "질문"), Map.of("turn", 2, "role", "ai", "text", "답"))));
         var t = java.time.Instant.now();
-        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+        store.save(store.load(devId).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
 
         mvc.perform(get("/api/attempts/{id}/report", devId).header("Authorization", "Bearer " + token)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.report.transcript[0].attachments[0].path").value(devFile))

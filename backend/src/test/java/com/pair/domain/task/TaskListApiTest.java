@@ -19,10 +19,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.TaskRepository;
 
 /** 응시자용 과제 목록과 상세: 자가진단(SELF)이고 숨김(HIDDEN)이 아닌 과제만 보인다 */
 @SpringBootTest
@@ -31,9 +31,9 @@ import com.pair.domain.task.repository.TaskRecordRepository;
 class TaskListApiTest {
 
     @Autowired MockMvc mvc;
-    @Autowired TaskRecordRepository records;
-    @Autowired TaskFileRecordRepository files;
-    @Autowired TaskQuestionRecordRepository questions;
+    @Autowired TaskRepository records;
+    @Autowired TaskFileRepository files;
+    @Autowired TaskQuestionRepository questions;
 
     @BeforeEach
     void setUp() {
@@ -46,8 +46,8 @@ class TaskListApiTest {
         TestTasks.seed(records);
     }
 
-    private void setStatus(String code, TaskRecord.Status status) {
-        TaskRecord t = records.findByCode(code).orElseThrow();
+    private void setStatus(String code, Task.Status status) {
+        Task t = records.findByCode(code).orElseThrow();
         t.changeStatus(status, Instant.now());
         records.save(t);
     }
@@ -77,8 +77,8 @@ class TaskListApiTest {
 
     @Test
     void 닫힌_과제는_목록에_보이고_숨김_과제는_뺀다() throws Exception {
-        setStatus(TestTasks.SELF_BIZ, TaskRecord.Status.CLOSED);
-        setStatus(TestTasks.SELF_DEV, TaskRecord.Status.HIDDEN);
+        setStatus(TestTasks.SELF_BIZ, Task.Status.CLOSED);
+        setStatus(TestTasks.SELF_DEV, Task.Status.HIDDEN);
         mvc.perform(get("/api/tasks"))
                 .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].id").value(TestTasks.SELF_BIZ))
@@ -96,7 +96,7 @@ class TaskListApiTest {
 
     @Test
     void 숨김_과제와_실전_복사본의_상세는_없는_과제로_본다() throws Exception {
-        setStatus(TestTasks.SELF_DEV, TaskRecord.Status.HIDDEN);
+        setStatus(TestTasks.SELF_DEV, Task.Status.HIDDEN);
         mvc.perform(get("/api/tasks/{id}", TestTasks.SELF_DEV)).andExpect(status().isNotFound());
         mvc.perform(get("/api/tasks/{id}", TestTasks.LIVE_DEV)).andExpect(status().isNotFound());
         mvc.perform(get("/api/tasks/{id}", "no-such-task")).andExpect(status().isNotFound());

@@ -22,10 +22,10 @@ import com.pair.domain.exam.entity.ProctorEventFrame;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.repository.ProctorEventFrameRepository;
 import com.pair.domain.exam.repository.ProctorEventRepository;
-import com.pair.domain.exam.dto.ExamDtos.ClipFrameRequest;
-import com.pair.domain.exam.dto.ExamDtos.ClipFrameView;
-import com.pair.domain.exam.dto.ExamDtos.ClipUploadRequest;
-import com.pair.domain.exam.dto.ExamDtos.ClipView;
+import com.pair.domain.exam.dto.ClipFrameRequest;
+import com.pair.domain.exam.dto.ClipFrameDto;
+import com.pair.domain.exam.dto.ClipUploadRequest;
+import com.pair.domain.exam.dto.ClipResponse;
 
 /**
  * 이벤트 증거 구간: 이벤트가 난 뒤 응시자 PC 가 자기 링 버퍼(앞 8초·뒤 4초)에서 골라 올린 사진을 파일 저장소에 두고 콘솔에서 보여 준다.
@@ -118,10 +118,10 @@ public class EvidenceClipService {
     }
 
     @Transactional(readOnly = true)
-    public ClipView clipOf(Long sessionId, Long eventId) {
+    public ClipResponse clipOf(Long sessionId, Long eventId) {
         requireEventIn(sessionId, eventId);
-        return new ClipView(eventId, frames.findByEventIdOrderByOffsetMsAscSourceAsc(eventId).stream()
-                .map(f -> new ClipFrameView(f.getId(), f.getSource(), f.getOffsetMs(), f.getSizeBytes(), f.getDeletedAt() != null)).toList());
+        return new ClipResponse(eventId, frames.findByEventIdOrderByOffsetMsAscSourceAsc(eventId).stream()
+                .map(f -> new ClipFrameDto(f.getId(), f.getSource(), f.getOffsetMs(), f.getSizeBytes(), f.getDeletedAt() != null)).toList());
     }
 
     @Transactional(readOnly = true)

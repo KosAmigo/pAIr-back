@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.service;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -39,9 +39,9 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import com.pair.infra.ai.AiUnavailableException;
 import com.pair.infra.sandbox.CodeRunner;
 import com.pair.domain.task.service.TaskDef;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.global.security.HeaderCurrentUserResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -105,8 +105,8 @@ class TaskGenFlowTest {
     @Autowired ScriptedAi ai;
     @Autowired CodeRunner runner;
     @Autowired DevTaskGenerator generator;
-    @Autowired TaskRepository tasks;
-    @Autowired TaskRecordRepository records;
+    @Autowired TaskDefRepository tasks;
+    @Autowired TaskRepository records;
     @Autowired GeneratedTaskWriter writer;
     @Autowired ObjectMapper json;
 
@@ -149,12 +149,12 @@ class TaskGenFlowTest {
         assertThat(ai.users).hasSize(1);
         assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
 
-        TaskRecord t = records.findByCode("flow-pass").orElseThrow();
-        assertThat(t.getStatus()).isEqualTo(TaskRecord.Status.HIDDEN);
+        Task t = records.findByCode("flow-pass").orElseThrow();
+        assertThat(t.getStatus()).isEqualTo(Task.Status.HIDDEN);
         assertThat(t.getPublishedAt()).isNull();
         assertThat(t.getCreatedBy()).isEqualTo(1L);
         assertThat(t.getTrack()).isEqualTo("DEV");
-        assertThat(t.getUsage()).isEqualTo(TaskRecord.Usage.SELF);
+        assertThat(t.getUsage()).isEqualTo(Task.Usage.SELF);
         assertThat(t.getTimeLimitMin()).isEqualTo(60);
         assertThat(t.getDifficulty()).isEqualTo("중급");
         assertThat(t.getCategory()).isEqualTo("장애 분석");
@@ -175,10 +175,10 @@ class TaskGenFlowTest {
         DevDraft g = good("flow-20min");
         ai.script.add(new DevDraft(g.title(), g.summary(), g.code(), g.category(), g.description(), g.requirements(), g.answer(),
                 g.files(), g.hiddenTests(), g.solution(), "고급"));
-        var form = new TaskGenForm("DEV", "쿠폰 할인 계산", "쿠폰 중복 적용", "SELF", 20);
+        var form = new TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 중복 적용", "SELF", 20);
         generator.generate(form, 1L, steps::add);
 
-        TaskRecord t = records.findByCode("flow-20min").orElseThrow();
+        Task t = records.findByCode("flow-20min").orElseThrow();
         assertThat(t.getTimeLimitMin()).isEqualTo(20);
         assertThat(t.getDifficulty()).isEqualTo("고급");
         assertThat(tasks.get("flow-20min").d4Minutes()).containsExactly(6, 10, 13, 16);
@@ -186,7 +186,7 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("저장한 과제를 TaskRepository 로 다시 읽으면 Draft 와 같다 (숨은 테스트는 test/ 를 뗀 경로)")
+    @DisplayName("저장한 과제를 TaskDefRepository 로 다시 읽으면 Draft 와 같다 (숨은 테스트는 test/ 를 뗀 경로)")
     void roundTrip() {
         DevDraft d = good("flow-roundtrip");
         ai.script.add(d);
@@ -253,8 +253,8 @@ class TaskGenFlowTest {
         assertThat(o.passed()).isFalse();
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(ai.users).hasSize(2);
-        assertThat(o.checks()).filteredOn(c -> !c.ok()).extracting(CheckResult::name).containsExactly(DevChecks.SOLVED_PASSES);
-        assertThat(records.findByCode("flow-fail-2").orElseThrow().getStatus()).isEqualTo(TaskRecord.Status.HIDDEN);
+        assertThat(o.checks()).filteredOn(c -> !c.ok()).extracting(GenCheckResult::name).containsExactly(DevChecks.SOLVED_PASSES);
+        assertThat(records.findByCode("flow-fail-2").orElseThrow().getStatus()).isEqualTo(Task.Status.HIDDEN);
         var report = json.readTree(writer.report("flow-fail-2"));
         assertThat(report.get("passed").asBoolean()).isFalse();
     }

@@ -5,5 +5,5 @@ public interface GenCheck<D> {
 
     String name();
 
-    CheckResult run(D draft);
+    GenCheckResult run(D draft);
 }

@@ -299,7 +299,7 @@ final class BizChecks {
         return l == null || l.isEmpty();
     }
 
-    private static GenCheck<BizDraft> check(String name, Function<BizDraft, CheckResult> body) {
+    private static GenCheck<BizDraft> check(String name, Function<BizDraft, GenCheckResult> body) {
         return new GenCheck<>() {
             @Override
             public String name() {
@@ -307,22 +307,22 @@ final class BizChecks {
             }
 
             @Override
-            public CheckResult run(BizDraft d) {
-                CheckResult r = body.apply(d);
-                return new CheckResult(name, r.ok(), r.detail());
+            public GenCheckResult run(BizDraft d) {
+                GenCheckResult r = body.apply(d);
+                return new GenCheckResult(name, r.ok(), r.detail());
             }
         };
     }
 
-    private static CheckResult ok(String detail) {
-        return new CheckResult("", true, detail);
+    private static GenCheckResult ok(String detail) {
+        return new GenCheckResult("", true, detail);
     }
 
-    private static CheckResult fail(String detail) {
-        return new CheckResult("", false, detail);
+    private static GenCheckResult fail(String detail) {
+        return new GenCheckResult("", false, detail);
     }
 
-    private static CheckResult skipped() {
+    private static GenCheckResult skipped() {
         return fail("형식이 맞지 않아 확인하지 않았습니다.");
     }
 }

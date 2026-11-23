@@ -1,11 +1,11 @@
 package com.pair.domain.question.service;
 
-import com.pair.domain.question.entity.ChoiceAnswerRecord;
-import com.pair.domain.question.entity.QuestionResultRecord;
-import com.pair.domain.question.entity.TextAnswerRecord;
-import com.pair.domain.question.repository.ChoiceAnswerRecordRepository;
-import com.pair.domain.question.repository.QuestionResultRecordRepository;
-import com.pair.domain.question.repository.TextAnswerRecordRepository;
+import com.pair.domain.question.entity.ChoiceAnswer;
+import com.pair.domain.question.entity.QuestionResult;
+import com.pair.domain.question.entity.TextAnswer;
+import com.pair.domain.question.repository.ChoiceAnswerRepository;
+import com.pair.domain.question.repository.QuestionResultRepository;
+import com.pair.domain.question.repository.TextAnswerRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -22,17 +22,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.scoring.repository.ScoringRecordRepository;
-import com.pair.domain.task.entity.QuestionChoiceRecord;
-import com.pair.domain.task.repository.QuestionChoiceRecordRepository;
-import com.pair.domain.task.entity.ShortAnswerKeyRecord;
-import com.pair.domain.task.repository.ShortAnswerKeyRecordRepository;
-import com.pair.domain.task.entity.TaskQuestionRecord;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.scoring.repository.ScoringRepository;
+import com.pair.domain.task.entity.QuestionChoice;
+import com.pair.domain.task.repository.QuestionChoiceRepository;
+import com.pair.domain.task.entity.ShortAnswerKey;
+import com.pair.domain.task.repository.ShortAnswerKeyRepository;
+import com.pair.domain.task.entity.TaskQuestion;
+import com.pair.domain.task.repository.TaskQuestionRepository;
 import com.pair.global.error.ConflictException;
 
 /**
@@ -46,20 +46,20 @@ public class QuestionService {
     static final String TASK = "TASK";
     static final int SHORT_MAX_CHARS = 200;
 
-    private final AttemptRecordRepository attempts;
-    private final AttemptStore store;
-    private final TaskQuestionRecordRepository questions;
-    private final QuestionChoiceRecordRepository choices;
-    private final ShortAnswerKeyRecordRepository keys;
-    private final ChoiceAnswerRecordRepository choiceAnswers;
-    private final TextAnswerRecordRepository textAnswers;
-    private final QuestionResultRecordRepository results;
-    private final ScoringRecordRepository scorings;
+    private final AttemptRepository attempts;
+    private final AttemptStoreRepository store;
+    private final TaskQuestionRepository questions;
+    private final QuestionChoiceRepository choices;
+    private final ShortAnswerKeyRepository keys;
+    private final ChoiceAnswerRepository choiceAnswers;
+    private final TextAnswerRepository textAnswers;
+    private final QuestionResultRepository results;
+    private final ScoringRepository scorings;
 
-    public QuestionService(AttemptRecordRepository attempts, AttemptStore store, TaskQuestionRecordRepository questions,
-                           QuestionChoiceRecordRepository choices, ShortAnswerKeyRecordRepository keys,
-                           ChoiceAnswerRecordRepository choiceAnswers, TextAnswerRecordRepository textAnswers,
-                           QuestionResultRecordRepository results, ScoringRecordRepository scorings) {
+    public QuestionService(AttemptRepository attempts, AttemptStoreRepository store, TaskQuestionRepository questions,
+                           QuestionChoiceRepository choices, ShortAnswerKeyRepository keys,
+                           ChoiceAnswerRepository choiceAnswers, TextAnswerRepository textAnswers,
+                           QuestionResultRepository results, ScoringRepository scorings) {
         this.attempts = attempts;
         this.store = store;
         this.questions = questions;
@@ -94,19 +94,19 @@ public class QuestionService {
     /** 응시자에게 보여 줄 문항(정답 정보 없음)과 지금까지 저장한 답. 문항이 없으면 빈 목록 */
     @Transactional(readOnly = true)
     public List<QuestionView> list(long attemptId) {
-        AttemptRecord a = attempt(attemptId);
-        List<TaskQuestionRecord> qs = questions.findByTaskIdAndStageAndActiveTrueOrderBySeqAsc(a.getTaskId(), TASK);
+        Attempt a = attempt(attemptId);
+        List<TaskQuestion> qs = questions.findByTaskIdAndStageAndActiveTrueOrderBySeqAsc(a.getTaskId(), TASK);
         if (qs.isEmpty()) return List.of();
-        List<Long> ids = qs.stream().map(TaskQuestionRecord::getId).toList();
+        List<Long> ids = qs.stream().map(TaskQuestion::getId).toList();
         Map<Long, List<ChoiceView>> choiceViews = new HashMap<>();
-        for (QuestionChoiceRecord c : choices.findByQuestionIdInOrderBySeqAsc(ids)) {
+        for (QuestionChoice c : choices.findByQuestionIdInOrderBySeqAsc(ids)) {
             choiceViews.computeIfAbsent(c.getQuestionId(), k -> new ArrayList<>()).add(new ChoiceView(c.getId(), c.getSeq(), c.getContent()));
         }
         Map<Long, List<Long>> chosen = chosenByQuestion(attemptId);
         Map<Long, String> texts = textAnswers.findByAttemptId(attemptId).stream()
-                .collect(Collectors.toMap(TextAnswerRecord::getQuestionId, TextAnswerRecord::getContent));
+                .collect(Collectors.toMap(TextAnswer::getQuestionId, TextAnswer::getContent));
         List<QuestionView> out = new ArrayList<>();
-        for (TaskQuestionRecord q : qs) {
+        for (TaskQuestion q : qs) {
             AnswerView answer = null;
             if (isChoice(q.getQuestionType())) {
                 if (chosen.containsKey(q.getId())) answer = new AnswerView(chosen.get(q.getId()), null);
@@ -127,11 +127,11 @@ public class QuestionService {
      */
     @Transactional
     public AnswerView answer(long attemptId, long questionId, AnswerRequest req) {
-        AttemptRecord a = attempt(attemptId);
-        if (a.getStatus() != Attempt.Status.SOLVING) {
+        Attempt a = attempt(attemptId);
+        if (a.getStatus() != AttemptState.Status.SOLVING) {
             throw new ConflictException("풀이 중일 때만 답을 저장할 수 있습니다. (지금 단계: " + a.getStatus() + ")");
         }
-        TaskQuestionRecord q = questions.findById(questionId)
+        TaskQuestion q = questions.findById(questionId)
                 .filter(x -> x.getTaskId().equals(a.getTaskId()) && TASK.equals(x.getStage()) && x.isActive())
                 .orElseThrow(() -> new IllegalArgumentException("이 과제의 문항이 아닙니다: " + questionId));
         if (req == null) throw new IllegalArgumentException("답이 비어 있습니다.");
@@ -144,22 +144,22 @@ public class QuestionService {
             List<Long> ids = req.choiceIds() == null ? List.of() : req.choiceIds().stream().distinct().toList();
             if (ids.stream().anyMatch(java.util.Objects::isNull)) throw new IllegalArgumentException("보기 번호가 올바르지 않습니다.");
             if (q.getQuestionType().equals("SINGLE") && ids.size() > 1) throw new IllegalArgumentException("한 개만 고를 수 있는 문항입니다.");
-            Set<Long> valid = choices.findByQuestionIdOrderByIdAsc(q.getId()).stream().map(QuestionChoiceRecord::getId).collect(Collectors.toSet());
+            Set<Long> valid = choices.findByQuestionIdOrderByIdAsc(q.getId()).stream().map(QuestionChoice::getId).collect(Collectors.toSet());
             if (!valid.containsAll(ids)) throw new IllegalArgumentException("이 문항의 보기가 아닙니다.");
             choiceAnswers.deleteByAttemptAndQuestion(attemptId, questionId);
-            for (Long id : ids) choiceAnswers.save(new ChoiceAnswerRecord(attemptId, id, questionId, q.getQuestionType(), now));
+            for (Long id : ids) choiceAnswers.save(new ChoiceAnswer(attemptId, id, questionId, q.getQuestionType(), now));
             saved = ids.isEmpty() ? null : new AnswerView(ids, null);
             event.put("choiceIds", ids);
         } else if (q.getQuestionType().equals("SHORT")) {
             if (req.choiceIds() != null && !req.choiceIds().isEmpty()) throw new IllegalArgumentException("단답형 문항은 text 로 답해야 합니다.");
             String text = req.text() == null ? "" : req.text().strip();
             if (text.length() > SHORT_MAX_CHARS) throw new IllegalArgumentException("답은 " + SHORT_MAX_CHARS + "자 이하로 입력하세요.");
-            TextAnswerRecord row = textAnswers.findByAttemptIdAndQuestionId(attemptId, questionId).orElse(null);
+            TextAnswer row = textAnswers.findByAttemptIdAndQuestionId(attemptId, questionId).orElse(null);
             if (text.isEmpty()) {
                 if (row != null) textAnswers.delete(row);
                 saved = null;
             } else {
-                if (row == null) textAnswers.save(new TextAnswerRecord(attemptId, questionId, "SHORT", text, now));
+                if (row == null) textAnswers.save(new TextAnswer(attemptId, questionId, "SHORT", text, now));
                 else row.update(text, now);
                 saved = new AnswerView(null, text);
             }
@@ -206,33 +206,33 @@ public class QuestionService {
      */
     @Transactional
     public void grade(long scoringId, long attemptId) {
-        AttemptRecord a = attempt(attemptId);
-        List<TaskQuestionRecord> qs = questions.findByTaskIdAndStageAndActiveTrueOrderBySeqAsc(a.getTaskId(), TASK);
+        Attempt a = attempt(attemptId);
+        List<TaskQuestion> qs = questions.findByTaskIdAndStageAndActiveTrueOrderBySeqAsc(a.getTaskId(), TASK);
         if (qs.isEmpty()) return;
         Map<Long, Graded> graded = gradeAll(qs, attemptId);
-        for (TaskQuestionRecord q : qs) {
+        for (TaskQuestion q : qs) {
             Graded g = graded.get(q.getId());
-            results.save(new QuestionResultRecord(scoringId, q.getId(), g.score(), QuestionResultRecord.AUTO, g.reason()));
+            results.save(new QuestionResult(scoringId, q.getId(), g.score(), QuestionResult.AUTO, g.reason()));
         }
     }
 
-    private Map<Long, Graded> gradeAll(List<TaskQuestionRecord> qs, long attemptId) {
-        List<Long> ids = qs.stream().map(TaskQuestionRecord::getId).toList();
-        Map<Long, List<QuestionChoiceRecord>> choicesByQ = choices.findByQuestionIdInOrderBySeqAsc(ids).stream()
-                .collect(Collectors.groupingBy(QuestionChoiceRecord::getQuestionId));
+    private Map<Long, Graded> gradeAll(List<TaskQuestion> qs, long attemptId) {
+        List<Long> ids = qs.stream().map(TaskQuestion::getId).toList();
+        Map<Long, List<QuestionChoice>> choicesByQ = choices.findByQuestionIdInOrderBySeqAsc(ids).stream()
+                .collect(Collectors.groupingBy(QuestionChoice::getQuestionId));
         Map<Long, List<String>> acceptedByQ = new HashMap<>();
-        for (ShortAnswerKeyRecord k : keys.findByQuestionIdInOrderByIdAsc(ids)) {
+        for (ShortAnswerKey k : keys.findByQuestionIdInOrderByIdAsc(ids)) {
             acceptedByQ.computeIfAbsent(k.getQuestionId(), x -> new ArrayList<>()).add(k.getAccepted());
         }
         Map<Long, List<Long>> chosen = chosenByQuestion(attemptId);
         Map<Long, String> texts = textAnswers.findByAttemptId(attemptId).stream()
-                .collect(Collectors.toMap(TextAnswerRecord::getQuestionId, TextAnswerRecord::getContent));
+                .collect(Collectors.toMap(TextAnswer::getQuestionId, TextAnswer::getContent));
         Map<Long, Graded> out = new HashMap<>();
-        for (TaskQuestionRecord q : qs) {
+        for (TaskQuestion q : qs) {
             int points = q.getPoints() == null ? 0 : q.getPoints();
             if (isChoice(q.getQuestionType())) {
-                List<QuestionChoiceRecord> cs = choicesByQ.getOrDefault(q.getId(), List.of());
-                Set<Long> correct = cs.stream().filter(QuestionChoiceRecord::isCorrect).map(QuestionChoiceRecord::getId).collect(Collectors.toSet());
+                List<QuestionChoice> cs = choicesByQ.getOrDefault(q.getId(), List.of());
+                Set<Long> correct = cs.stream().filter(QuestionChoice::isCorrect).map(QuestionChoice::getId).collect(Collectors.toSet());
                 Set<Long> mine = new LinkedHashSet<>(chosen.getOrDefault(q.getId(), List.of()));
                 out.put(q.getId(), gradeChoice(points, mine, correct, choiceText(cs, mine), choiceText(cs, correct)));
             } else {
@@ -249,33 +249,33 @@ public class QuestionService {
     public Report report(long attemptId) {
         var scoring = scorings.findFirstByAttemptIdAndStatusOrderByIdDesc(attemptId, "DONE").orElse(null);
         if (scoring == null) return null;
-        List<QuestionResultRecord> rs = results.findByScoringId(scoring.getId());
+        List<QuestionResult> rs = results.findByScoringId(scoring.getId());
         if (rs.isEmpty()) return null;
-        Map<Long, TaskQuestionRecord> byId = questions.findAllById(rs.stream().map(QuestionResultRecord::getQuestionId).toList()).stream()
-                .collect(Collectors.toMap(TaskQuestionRecord::getId, q -> q));
+        Map<Long, TaskQuestion> byId = questions.findAllById(rs.stream().map(QuestionResult::getQuestionId).toList()).stream()
+                .collect(Collectors.toMap(TaskQuestion::getId, q -> q));
         List<Long> ids = new ArrayList<>(byId.keySet());
-        Map<Long, List<QuestionChoiceRecord>> choicesByQ = choices.findByQuestionIdInOrderBySeqAsc(ids).stream()
-                .collect(Collectors.groupingBy(QuestionChoiceRecord::getQuestionId));
+        Map<Long, List<QuestionChoice>> choicesByQ = choices.findByQuestionIdInOrderBySeqAsc(ids).stream()
+                .collect(Collectors.groupingBy(QuestionChoice::getQuestionId));
         Map<Long, List<String>> acceptedByQ = new HashMap<>();
-        for (ShortAnswerKeyRecord k : keys.findByQuestionIdInOrderByIdAsc(ids)) {
+        for (ShortAnswerKey k : keys.findByQuestionIdInOrderByIdAsc(ids)) {
             acceptedByQ.computeIfAbsent(k.getQuestionId(), x -> new ArrayList<>()).add(k.getAccepted());
         }
         Map<Long, List<Long>> chosen = chosenByQuestion(attemptId);
         Map<Long, String> texts = textAnswers.findByAttemptId(attemptId).stream()
-                .collect(Collectors.toMap(TextAnswerRecord::getQuestionId, TextAnswerRecord::getContent));
+                .collect(Collectors.toMap(TextAnswer::getQuestionId, TextAnswer::getContent));
         List<ReportItem> items = new ArrayList<>();
         int score = 0;
         int max = 0;
-        for (QuestionResultRecord r : rs.stream().sorted(Comparator.comparingInt(x -> byId.get(x.getQuestionId()).getSeq())).toList()) {
-            TaskQuestionRecord q = byId.get(r.getQuestionId());
+        for (QuestionResult r : rs.stream().sorted(Comparator.comparingInt(x -> byId.get(x.getQuestionId()).getSeq())).toList()) {
+            TaskQuestion q = byId.get(r.getQuestionId());
             int points = q.getPoints() == null ? 0 : q.getPoints();
             String your;
             String correct;
             if (isChoice(q.getQuestionType())) {
-                List<QuestionChoiceRecord> cs = choicesByQ.getOrDefault(q.getId(), List.of());
+                List<QuestionChoice> cs = choicesByQ.getOrDefault(q.getId(), List.of());
                 Set<Long> mine = new LinkedHashSet<>(chosen.getOrDefault(q.getId(), List.of()));
                 your = mine.isEmpty() ? null : choiceText(cs, mine);
-                correct = choiceText(cs, cs.stream().filter(QuestionChoiceRecord::isCorrect).map(QuestionChoiceRecord::getId).collect(Collectors.toSet()));
+                correct = choiceText(cs, cs.stream().filter(QuestionChoice::isCorrect).map(QuestionChoice::getId).collect(Collectors.toSet()));
             } else {
                 your = texts.get(q.getId());
                 correct = joinAccepted(acceptedByQ.getOrDefault(q.getId(), List.of()));
@@ -293,21 +293,21 @@ public class QuestionService {
     /** 문항 id → 고른 보기 id (보기 id 순) */
     private Map<Long, List<Long>> chosenByQuestion(long attemptId) {
         Map<Long, List<Long>> m = new HashMap<>();
-        choiceAnswers.findByAttemptId(attemptId).stream().sorted(Comparator.comparing(ChoiceAnswerRecord::getChoiceId))
+        choiceAnswers.findByAttemptId(attemptId).stream().sorted(Comparator.comparing(ChoiceAnswer::getChoiceId))
                 .forEach(c -> m.computeIfAbsent(c.getQuestionId(), k -> new ArrayList<>()).add(c.getChoiceId()));
         return m;
     }
 
     /** 보기 내용을 보기 순서대로 쉼표로 이은 글 */
-    private static String choiceText(List<QuestionChoiceRecord> all, Set<Long> pick) {
-        return all.stream().filter(c -> pick.contains(c.getId())).map(QuestionChoiceRecord::getContent).collect(Collectors.joining(", "));
+    private static String choiceText(List<QuestionChoice> all, Set<Long> pick) {
+        return all.stream().filter(c -> pick.contains(c.getId())).map(QuestionChoice::getContent).collect(Collectors.joining(", "));
     }
 
     private static boolean isChoice(String type) {
         return "SINGLE".equals(type) || "MULTI".equals(type);
     }
 
-    private AttemptRecord attempt(long attemptId) {
+    private Attempt attempt(long attemptId) {
         return attempts.findById(attemptId).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + attemptId));
     }
 }

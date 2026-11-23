@@ -1,5 +1,6 @@
 package com.pair.domain.exam.service;
 
+import com.pair.domain.exam.exception.LinkExpiredException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -14,7 +15,7 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.repository.ProctorEventRepository;
-import com.pair.domain.exam.dto.ExamDtos.ParticipantView;
+import com.pair.domain.exam.dto.ParticipantResponse;
 
 /**
  * 시험 중 연결 유예. 시작한 응시자의 시험 화면은 10초마다 신호를 보낸다 (heartbeat).
@@ -79,7 +80,7 @@ public class ConnectionGrace {
      * 진행 중인 시험의 아직 제출하지 않은 응시자만 되살릴 수 있다. 같은 행을 잠가 응시자의 신호·입장과 줄을 선다.
      */
     @Transactional
-    public ParticipantView restore(Long sessionId, Long participantId, Long restoredBy) {
+    public ParticipantResponse restore(Long sessionId, Long participantId, Long restoredBy) {
         Instant now = clock.instant();
         ExamParticipant p = participants.lockById(participantId)
                 .filter(x -> x.getSession().getId().equals(sessionId))
@@ -94,7 +95,7 @@ public class ConnectionGrace {
         int offlineMs = (int) Math.min(Integer.MAX_VALUE, Duration.between(expiredAt, now).toMillis());
         events.save(new ProctorEvent(p.getId(), ProctorEvent.Type.LINK_RESTORED, now, offlineMs, null,
                 "{\"restoredBy\":" + restoredBy + ",\"expiredAt\":\"" + expiredAt + "\"}", now));
-        return ParticipantView.from(p, pr, now);
+        return ParticipantResponse.from(p, pr, now);
     }
 
     /** 주기 점검: 진행 중인 회차에서 마지막 신호가 유예를 넘긴 응시자를 만료시킨다. 돌아오지 않아도 기록이 남게 한다. @return 만료시킨 인원 */

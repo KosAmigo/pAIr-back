@@ -1,10 +1,10 @@
 package com.pair.domain.task.service;
 
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import java.util.List;
 
 /**
- * 과제 정의. DB(tasks, task_questions, settings JSON)에서 TaskRepository 가 만든다.
+ * 과제 정의. DB(tasks, task_questions, settings JSON)에서 TaskDefRepository 가 만든다.
  * 숨은 파일(task_files 의 HIDDEN)은 이 객체에 담지 않고 채점할 때만 따로 읽는다.
  */
 public record TaskDef(

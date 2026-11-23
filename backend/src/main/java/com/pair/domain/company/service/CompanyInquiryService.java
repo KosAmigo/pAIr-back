@@ -1,6 +1,9 @@
 package com.pair.domain.company.service;
 
-import com.pair.domain.company.dto.CompanyInquiryDtos;
+import com.pair.domain.company.dto.CompanyResponse;
+import com.pair.domain.company.dto.InquiryMemberDto;
+import com.pair.domain.company.dto.InquiryMemberInputDto;
+import com.pair.domain.company.dto.InquiryResponse;
 import com.pair.domain.company.entity.Company;
 import com.pair.domain.company.entity.CompanyInquiry;
 import com.pair.domain.company.entity.CompanyInquiryMember;
@@ -46,7 +49,7 @@ public class CompanyInquiryService {
     }
 
     @Transactional
-    public CompanyInquiryDtos.InquiryView submit(String companyName, String businessNo, String contactName,
+    public InquiryResponse submit(String companyName, String businessNo, String contactName,
             String contactEmail, String message, byte[] csv) {
         if (csv == null || csv.length == 0) throw new IllegalArgumentException("회원 명단 CSV 파일을 올려 주세요.");
         String company = required(companyName, 100, "회사명");
@@ -54,7 +57,7 @@ public class CompanyInquiryService {
         String contact = required(contactName, 50, "담당자 이름");
         String email = normalizeEmail(contactEmail);
         if (!EMAIL.matcher(email).matches()) throw new IllegalArgumentException("담당자 이메일 형식이 올바르지 않습니다.");
-        List<CompanyInquiryDtos.MemberInput> roster = parseCsv(csv);
+        List<InquiryMemberInputDto> roster = parseCsv(csv);
         validateRoster(roster);
 
         CompanyInquiry inquiry = inquiries.saveAndFlush(new CompanyInquiry(company, business, contact, email,
@@ -63,28 +66,28 @@ public class CompanyInquiryService {
                 .map(m -> new CompanyInquiryMember(inquiry.getId(), m.name(), normalizeEmail(m.email()), m.role()))
                 .toList();
         members.saveAll(records);
-        return view(inquiry, roster.stream().map(m -> new CompanyInquiryDtos.MemberView(m.name(), normalizeEmail(m.email()), m.role())).toList());
+        return view(inquiry, roster.stream().map(m -> new InquiryMemberDto(m.name(), normalizeEmail(m.email()), m.role())).toList());
     }
 
     @Transactional(readOnly = true)
-    public List<CompanyInquiryDtos.InquiryView> list() {
+    public List<InquiryResponse> list() {
         List<CompanyInquiry> all = inquiries.findAllByOrderByCreatedAtDesc();
         if (all.isEmpty()) return List.of();
-        Map<Long, List<CompanyInquiryDtos.MemberView>> roster = members.findByInquiryIdIn(
+        Map<Long, List<InquiryMemberDto>> roster = members.findByInquiryIdIn(
                 all.stream().map(CompanyInquiry::getId).toList()).stream()
                 .collect(java.util.stream.Collectors.groupingBy(CompanyInquiryMember::getInquiryId,
-                        java.util.stream.Collectors.mapping(m -> new CompanyInquiryDtos.MemberView(
+                        java.util.stream.Collectors.mapping(m -> new InquiryMemberDto(
                                 m.getName(), m.getEmail(), m.getRole()), java.util.stream.Collectors.toList())));
         return all.stream().map(inquiry -> view(inquiry, roster.getOrDefault(inquiry.getId(), List.of()))).toList();
     }
 
     @Transactional
-    public CompanyInquiryDtos.CompanyView approve(Long inquiryId, Long adminId) {
+    public CompanyResponse approve(Long inquiryId, Long adminId) {
         CompanyInquiry inquiry = inquiries.lockById(inquiryId)
                 .orElseThrow(() -> new java.util.NoSuchElementException("기업 문의를 찾을 수 없습니다."));
         if (inquiry.getStatus() != CompanyInquiry.Status.PENDING) throw new IllegalStateException("이미 처리된 기업 문의입니다.");
         List<CompanyInquiryMember> roster = members.findByInquiryIdOrderById(inquiryId);
-        validateRoster(roster.stream().map(m -> new CompanyInquiryDtos.MemberInput(m.getName(), m.getEmail(), m.getRole())).toList());
+        validateRoster(roster.stream().map(m -> new InquiryMemberInputDto(m.getName(), m.getEmail(), m.getRole())).toList());
         for (CompanyInquiryMember member : roster) {
             if (accounts.existsByEmailIgnoreCase(member.getEmail())) {
                 throw new ConflictException("이미 가입된 이메일입니다. 명단을 수정한 뒤 다시 승인해 주세요: " + member.getEmail());
@@ -97,7 +100,7 @@ public class CompanyInquiryService {
         for (CompanyInquiryMember member : roster) {
             corporateAccounts.create(member.getEmail(), member.getName(), member.getRole(), company.getId());
         }
-        return CompanyInquiryDtos.CompanyView.from(company);
+        return CompanyResponse.from(company);
     }
 
     @Transactional
@@ -108,13 +111,13 @@ public class CompanyInquiryService {
     }
 
     @Transactional
-    public CompanyInquiryDtos.InquiryView replaceRoster(Long inquiryId, byte[] csv) {
+    public InquiryResponse replaceRoster(Long inquiryId, byte[] csv) {
         CompanyInquiry inquiry = inquiries.lockById(inquiryId)
                 .orElseThrow(() -> new java.util.NoSuchElementException("기업 문의를 찾을 수 없습니다."));
         if (inquiry.getStatus() != CompanyInquiry.Status.PENDING) throw new IllegalStateException("처리 전 문의만 명단을 바꿀 수 있습니다.");
-        List<CompanyInquiryDtos.MemberInput> roster = parseCsv(csv);
+        List<InquiryMemberInputDto> roster = parseCsv(csv);
         validateRoster(roster);
-        for (CompanyInquiryDtos.MemberInput member : roster) {
+        for (InquiryMemberInputDto member : roster) {
             if (accounts.existsByEmailIgnoreCase(normalizeEmail(member.email()))) {
                 throw new ConflictException("이미 가입된 이메일입니다. 명단을 수정해 주세요: " + member.email());
             }
@@ -122,23 +125,23 @@ public class CompanyInquiryService {
         members.deleteByInquiryId(inquiryId);
         members.saveAll(roster.stream().map(m -> new CompanyInquiryMember(inquiryId, m.name().trim(),
                 normalizeEmail(m.email()), m.role())).toList());
-        return view(inquiry, roster.stream().map(m -> new CompanyInquiryDtos.MemberView(m.name().trim(),
+        return view(inquiry, roster.stream().map(m -> new InquiryMemberDto(m.name().trim(),
                 normalizeEmail(m.email()), m.role())).toList());
     }
 
-    private static CompanyInquiryDtos.InquiryView view(CompanyInquiry inquiry, List<CompanyInquiryDtos.MemberView> roster) {
-        return new CompanyInquiryDtos.InquiryView(inquiry.getId(), inquiry.getCompanyName(), inquiry.getBusinessNo(),
+    private static InquiryResponse view(CompanyInquiry inquiry, List<InquiryMemberDto> roster) {
+        return new InquiryResponse(inquiry.getId(), inquiry.getCompanyName(), inquiry.getBusinessNo(),
                 inquiry.getContactName(), inquiry.getContactEmail(), inquiry.getMessage(), inquiry.getStatus(),
                 inquiry.getCompanyId(), inquiry.getCreatedAt(), roster);
     }
 
-    private static void validateRoster(List<CompanyInquiryDtos.MemberInput> roster) {
+    private static void validateRoster(List<InquiryMemberInputDto> roster) {
         if (roster.isEmpty() || roster.size() > MAX_MEMBERS) {
             throw new IllegalArgumentException("회원 명단은 1명 이상 %d명 이하로 입력해 주세요.".formatted(MAX_MEMBERS));
         }
         Set<String> emails = new HashSet<>();
         long managers = 0;
-        for (CompanyInquiryDtos.MemberInput member : roster) {
+        for (InquiryMemberInputDto member : roster) {
             required(member.name(), 50, "회원명");
             String email = normalizeEmail(member.email());
             if (!EMAIL.matcher(email).matches()) throw new IllegalArgumentException("이메일 형식이 올바르지 않습니다: " + email);
@@ -151,7 +154,7 @@ public class CompanyInquiryService {
         if (managers != 1) throw new IllegalArgumentException("회원 명단에는 MANAGER가 정확히 1명 있어야 합니다.");
     }
 
-    private static List<CompanyInquiryDtos.MemberInput> parseCsv(byte[] content) {
+    private static List<InquiryMemberInputDto> parseCsv(byte[] content) {
         String csv = new String(content, StandardCharsets.UTF_8);
         if (!csv.isEmpty() && csv.charAt(0) == '\uFEFF') csv = csv.substring(1);
         List<List<String>> rows = parseRecords(csv);
@@ -159,7 +162,7 @@ public class CompanyInquiryService {
                 .equals(List.of("회원명", "회원이메일", "역할"))) {
             throw new IllegalArgumentException("CSV 첫 줄은 회원명,회원이메일,역할 순서여야 합니다.");
         }
-        List<CompanyInquiryDtos.MemberInput> result = new ArrayList<>();
+        List<InquiryMemberInputDto> result = new ArrayList<>();
         for (int i = 1; i < rows.size(); i++) {
             List<String> row = rows.get(i);
             if (row.size() == 1 && row.get(0).isBlank()) continue;
@@ -170,7 +173,7 @@ public class CompanyInquiryService {
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("CSV %d번째 역할은 MANAGER 또는 PROCTOR여야 합니다.".formatted(i + 1));
             }
-            result.add(new CompanyInquiryDtos.MemberInput(row.get(0).trim(), row.get(1).trim(), role));
+            result.add(new InquiryMemberInputDto(row.get(0).trim(), row.get(1).trim(), role));
         }
         return result;
     }

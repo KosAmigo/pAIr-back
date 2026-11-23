@@ -22,8 +22,8 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.repository.ProctorEventRepository;
-import com.pair.domain.exam.dto.ExamDtos.ProctorEventRequest;
-import com.pair.domain.exam.dto.ExamDtos.ProctorEventView;
+import com.pair.domain.exam.dto.ProctorEventRequest;
+import com.pair.domain.exam.dto.ProctorEventResponse;
 
 /**
  * 감독 이벤트 수신과 사진 보관.
@@ -49,7 +49,7 @@ public class ProctorService {
     private final ObjectMapper json;
     private final ExamProperties props;
     private final Clock clock;
-    private final com.pair.domain.attempt.repository.AttemptRecordRepository attempts;
+    private final com.pair.domain.attempt.repository.AttemptRepository attempts;
     private final TransactionTemplate tx;
     private final com.pair.domain.exam.repository.ExamSessionRepository sessions;
     private final com.pair.domain.exam.repository.SnapshotRetentionExtensionRepository extensions;
@@ -58,7 +58,7 @@ public class ProctorService {
 
     public ProctorService(ExamParticipantRepository participants, ProctorEventRepository events, SnapshotValidator snapshots,
             SnapshotStorage storage, ObjectMapper json, ExamProperties props, Clock clock,
-            com.pair.domain.attempt.repository.AttemptRecordRepository attempts, PlatformTransactionManager txManager,
+            com.pair.domain.attempt.repository.AttemptRepository attempts, PlatformTransactionManager txManager,
             com.pair.domain.exam.repository.ExamSessionRepository sessions,
             com.pair.domain.exam.repository.SnapshotRetentionExtensionRepository extensions, SnapshotRetentionService retention,
             com.pair.domain.exam.repository.ProctorEventFrameRepository clipFrames) {
@@ -85,7 +85,7 @@ public class ProctorService {
      * 업로드가 실패하면 예외를 던져 브라우저가 다시 보내게 한다. 다시 온 요청은 같은 clientId 의 이벤트를 찾아
      * 이벤트를 또 만들지 않고 사진만 다시 올려 연결한다. clientId 가 없는 옛 클라이언트는 이벤트도 되돌려 중복을 막는다.
      */
-    public ProctorEventView record(String token, ProctorEventRequest req) {
+    public ProctorEventResponse record(String token, ProctorEventRequest req) {
         Instant now = clock.instant();
         Stored stored = storeEvent(token, req, now);
         if (stored.jpeg() == null) return stored.view();
@@ -102,7 +102,7 @@ public class ProctorService {
         int size = stored.jpeg().length;
         return tx.execute(status -> {
             events.attachSnapshot(stored.eventId(), key, size);
-            return ProctorEventView.from(events.findById(stored.eventId()).orElseThrow());
+            return ProctorEventResponse.from(events.findById(stored.eventId()).orElseThrow());
         });
     }
 
@@ -136,7 +136,7 @@ public class ProctorService {
             if (existing.isPresent()) {
                 ProctorEvent e = existing.get();
                 boolean needsPhoto = e.getSnapshotKey() == null && jpeg != null;
-                return new Stored(ProctorEventView.from(e), e.getId(), s.getId(), needsPhoto ? jpeg : null, false);
+                return new Stored(ProctorEventResponse.from(e), e.getId(), s.getId(), needsPhoto ? jpeg : null, false);
             }
         }
 
@@ -153,7 +153,7 @@ public class ProctorService {
         if (overLimit) e.skipSnapshot(ProctorEvent.SnapshotSkipReason.LIMIT_EXCEEDED); // 감독 화면에 "상한 초과"로 보인다
         e.assignClientId(req.clientId());
         events.flush(); // 같은 clientId 가 동시에 들어왔다면 여기서 유니크 위반으로 드러난다
-        return new Stored(ProctorEventView.from(e), e.getId(), s.getId(), jpeg, true);
+        return new Stored(ProctorEventResponse.from(e), e.getId(), s.getId(), jpeg, true);
     }
 
     /**
@@ -169,27 +169,27 @@ public class ProctorService {
     }
 
     /** 1단계 결과. jpeg 가 null 이면 올릴 사진이 없다 (없거나, 상한을 넘었거나, 이미 올라가 있음) */
-    private record Stored(ProctorEventView view, Long eventId, Long sessionId, byte[] jpeg, boolean created) {}
+    private record Stored(ProctorEventResponse view, Long eventId, Long sessionId, byte[] jpeg, boolean created) {}
 
     @Transactional(readOnly = true)
-    public List<ProctorEventView> eventsOf(Long sessionId, Long participantId) {
+    public List<ProctorEventResponse> eventsOf(Long sessionId, Long participantId) {
         ExamParticipant p = participants.findById(participantId)
                 .filter(x -> x.getSession().getId().equals(sessionId))
                 .orElseThrow(() -> new NoSuchElementException("없는 대상자입니다."));
-        return events.findByParticipantIdOrderByStartedAtAsc(p.getId()).stream().map(ProctorEventView::from).toList();
+        return events.findByParticipantIdOrderByStartedAtAsc(p.getId()).stream().map(ProctorEventResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
-    public List<ProctorEventView> eventsOfSession(Long sessionId) {
-        return events.findBySessionId(sessionId).stream().map(ProctorEventView::from).toList();
+    public List<ProctorEventResponse> eventsOfSession(Long sessionId) {
+        return events.findBySessionId(sessionId).stream().map(ProctorEventResponse::from).toList();
     }
 
     /** 담당자 판정 (OK/SUSPECT). review 가 null 이면 판정을 지운다 */
     @Transactional
-    public ProctorEventView review(Long sessionId, Long eventId, ProctorEvent.Review review, String note, Long reviewerId) {
+    public ProctorEventResponse review(Long sessionId, Long eventId, ProctorEvent.Review review, String note, Long reviewerId) {
         ProctorEvent e = eventOf(sessionId, eventId);
         e.review(review, note == null || note.isBlank() ? null : note.trim(), reviewerId, clock.instant());
-        return ProctorEventView.from(e);
+        return ProctorEventResponse.from(e);
     }
 
     /** 콘솔에서 사진 보기. 보관 기간이 지나 지운 사진은 IllegalStateException */

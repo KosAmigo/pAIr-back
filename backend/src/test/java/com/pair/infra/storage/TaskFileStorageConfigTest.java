@@ -1,6 +1,6 @@
 package com.pair.infra.storage;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import com.pair.domain.taskgen.service.BizTaskGenerator;
 import com.pair.domain.taskgen.service.DevTaskGenerator;
 import com.pair.domain.taskgen.service.TaskGenJobs;
@@ -61,8 +61,8 @@ class TaskFileStorageConfigTest {
         return new TaskGenJobs(dev, biz, new TaskGenProperties(null, null, null, null, null), new TaskFileStorageGuard(storage, url));
     }
 
-    private static TaskGenForm form(String track) {
-        return new TaskGenForm(track, "주제", "함정", "사용", null);
+    private static TaskGenRequest form(String track) {
+        return new TaskGenRequest(track, "주제", "함정", "사용", null);
     }
 
     @Test

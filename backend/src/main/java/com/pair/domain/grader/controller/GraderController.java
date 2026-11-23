@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.grader.service.GraderService;
 import com.pair.domain.grader.service.PromptStore;
-import com.pair.domain.grader.service.PromptVersion;
+import com.pair.domain.grader.service.PromptVersionState;
 import com.pair.domain.scoring.service.Rubric;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -58,12 +58,12 @@ public class GraderController {
     }
 
     @GetMapping("/versions/{id}")
-    public PromptVersion version(@PathVariable String id) {
+    public PromptVersionState version(@PathVariable String id) {
         return prompts.get(id);
     }
 
     @PostMapping("/versions")
-    public PromptVersion createVersion(@RequestBody PromptVersion draft) {
+    public PromptVersionState createVersion(@RequestBody PromptVersionState draft) {
         return prompts.create(draft);
     }
 

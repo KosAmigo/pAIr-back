@@ -25,19 +25,19 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.pair.infra.ai.EmbeddingClient;
 import com.pair.infra.ai.Judge;
-import com.pair.domain.attempt.service.Attempt;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.grader.service.PromptVersion;
-import com.pair.domain.task.entity.DocumentPageRecord;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
+import com.pair.domain.attempt.service.AttemptState;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.grader.service.PromptVersionState;
+import com.pair.domain.task.entity.DocumentPage;
+import com.pair.domain.task.repository.DocumentPageRepository;
 import com.pair.domain.task.service.TaskCatalog;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.entity.TaskQuestionRecord;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.entity.TaskQuestion;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.domain.task.TestTasks;
 
 /** 비개발 채점의 제공 자료: 과제 원본(PDF 포함)에서 가져오고, auto 로 full(캐시 앞부분)/rag(뒷부분)를 고른다. AI·임베딩은 가짜. */
@@ -58,19 +58,19 @@ class ScoringReferenceTest {
 
     @Autowired ScoringService scoring;
     @Autowired ReferenceDocs referenceDocs;
-    @Autowired TaskRepository tasks;
+    @Autowired TaskDefRepository tasks;
     @Autowired TaskCatalog catalog;
-    @Autowired AttemptStore store;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
-    @Autowired DocumentPageRecordRepository pages;
-    @Autowired com.pair.domain.task.repository.QuestionSourceRecordRepository sourceRecords;
+    @Autowired AttemptStoreRepository store;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
+    @Autowired DocumentPageRepository pages;
+    @Autowired com.pair.domain.task.repository.QuestionSourceRepository sourceRecords;
     @Autowired com.pair.domain.attempt.service.AttemptRegistry registry;
 
     static final String BIG = "big-biz";
     final Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    final PromptVersion version = new PromptVersion("20261120-1100_ref-test", "ref", null, now, null, "규칙", Map.of());
+    final PromptVersionState version = new PromptVersionState("20261120-1100_ref-test", "ref", null, now, null, "규칙", Map.of());
 
     @BeforeEach
     void setUp() {
@@ -78,33 +78,33 @@ class ScoringReferenceTest {
         TestTasks.seed(taskRecords, taskFiles, taskQuestions);
         // pricing-plan(2번): PDF 자료 1개(2쪽) + 숨은 자료 + 자료 밖 공개 파일을 더한다
         long small = 2L;
-        TaskFileRecord pdf = pdf(small, "자료/설문보고서.pdf");
-        pages.save(new DocumentPageRecord(pdf.getId(), 2, "둘째 쪽 글: 가격 인상 여파"));
-        pages.save(new DocumentPageRecord(pdf.getId(), 1, "첫 쪽 글: 이탈 사유"));
-        taskFiles.save(new TaskFileRecord(small, "자료/숨김.md", "숨은 자료 글", "text/markdown", 10, TaskFileRecord.HIDDEN, true));
-        taskFiles.save(new TaskFileRecord(small, "참고/밖의파일.md", "자료 밖 글", "text/markdown", 10, TaskFileRecord.VISIBLE, false));
+        TaskFile pdf = pdf(small, "자료/설문보고서.pdf");
+        pages.save(new DocumentPage(pdf.getId(), 2, "둘째 쪽 글: 가격 인상 여파"));
+        pages.save(new DocumentPage(pdf.getId(), 1, "첫 쪽 글: 이탈 사유"));
+        taskFiles.save(new TaskFile(small, "자료/숨김.md", "숨은 자료 글", "text/markdown", 10, TaskFile.HIDDEN, true));
+        taskFiles.save(new TaskFile(small, "참고/밖의파일.md", "자료 밖 글", "text/markdown", 10, TaskFile.VISIBLE, false));
         // 큰 자료 과제: PDF 6쪽 × 2500자 = 15000자 (> 12000)
-        TaskRecord big = new TaskRecord(60L, BIG, "큰 자료 과제", "BIZ", 60, TaskRecord.Usage.SELF, TaskRecord.Status.OPEN, null, 1L, now);
+        Task big = new Task(60L, BIG, "큰 자료 과제", "BIZ", 60, Task.Usage.SELF, Task.Status.OPEN, null, 1L, now);
         big.setContent("설명", "요구", "{\"openFile\":\"기획안.md\",\"editableFile\":null,\"requiredHeadings\":[],\"d4Minutes\":[10,20,30,40]}");
         taskRecords.save(big);
         taskFiles.deleteAll(taskFiles.findAll().stream().filter(f -> f.getTaskId() == 60L).toList());
-        taskFiles.save(new TaskFileRecord(60L, "기획안.md", "", "text/markdown", 0, TaskFileRecord.VISIBLE, false));
-        taskFiles.save(new TaskFileRecord(60L, "checklist.md", "체크", "text/markdown", 10, TaskFileRecord.HIDDEN, true));
-        TaskFileRecord bigPdf = pdf(60L, "자료/큰보고서.pdf");
+        taskFiles.save(new TaskFile(60L, "기획안.md", "", "text/markdown", 0, TaskFile.VISIBLE, false));
+        taskFiles.save(new TaskFile(60L, "checklist.md", "체크", "text/markdown", 10, TaskFile.HIDDEN, true));
+        TaskFile bigPdf = pdf(60L, "자료/큰보고서.pdf");
         for (int i = 1; i <= 6; i++) {
             String filler = ("쪽" + i + " 내용 ").repeat(2500 / 6);
-            pages.save(new DocumentPageRecord(bigPdf.getId(), i, (i == 6 ? "가격 " : "") + filler));
+            pages.save(new DocumentPage(bigPdf.getId(), i, (i == 6 ? "가격 " : "") + filler));
         }
         // 함정 정보(_gen/report.json)와 문항 근거(question_sources): 큰 자료 과제에만 있다
         taskQuestions.deleteAll(taskQuestions.findAll().stream().filter(q -> q.getTaskId() == 60L).toList());
         sourceRecords.deleteAll();
-        taskFiles.save(new TaskFileRecord(60L, "_gen/report.json",
+        taskFiles.save(new TaskFile(60L, "_gen/report.json",
                 "{\"details\":{\"trap\":{\"description\":\"6쪽의 단서를 놓치면 가격 인상이 이득처럼 보인다\",\"evidence\":\"\\\"쪽6 내용 쪽6 내용\\\"\"}}}",
-                "application/json", 100, TaskFileRecord.HIDDEN, true));
-        var q1 = taskQuestions.save(new TaskQuestionRecord(60L, "TASK", "SHORT", 1, "문항 하나"));
-        var q2 = taskQuestions.save(new TaskQuestionRecord(60L, "TASK", "SINGLE", 2, "문항 둘"));
-        sourceRecords.save(new com.pair.domain.task.entity.QuestionSourceRecord(q1.getId(), bigPdf.getId(), "5,6"));
-        sourceRecords.save(new com.pair.domain.task.entity.QuestionSourceRecord(q2.getId(), bigPdf.getId(), null));
+                "application/json", 100, TaskFile.HIDDEN, true));
+        var q1 = taskQuestions.save(new TaskQuestion(60L, "TASK", "SHORT", 1, "문항 하나"));
+        var q2 = taskQuestions.save(new TaskQuestion(60L, "TASK", "SINGLE", 2, "문항 둘"));
+        sourceRecords.save(new com.pair.domain.task.entity.QuestionSource(q1.getId(), bigPdf.getId(), "5,6"));
+        sourceRecords.save(new com.pair.domain.task.entity.QuestionSource(q2.getId(), bigPdf.getId(), null));
         when(embeddings.embed(anyList())).thenAnswer(inv -> {
             List<String> texts = inv.getArgument(0);
             List<float[]> v = new ArrayList<>();
@@ -113,8 +113,8 @@ class ScoringReferenceTest {
         });
     }
 
-    private TaskFileRecord pdf(long taskId, String path) {
-        TaskFileRecord f = new TaskFileRecord(taskId, path, null, "application/pdf", 1000, TaskFileRecord.VISIBLE, true);
+    private TaskFile pdf(long taskId, String path) {
+        TaskFile f = new TaskFile(taskId, path, null, "application/pdf", 1000, TaskFile.VISIBLE, true);
         f.setStorageKey("tasks/" + taskId + "/" + path);
         return taskFiles.save(f);
     }
@@ -155,10 +155,10 @@ class ScoringReferenceTest {
     record Prompt(String system, String prefix, String body) {}
 
     private String newAttempt(String taskCode, long taskId, Map<String, String> files) {
-        var r = registry.save(com.pair.domain.attempt.entity.AttemptRecord.self(1L, taskId, "gpt-test", now));
+        var r = registry.save(com.pair.domain.attempt.entity.Attempt.self(1L, taskId, "gpt-test", now));
         String id = String.valueOf(r.getId());
-        store.create(new Attempt(id, taskCode, "openai", "gpt-test", now, null, null, null,
-                Attempt.Status.SCORING, List.of(), null, null), files);
+        store.create(new AttemptState(id, taskCode, "openai", "gpt-test", now, null, null, null,
+                AttemptState.Status.SCORING, List.of(), null, null), files);
         store.save(store.load(id).withSubmitted(now.plusSeconds(1)));
         return id;
     }

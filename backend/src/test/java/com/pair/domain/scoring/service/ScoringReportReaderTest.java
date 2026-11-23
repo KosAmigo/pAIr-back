@@ -1,6 +1,5 @@
 package com.pair.domain.scoring.service;
 
-import com.pair.domain.scoring.service.TestPromptVersions;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Path;
@@ -19,15 +18,15 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.pair.domain.attempt.entity.AttemptRecord;
+import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.repository.AttemptStore;
-import com.pair.domain.grader.service.PromptVersion;
-import com.pair.domain.scoring.service.ScoringService.CheckResult;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.grader.service.PromptVersionState;
+import com.pair.domain.scoring.service.ScoringService.CheckOutcome;
 import com.pair.domain.scoring.service.ScoringService.ItemResult;
-import com.pair.domain.scoring.service.ScoringService.JudgeCall;
+import com.pair.domain.scoring.service.ScoringService.JudgeUsage;
 import com.pair.domain.scoring.service.ScoringService.JudgeView;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 
 /** 리포트를 읽을 때 점수와 판정이 채점 테이블 기준으로 나오는지 (H2) */
@@ -44,20 +43,20 @@ class ScoringReportReaderTest {
     }
 
     @Autowired ScoringRecords records;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AttemptRegistry registry;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired com.pair.domain.scoring.repository.PromptVersionRecordRepository promptVersions;
+    @Autowired TaskRepository taskRecords;
+    @Autowired com.pair.domain.scoring.repository.PromptVersionRepository promptVersions;
 
     final Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
-    final PromptVersion version = new PromptVersion("20261119-1600_reader-test", "reader", null, now, null, "규칙", Map.of());
+    final PromptVersionState version = new PromptVersionState("20261119-1600_reader-test", "reader", null, now, null, "규칙", Map.of());
     long attemptId;
 
     @BeforeEach
     void setUp() {
         TestTasks.seed(taskRecords);
         TestPromptVersions.ensure(promptVersions, version);
-        attemptId = registry.save(AttemptRecord.self(1L, 1L, "gpt-test", now)).getId();
+        attemptId = registry.save(Attempt.self(1L, 1L, "gpt-test", now)).getId();
     }
 
     @Test
@@ -71,14 +70,14 @@ class ScoringReportReaderTest {
                 new JudgeView("claude", "haiku", true, 0, List.of("#T01"), "목표 없음"),
                 new JudgeView("openai#1", "terra", true, 0, List.of("#T01"), "목표 없음"),
                 new JudgeView("openai#2", "terra", false, 0, List.of(), "괜찮음"));
-        CheckResult u1 = new CheckResult("U1", "라벨", "JUDGE", 4, 4, "DEDUCTED", List.of("#T01"), "목표 없음", views);
-        CheckResult d1 = new CheckResult("D1", "라벨", "AUTO", 5, 10, "DEDUCTED", List.of(), "테스트 2개 실패");
+        CheckOutcome u1 = new CheckOutcome("U1", "라벨", "JUDGE", 4, 4, "DEDUCTED", List.of("#T01"), "목표 없음", views);
+        CheckOutcome d1 = new CheckOutcome("D1", "라벨", "AUTO", 5, 10, "DEDUCTED", List.of(), "테스트 2개 실패");
         records.finish(sid, true, List.of(
                 new ItemResult("usage", "AI 활용력", 20, 16, List.of(u1)),
                 new ItemResult("delivery", "AI 결과 도출력", 30, 20, List.of(d1))), List.of(
-                new JudgeCall("claude", "haiku", 100, 10, 50),
-                new JudgeCall("openai#1", "terra", 200, 20, 0),
-                new JudgeCall("openai#2", "terra", 300, 30, 0)));
+                new JudgeUsage("claude", "haiku", 100, 10, 50),
+                new JudgeUsage("openai#1", "terra", 200, 20, 0),
+                new JudgeUsage("openai#2", "terra", 300, 30, 0)));
 
         JsonNode rep = store.readReport(String.valueOf(attemptId));
 

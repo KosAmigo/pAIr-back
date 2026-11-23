@@ -1,6 +1,7 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.auth.dto.AuthResponse;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -23,11 +24,10 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
-import com.pair.domain.auth.dto.AuthDtos;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
@@ -41,13 +41,13 @@ class ReplayCompareTest {
     @Autowired AuthService auth;
     @MockitoBean JavaMailSender mail;
     @Autowired AttemptService attempts;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired ReplayCompareService compare;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
 
-    AuthDtos.AuthResponse owner;
+    AuthResponse owner;
     String a;
     String b;
 
@@ -63,7 +63,7 @@ class ReplayCompareTest {
                 check("C3", "추가 체크", "SKIPPED", 0, null, List.of())));
     }
 
-    private AuthDtos.AuthResponse signup() {
+    private AuthResponse signup() {
         return AuthTestSupport.signup(auth, mail, "Test", UUID.randomUUID() + "@example.com");
     }
 
@@ -88,7 +88,7 @@ class ReplayCompareTest {
 
     private void finish(String id, Map<String, Object> report) {
         Instant t = Instant.now();
-        store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(Attempt.Status.DONE));
+        store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptState.Status.DONE));
         store.writeReport(id, report);
     }
 

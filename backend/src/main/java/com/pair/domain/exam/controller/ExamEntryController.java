@@ -1,6 +1,8 @@
 package com.pair.domain.exam.controller;
 
-import com.pair.domain.exam.dto.ExamDtos;
+import com.pair.domain.exam.dto.ClipUploadRequest;
+import com.pair.domain.exam.dto.EnvProgressRequest;
+import com.pair.domain.exam.dto.NoticeResponse;
 import java.time.Clock;
 
 import org.springframework.http.HttpStatus;
@@ -14,13 +16,13 @@ import org.springframework.web.bind.annotation.RestController;
 import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.ExamEntryService;
 import com.pair.domain.exam.service.ProctorService;
-import com.pair.domain.exam.dto.ExamDtos.ConsentRequest;
-import com.pair.domain.exam.dto.ExamDtos.EntryInfo;
-import com.pair.domain.exam.dto.ExamDtos.EnvScanPhotoView;
-import com.pair.domain.exam.dto.ExamDtos.EnvScanRequest;
-import com.pair.domain.exam.dto.ExamDtos.ProctorEventRequest;
-import com.pair.domain.exam.dto.ExamDtos.ProctorEventView;
-import com.pair.domain.exam.dto.ExamDtos.ServerTime;
+import com.pair.domain.exam.dto.ConsentRequest;
+import com.pair.domain.exam.dto.EntryInfoResponse;
+import com.pair.domain.exam.dto.EnvScanPhotoResponse;
+import com.pair.domain.exam.dto.EnvScanRequest;
+import com.pair.domain.exam.dto.ProctorEventRequest;
+import com.pair.domain.exam.dto.ProctorEventResponse;
+import com.pair.domain.exam.dto.ServerTimeResponse;
 
 import jakarta.validation.Valid;
 
@@ -53,22 +55,22 @@ public class ExamEntryController {
 
     /** 서버 시각. 프론트는 (서버 시각 - 내 시각)을 보정값으로 써서 남은 시간을 그린다 */
     @GetMapping("/api/time")
-    public ServerTime time() {
-        return new ServerTime(clock.instant());
+    public ServerTimeResponse time() {
+        return new ServerTimeResponse(clock.instant());
     }
 
     @GetMapping("/api/entry/{token}")
-    public EntryInfo info(@PathVariable String token) {
+    public EntryInfoResponse info(@PathVariable String token) {
         return entry.info(token);
     }
 
     @PostMapping("/api/entry/{token}/consent")
-    public EntryInfo consent(@PathVariable String token, @Valid @RequestBody ConsentRequest req) {
+    public EntryInfoResponse consent(@PathVariable String token, @Valid @RequestBody ConsentRequest req) {
         return entry.consent(token, req);
     }
 
     @PostMapping("/api/entry/{token}/enter")
-    public EntryInfo enter(@PathVariable String token) {
+    public EntryInfoResponse enter(@PathVariable String token) {
         return entry.enter(token);
     }
 
@@ -79,39 +81,39 @@ public class ExamEntryController {
     }
 
     @PostMapping("/api/entry/{token}/start")
-    public EntryInfo start(@PathVariable String token) {
+    public EntryInfoResponse start(@PathVariable String token) {
         return entry.start(token);
     }
 
     /** 과제 하나 제출 */
     @PostMapping("/api/entry/{token}/tasks/{taskId}/submit")
-    public EntryInfo submitTask(@PathVariable String token, @PathVariable String taskId) {
+    public EntryInfoResponse submitTask(@PathVariable String token, @PathVariable String taskId) {
         return entry.submitTask(token, taskId);
     }
 
     /** 남은 과제 모두 제출 (시험 끝내기) */
     @PostMapping("/api/entry/{token}/submit")
-    public EntryInfo submit(@PathVariable String token) {
+    public EntryInfoResponse submit(@PathVariable String token) {
         return entry.submit(token);
     }
 
     /** 환경 점검 사진(방 360도의 한 방향, 책상 위) 업로드. 시험 시작 전 입장 단계에서 올린다 */
     @PostMapping("/api/entry/{token}/env-scan")
     @ResponseStatus(HttpStatus.CREATED)
-    public EnvScanPhotoView envScan(@PathVariable String token, @Valid @RequestBody EnvScanRequest req) {
+    public EnvScanPhotoResponse envScan(@PathVariable String token, @Valid @RequestBody EnvScanRequest req) {
         return envScan.upload(token, req);
     }
 
     /** 환경 점검 진행 상태 (콘솔이 실시간으로 본다). 입장 대기 중 점검 화면이 올린다 */
     @PostMapping("/api/entry/{token}/env-progress")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void envProgress(@PathVariable String token, @Valid @RequestBody ExamDtos.EnvProgressRequest req) {
+    public void envProgress(@PathVariable String token, @Valid @RequestBody EnvProgressRequest req) {
         envCheck.saveProgress(token, req.result());
     }
 
     /** 콘솔이 보낸 안내 메시지 (읽음 여부 포함). 입장 대기 화면과 시험 화면이 주기적으로 가져간다 */
     @GetMapping("/api/entry/{token}/notices")
-    public java.util.List<ExamDtos.NoticeView> notices(@PathVariable String token) {
+    public java.util.List<NoticeResponse> notices(@PathVariable String token) {
         return notices.forEntry(token);
     }
 
@@ -123,14 +125,14 @@ public class ExamEntryController {
 
     @PostMapping("/api/entry/{token}/proctor-events")
     @ResponseStatus(HttpStatus.CREATED)
-    public ProctorEventView proctorEvent(@PathVariable String token, @Valid @RequestBody ProctorEventRequest req) {
+    public ProctorEventResponse proctorEvent(@PathVariable String token, @Valid @RequestBody ProctorEventRequest req) {
         return proctor.record(token, req);
     }
 
     /** 이벤트(clientId)의 증거 구간 사진 올리기. 응시자 PC 가 링 버퍼에서 이벤트 앞 8초·뒤 4초를 골라 보낸다 */
     @PostMapping("/api/entry/{token}/proctor-events/{clientId}/clip")
     @ResponseStatus(HttpStatus.CREATED)
-    public void proctorClip(@PathVariable String token, @PathVariable String clientId, @Valid @RequestBody ExamDtos.ClipUploadRequest req) {
+    public void proctorClip(@PathVariable String token, @PathVariable String clientId, @Valid @RequestBody ClipUploadRequest req) {
         clips.upload(token, clientId, req);
     }
 }

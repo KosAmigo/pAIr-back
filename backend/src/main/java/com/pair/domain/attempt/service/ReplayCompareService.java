@@ -1,8 +1,8 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.entity.AttemptRecord;
-import com.pair.domain.attempt.repository.AttemptRecordRepository;
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,7 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.pair.domain.task.repository.TaskRepository;
+import com.pair.domain.task.repository.TaskDefRepository;
 
 /**
  * 복기에서 두 풀이의 감점 근거를 항목·체크별로 나란히 맞춘다. 점수가 왜 달라졌는지(어느 체크가 감점에서 통과로 바뀌었는지)를 보여 주기 위한 것.
@@ -40,12 +40,12 @@ public class ReplayCompareService {
      */
     public record FileDiff(String path, String base, String a, String b) {}
 
-    private final AttemptRecordRepository records;
+    private final AttemptRepository records;
     private final ReplayReports reports;
-    private final AttemptStore store;
-    private final TaskRepository tasks;
+    private final AttemptStoreRepository store;
+    private final TaskDefRepository tasks;
 
-    public ReplayCompareService(AttemptRecordRepository records, ReplayReports reports, AttemptStore store, TaskRepository tasks) {
+    public ReplayCompareService(AttemptRepository records, ReplayReports reports, AttemptStoreRepository store, TaskDefRepository tasks) {
         this.records = records;
         this.reports = reports;
         this.store = store;
@@ -60,8 +60,8 @@ public class ReplayCompareService {
      */
     @Transactional(readOnly = true)
     public List<FileDiff> files(Long userId, String aId, String bId) {
-        AttemptRecord ra = mine(userId, aId);
-        AttemptRecord rb = mine(userId, bId);
+        Attempt ra = mine(userId, aId);
+        Attempt rb = mine(userId, bId);
         if (!ra.getTaskId().equals(rb.getTaskId())) throw new IllegalArgumentException("같은 과제의 풀이끼리만 비교할 수 있습니다.");
         Map<String, String> base = tasks.visibleFiles(store.load(aId).taskId());
         Map<String, String> fa = store.readFiles(aId);
@@ -82,8 +82,8 @@ public class ReplayCompareService {
     /** 두 응시 모두 내 자가진단 응시이고 채점이 끝나 있어야 한다. 남의 응시는 있는지도 알려 주지 않는다(404) */
     @Transactional(readOnly = true)
     public Result compare(Long userId, String aId, String bId) {
-        AttemptRecord a = mine(userId, aId);
-        AttemptRecord b = mine(userId, bId);
+        Attempt a = mine(userId, aId);
+        Attempt b = mine(userId, bId);
         JsonNode ra = reports.scored(a).orElseThrow(() -> notScored(aId));
         JsonNode rb = reports.scored(b).orElseThrow(() -> notScored(bId));
 
@@ -138,14 +138,14 @@ public class ReplayCompareService {
         return m;
     }
 
-    private AttemptRecord mine(Long userId, String id) {
-        AttemptRecord r;
+    private Attempt mine(Long userId, String id) {
+        Attempt r;
         try {
             r = records.findById(Long.parseLong(id)).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + id));
         } catch (NumberFormatException e) {
             throw new NoSuchElementException("없는 응시입니다: " + id);
         }
-        if (r.getMode() != AttemptRecord.Mode.SELF || !userId.equals(r.getUserId())) throw new NoSuchElementException("없는 응시입니다: " + id);
+        if (r.getMode() != Attempt.Mode.SELF || !userId.equals(r.getUserId())) throw new NoSuchElementException("없는 응시입니다: " + id);
         return r;
     }
 

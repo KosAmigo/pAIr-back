@@ -20,19 +20,19 @@ class BizChecksTest {
     private final PdfMaker pdf = new PdfMaker();
     private final BizFixtures.FakeSolver solver = new BizFixtures.FakeSolver();
 
-    private List<CheckResult> run(BizDraft d) {
+    private List<GenCheckResult> run(BizDraft d) {
         return BizChecks.forDraft(pdf, solver, "claude-sonnet-5-5", d).stream().map(c -> c.run(d)).toList();
     }
 
     private List<String> failed(BizDraft d) {
-        return run(d).stream().filter(r -> !r.ok()).map(CheckResult::name).toList();
+        return run(d).stream().filter(r -> !r.ok()).map(GenCheckResult::name).toList();
     }
 
     @Test
     @DisplayName("정상 Draft 는 검사 7개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
     void allPass() {
         var results = run(BizFixtures.good("c"));
-        assertThat(results).hasSize(7).allMatch(CheckResult::ok, results.toString());
+        assertThat(results).hasSize(7).allMatch(GenCheckResult::ok, results.toString());
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
         assertThat(solver.lastPrompt).contains("자료/설문 요약.pdf (2쪽)").contains("34%가 라이트").contains("1) 34%").contains("월,요금제,가입자 수");
         assertThat(solver.calls.get()).isEqualTo(1);
@@ -53,7 +53,7 @@ class BizChecksTest {
         var same = BizFixtures.single("q", List.of("a", "b", "c", "d"), 1, DOC1 + "|1", DOC1 + "|2");
         assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 0, same))))).containsExactly(BizChecks.SOURCES);
         var noPage = BizFixtures.single("q", List.of("a", "b", "c", "d"), 1, DOC1 + "|3", DOC2 + "|1");
-        assertThat(run(edit(d, b -> b.questions(replaceQuestion(d, 0, noPage)))).stream().filter(r -> !r.ok()).map(CheckResult::detail).toList())
+        assertThat(run(edit(d, b -> b.questions(replaceQuestion(d, 0, noPage)))).stream().filter(r -> !r.ok()).map(GenCheckResult::detail).toList())
                 .singleElement().asString().contains("없는 쪽");
         var noDoc = BizFixtures.single("q", List.of("a", "b", "c", "d"), 1, "자료/없음.pdf|1", DOC2 + "|1");
         assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 0, noDoc))))).containsExactly(BizChecks.SOURCES);
@@ -105,7 +105,7 @@ class BizChecksTest {
         BizDraft d = BizFixtures.good("c");
         solver.reply = "{\"answers\": [\"2\", \"2\", \"21080\", \"2000\"]}";
         var r = run(d);
-        assertThat(r.stream().filter(x -> !x.ok()).map(CheckResult::name)).containsExactly(BizChecks.SOLVE);
+        assertThat(r.stream().filter(x -> !x.ok()).map(GenCheckResult::name)).containsExactly(BizChecks.SOLVE);
         assertThat(r.get(6).detail()).contains("Q1");
         solver.reply = "답을 모르겠습니다";
         assertThat(failed(d)).containsExactly(BizChecks.SOLVE);
@@ -121,7 +121,7 @@ class BizChecksTest {
         var r = run(oneDoc);
         assertThat(r.get(0).ok()).isFalse();
         assertThat(r.get(0).detail()).contains("2개 이상");
-        assertThat(r.subList(1, 7)).noneMatch(CheckResult::ok);
+        assertThat(r.subList(1, 7)).noneMatch(GenCheckResult::ok);
         assertThat(solver.calls.get()).isZero();
 
         var badPath = edit(d, b -> b.csvFiles(List.of(new DevDraft.FileDraft("자료/../evil.csv", "a,b\n1,2\n"))));

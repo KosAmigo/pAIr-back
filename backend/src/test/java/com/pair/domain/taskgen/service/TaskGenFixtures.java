@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.service;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -12,8 +12,8 @@ final class TaskGenFixtures {
 
     private TaskGenFixtures() {}
 
-    static TaskGenForm form() {
-        return new TaskGenForm("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "SELF", 60);
+    static TaskGenRequest form() {
+        return new TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "SELF", 60);
     }
 
     static DevDraft.FileDraft f(String path, String content) {

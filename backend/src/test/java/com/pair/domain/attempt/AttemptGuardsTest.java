@@ -1,6 +1,6 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.repository.AttemptStore;
+import com.pair.domain.attempt.repository.AttemptStoreRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.service.EditProposals;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,10 +31,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.pair.infra.ai.AssistantClient;
 import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.SandboxRunner;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
@@ -54,11 +54,11 @@ class AttemptGuardsTest {
     }
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStore store;
+    @Autowired AttemptStoreRepository store;
     @Autowired AuthService auth;
-    @Autowired TaskRecordRepository taskRecords;
-    @Autowired TaskFileRecordRepository taskFiles;
-    @Autowired TaskQuestionRecordRepository taskQuestions;
+    @Autowired TaskRepository taskRecords;
+    @Autowired TaskFileRepository taskFiles;
+    @Autowired TaskQuestionRepository taskQuestions;
     @Autowired MockMvc mvc;
     @MockitoBean JavaMailSender mail;
     @MockitoBean AssistantClient assistant;
@@ -94,9 +94,9 @@ class AttemptGuardsTest {
     @Test
     void 과제에서_읽기_전용으로_정한_파일은_저장할_수_없다() throws Exception {
         String path = "src/shop/Db.java";
-        TaskFileRecord original = taskFiles.findByTaskIdAndPath(1L, path).orElseThrow();
+        TaskFile original = taskFiles.findByTaskIdAndPath(1L, path).orElseThrow();
         taskFiles.delete(original);
-        taskFiles.save(new TaskFileRecord(1L, path, original.getContent(), original.getMimeType(), original.getSizeBytes(),
+        taskFiles.save(new TaskFile(1L, path, original.getContent(), original.getMimeType(), original.getSizeBytes(),
                 original.getVisibility(), true));
         try {
             String before = store.readFiles(devId).get(path);
@@ -104,7 +104,7 @@ class AttemptGuardsTest {
             assertThat(store.readFiles(devId).get(path)).isEqualTo(before);
         } finally {
             taskFiles.delete(taskFiles.findByTaskIdAndPath(1L, path).orElseThrow());
-            taskFiles.save(new TaskFileRecord(1L, path, original.getContent(), original.getMimeType(), original.getSizeBytes(),
+            taskFiles.save(new TaskFile(1L, path, original.getContent(), original.getMimeType(), original.getSizeBytes(),
                     original.getVisibility(), false));
         }
     }

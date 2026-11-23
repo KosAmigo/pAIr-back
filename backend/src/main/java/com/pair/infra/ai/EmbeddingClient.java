@@ -10,7 +10,7 @@ import org.springframework.ai.openai.OpenAiEmbeddingOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.stereotype.Component;
 
-import com.pair.global.config.AiKeys;
+import com.pair.global.config.AiKeyProperties;
 
 /**
  * 문서 조각과 검색 문장의 임베딩 (OpenAI text-embedding-3-small, 1536차원).
@@ -21,10 +21,10 @@ public class EmbeddingClient {
 
     public static final String MODEL = "text-embedding-3-small";
 
-    private final AiKeys keys;
+    private final AiKeyProperties keys;
     private volatile OpenAiEmbeddingModel model;
 
-    public EmbeddingClient(AiKeys keys) {
+    public EmbeddingClient(AiKeyProperties keys) {
         this.keys = keys;
     }
 

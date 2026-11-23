@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.service;
 
-import com.pair.domain.taskgen.dto.TaskGenForm;
+import com.pair.domain.taskgen.dto.TaskGenRequest;
 import com.pair.infra.storage.TaskFileStorage;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -22,20 +22,20 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.task.entity.DocumentPageRecord;
-import com.pair.domain.task.repository.DocumentPageRecordRepository;
-import com.pair.domain.task.entity.QuestionChoiceRecord;
-import com.pair.domain.task.repository.QuestionChoiceRecordRepository;
-import com.pair.domain.task.entity.QuestionSourceRecord;
-import com.pair.domain.task.repository.QuestionSourceRecordRepository;
-import com.pair.domain.task.entity.ShortAnswerKeyRecord;
-import com.pair.domain.task.repository.ShortAnswerKeyRecordRepository;
-import com.pair.domain.task.entity.TaskFileRecord;
-import com.pair.domain.task.repository.TaskFileRecordRepository;
-import com.pair.domain.task.entity.TaskQuestionRecord;
-import com.pair.domain.task.repository.TaskQuestionRecordRepository;
-import com.pair.domain.task.entity.TaskRecord;
-import com.pair.domain.task.repository.TaskRecordRepository;
+import com.pair.domain.task.entity.DocumentPage;
+import com.pair.domain.task.repository.DocumentPageRepository;
+import com.pair.domain.task.entity.QuestionChoice;
+import com.pair.domain.task.repository.QuestionChoiceRepository;
+import com.pair.domain.task.entity.QuestionSource;
+import com.pair.domain.task.repository.QuestionSourceRepository;
+import com.pair.domain.task.entity.ShortAnswerKey;
+import com.pair.domain.task.repository.ShortAnswerKeyRepository;
+import com.pair.domain.task.entity.TaskFile;
+import com.pair.domain.task.repository.TaskFileRepository;
+import com.pair.domain.task.entity.TaskQuestion;
+import com.pair.domain.task.repository.TaskQuestionRepository;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.TaskRepository;
 
 /**
  * 생성한 과제를 DB 에 한 트랜잭션으로 저장한다 (tasks, task_files, task_questions).
@@ -70,26 +70,26 @@ public class GeneratedTaskWriter {
     /** 모델이 정한 난이도. 초급·중급·고급이 아니면 중급 */
     static String difficultyOf(String v) {
         String s = v == null ? "" : v.strip();
-        return TaskGenForm.DIFFICULTIES.contains(s) ? s : "중급";
+        return TaskGenRequest.DIFFICULTIES.contains(s) ? s : "중급";
     }
 
-    private final TaskRecordRepository records;
-    private final TaskFileRecordRepository files;
-    private final TaskQuestionRecordRepository questions;
+    private final TaskRepository records;
+    private final TaskFileRepository files;
+    private final TaskQuestionRepository questions;
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final Clock clock;
     private final PdfMaker pdf;
     private final TaskFileStorage storage;
-    private final QuestionChoiceRecordRepository choices;
-    private final ShortAnswerKeyRecordRepository answerKeys;
-    private final QuestionSourceRecordRepository sources;
-    private final DocumentPageRecordRepository pages;
+    private final QuestionChoiceRepository choices;
+    private final ShortAnswerKeyRepository answerKeys;
+    private final QuestionSourceRepository sources;
+    private final DocumentPageRepository pages;
 
-    public GeneratedTaskWriter(TaskRecordRepository records, TaskFileRecordRepository files,
-            TaskQuestionRecordRepository questions, JdbcTemplate jdbc, ObjectMapper json, Clock clock, PdfMaker pdf,
-            TaskFileStorage storage, QuestionChoiceRecordRepository choices, ShortAnswerKeyRecordRepository answerKeys,
-            QuestionSourceRecordRepository sources, DocumentPageRecordRepository pages) {
+    public GeneratedTaskWriter(TaskRepository records, TaskFileRepository files,
+            TaskQuestionRepository questions, JdbcTemplate jdbc, ObjectMapper json, Clock clock, PdfMaker pdf,
+            TaskFileStorage storage, QuestionChoiceRepository choices, ShortAnswerKeyRepository answerKeys,
+            QuestionSourceRepository sources, DocumentPageRepository pages) {
         this.pdf = pdf;
         this.storage = storage;
         this.choices = choices;
@@ -106,27 +106,27 @@ public class GeneratedTaskWriter {
 
     /** 저장하고 과제 code 를 돌려준다. code 가 겹치면 -2, -3 … 을 붙인다 */
     @Transactional
-    public String saveDev(TaskGenForm form, DevDraft d, TaskGenerator.GenReport report, long adminId) {
+    public String saveDev(TaskGenRequest form, DevDraft d, TaskGenerator.GenReport report, long adminId) {
         String code = uniqueCode(d.code(), d.title());
         Instant now = clock.instant();
         long id = nextTaskId();
 
-        TaskRecord t = new TaskRecord(id, code, cut(d.title(), 200), "DEV", form.minutes(), form.usageValue(),
-                TaskRecord.Status.HIDDEN, null, adminId, now);
+        Task t = new Task(id, code, cut(d.title(), 200), "DEV", form.minutes(), form.usageValue(),
+                Task.Status.HIDDEN, null, adminId, now);
         t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), difficultyOf(d.difficulty()));
         t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), settings(d, form.minutes()));
         records.save(t);
 
-        List<TaskFileRecord> rows = new ArrayList<>();
-        for (var f : d.files()) rows.add(file(id, f.path(), f.content(), TaskFileRecord.VISIBLE, false));
-        for (var f : d.hiddenTests()) rows.add(file(id, f.path().substring("test/".length()), f.content(), TaskFileRecord.HIDDEN, true));
-        rows.add(file(id, "answer.md", d.answer(), TaskFileRecord.HIDDEN, true));
-        for (var f : d.solution()) rows.add(file(id, SOLUTION_DIR + f.path() + ".txt", f.content(), TaskFileRecord.HIDDEN, true));
-        rows.add(file(id, REPORT_PATH, toJson(report), TaskFileRecord.HIDDEN, true));
+        List<TaskFile> rows = new ArrayList<>();
+        for (var f : d.files()) rows.add(file(id, f.path(), f.content(), TaskFile.VISIBLE, false));
+        for (var f : d.hiddenTests()) rows.add(file(id, f.path().substring("test/".length()), f.content(), TaskFile.HIDDEN, true));
+        rows.add(file(id, "answer.md", d.answer(), TaskFile.HIDDEN, true));
+        for (var f : d.solution()) rows.add(file(id, SOLUTION_DIR + f.path() + ".txt", f.content(), TaskFile.HIDDEN, true));
+        rows.add(file(id, REPORT_PATH, toJson(report), TaskFile.HIDDEN, true));
         files.saveAll(rows);
 
         for (int i = 0; i < DEV_FOLLOW_UPS.size(); i++) {
-            questions.save(new TaskQuestionRecord(id, TaskQuestionRecord.FOLLOWUP, "ESSAY", i + 1, DEV_FOLLOW_UPS.get(i)));
+            questions.save(new TaskQuestion(id, TaskQuestion.FOLLOWUP, "ESSAY", i + 1, DEV_FOLLOW_UPS.get(i)));
         }
         return code;
     }
@@ -143,7 +143,7 @@ public class GeneratedTaskWriter {
      * DB 저장이 실패하면(롤백) 이미 올린 PDF 도 지운다.
      */
     @Transactional
-    public String saveBiz(TaskGenForm form, BizDraft d, TaskGenerator.GenReport report, long adminId) {
+    public String saveBiz(TaskGenRequest form, BizDraft d, TaskGenerator.GenReport report, long adminId) {
         List<String> uploaded = new ArrayList<>();
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -157,16 +157,16 @@ public class GeneratedTaskWriter {
         Instant now = clock.instant();
         long id = nextTaskId();
 
-        TaskRecord t = new TaskRecord(id, code, cut(d.title(), 200), "BIZ", form.minutes(), form.usageValue(),
-                TaskRecord.Status.HIDDEN, null, adminId, now);
+        Task t = new Task(id, code, cut(d.title(), 200), "BIZ", form.minutes(), form.usageValue(),
+                Task.Status.HIDDEN, null, adminId, now);
         t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), difficultyOf(d.difficulty()));
         t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings(form.minutes()));
         records.save(t);
 
         Map<String, Long> fileIds = new LinkedHashMap<>();
         for (var f : d.csvFiles()) {
-            TaskFileRecord r = files.save(new TaskFileRecord(id, f.path(), f.content(), "text/csv",
-                    f.content().getBytes(StandardCharsets.UTF_8).length, TaskFileRecord.VISIBLE, false));
+            TaskFile r = files.save(new TaskFile(id, f.path(), f.content(), "text/csv",
+                    f.content().getBytes(StandardCharsets.UTF_8).length, TaskFile.VISIBLE, false));
             fileIds.put(f.path(), r.getId());
         }
         int n = 0;
@@ -175,41 +175,41 @@ public class GeneratedTaskWriter {
             String key = TaskFileStorage.keyOf(id, ++n);
             uploaded.add(key);
             storage.put(key, made.bytes());
-            TaskFileRecord r = new TaskFileRecord(id, doc.path(), null, "application/pdf", made.bytes().length,
-                    TaskFileRecord.VISIBLE, true);
+            TaskFile r = new TaskFile(id, doc.path(), null, "application/pdf", made.bytes().length,
+                    TaskFile.VISIBLE, true);
             r.setStorageKey(key);
             r = files.save(r);
             fileIds.put(doc.path(), r.getId());
             // 생성한 글을 그대로 쪽별로 넣는다 (형식 검사가 PDF 쪽 수 = 글 쪽 수를 확인했다)
-            for (int i = 0; i < doc.pages().size(); i++) pages.save(new DocumentPageRecord(r.getId(), i + 1, doc.pages().get(i)));
+            for (int i = 0; i < doc.pages().size(); i++) pages.save(new DocumentPage(r.getId(), i + 1, doc.pages().get(i)));
         }
-        files.save(file(id, "기획안.md", "# " + d.title() + "\n\n" + String.join("\n\n", BIZ_HEADINGS) + "\n", TaskFileRecord.VISIBLE, false));
-        files.save(file(id, "checklist.md", d.checklist(), TaskFileRecord.HIDDEN, true));
-        files.save(file(id, REPORT_PATH, toJson(report), TaskFileRecord.HIDDEN, true));
+        files.save(file(id, "기획안.md", "# " + d.title() + "\n\n" + String.join("\n\n", BIZ_HEADINGS) + "\n", TaskFile.VISIBLE, false));
+        files.save(file(id, "checklist.md", d.checklist(), TaskFile.HIDDEN, true));
+        files.save(file(id, REPORT_PATH, toJson(report), TaskFile.HIDDEN, true));
 
         int seq = 1;
         for (var q : d.questions()) {
-            TaskQuestionRecord qr = new TaskQuestionRecord(id, "TASK", q.type().name(), seq++, q.content());
+            TaskQuestion qr = new TaskQuestion(id, "TASK", q.type().name(), seq++, q.content());
             qr.setPoints(q.type() == BizDraft.Type.SINGLE ? POINTS_SINGLE : POINTS_SHORT);
             qr = questions.save(qr);
             Long qid = qr.getId();
             if (q.type() == BizDraft.Type.SINGLE) {
                 for (int i = 0; i < q.choices().size(); i++) {
-                    choices.save(new QuestionChoiceRecord(qid, i + 1, q.choices().get(i).content(), q.choices().get(i).correct()));
+                    choices.save(new QuestionChoice(qid, i + 1, q.choices().get(i).content(), q.choices().get(i).correct()));
                 }
             } else {
                 for (String a : new LinkedHashSet<>(q.accepted().stream().map(String::strip).toList())) {
-                    answerKeys.save(new ShortAnswerKeyRecord(qid, a));
+                    answerKeys.save(new ShortAnswerKey(qid, a));
                 }
             }
             Map<Long, String> pagesByFile = new LinkedHashMap<>();
             for (var s : q.sources()) {
                 pagesByFile.merge(fileIds.get(s.path()), s.pages() == null ? "" : s.pages().strip(), (a, b) -> a.isEmpty() ? b : a + "," + b);
             }
-            pagesByFile.forEach((fileId, pg) -> sources.save(new QuestionSourceRecord(qid, fileId, pg.isEmpty() ? null : cut(pg, 50))));
+            pagesByFile.forEach((fileId, pg) -> sources.save(new QuestionSource(qid, fileId, pg.isEmpty() ? null : cut(pg, 50))));
         }
         for (int i = 0; i < d.followUps().size(); i++) {
-            questions.save(new TaskQuestionRecord(id, TaskQuestionRecord.FOLLOWUP, "ESSAY", i + 1, d.followUps().get(i)));
+            questions.save(new TaskQuestion(id, TaskQuestion.FOLLOWUP, "ESSAY", i + 1, d.followUps().get(i)));
         }
         return code;
     }
@@ -226,9 +226,9 @@ public class GeneratedTaskWriter {
     /** 과제 콘솔이 보여 줄 확인 결과(report.json 내용). 없으면 NoSuchElementException(404) */
     @Transactional(readOnly = true)
     public String report(String code) {
-        TaskRecord t = records.findByCode(code).orElseThrow(() -> new NoSuchElementException("없는 과제입니다: " + code));
-        Optional<TaskFileRecord> f = files.findByTaskIdAndPath(t.getId(), REPORT_PATH);
-        return f.map(TaskFileRecord::getContent).orElseThrow(() -> new NoSuchElementException("AI 생성 확인 결과가 없는 과제입니다: " + code));
+        Task t = records.findByCode(code).orElseThrow(() -> new NoSuchElementException("없는 과제입니다: " + code));
+        Optional<TaskFile> f = files.findByTaskIdAndPath(t.getId(), REPORT_PATH);
+        return f.map(TaskFile::getContent).orElseThrow(() -> new NoSuchElementException("AI 생성 확인 결과가 없는 과제입니다: " + code));
     }
 
     private String uniqueCode(String wanted, String title) {
@@ -270,8 +270,8 @@ public class GeneratedTaskWriter {
         return id == null ? 1 : id;
     }
 
-    private static TaskFileRecord file(long taskId, String path, String content, String visibility, boolean readOnly) {
-        return new TaskFileRecord(taskId, path, content, mime(path), content.getBytes(StandardCharsets.UTF_8).length, visibility, readOnly);
+    private static TaskFile file(long taskId, String path, String content, String visibility, boolean readOnly) {
+        return new TaskFile(taskId, path, content, mime(path), content.getBytes(StandardCharsets.UTF_8).length, visibility, readOnly);
     }
 
     private static String mime(String path) {

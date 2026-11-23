@@ -1,7 +1,11 @@
 package com.pair.domain.company.controller;
 
-import com.pair.domain.company.dto.CompanyInquiryDtos;
-import com.pair.domain.company.dto.CompanyMemberDtos;
+import com.pair.domain.company.dto.CompanyDetailResponse;
+import com.pair.domain.company.dto.CompanyMemberResponse;
+import com.pair.domain.company.dto.CompanyResponse;
+import com.pair.domain.company.dto.InquiryResponse;
+import com.pair.domain.company.dto.ManagerReplacementResponse;
+import com.pair.domain.company.dto.ReplaceManagerRequest;
 import com.pair.domain.company.service.CompanyInquiryService;
 import com.pair.domain.company.service.CompanyMemberService;
 import java.util.List;
@@ -36,19 +40,19 @@ public class AdminCompanyController {
     }
 
     @GetMapping("/company-inquiries")
-    public List<CompanyInquiryDtos.InquiryView> inquiries(CurrentUser user) {
+    public List<InquiryResponse> inquiries(CurrentUser user) {
         requireAdmin(user);
         return inquiries.list();
     }
 
     @PostMapping("/company-inquiries/{inquiryId}/approve")
-    public CompanyInquiryDtos.CompanyView approve(CurrentUser user, @PathVariable Long inquiryId) {
+    public CompanyResponse approve(CurrentUser user, @PathVariable Long inquiryId) {
         requireAdmin(user);
         return inquiries.approve(inquiryId, user.userId());
     }
 
     @PostMapping(value = "/company-inquiries/{inquiryId}/members", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public CompanyInquiryDtos.InquiryView replaceMembers(CurrentUser user, @PathVariable Long inquiryId,
+    public InquiryResponse replaceMembers(CurrentUser user, @PathVariable Long inquiryId,
             @org.springframework.web.bind.annotation.RequestParam("file") MultipartFile file) throws java.io.IOException {
         requireAdmin(user);
         if (file == null || file.isEmpty()) throw new IllegalArgumentException("회원 명단 CSV 파일을 올려 주세요.");
@@ -65,26 +69,26 @@ public class AdminCompanyController {
     }
 
     @GetMapping("/companies")
-    public List<CompanyInquiryDtos.CompanyView> companies(CurrentUser user) {
+    public List<CompanyResponse> companies(CurrentUser user) {
         requireAdmin(user);
         return members.allCompanies();
     }
 
     @GetMapping("/companies/{companyId}")
-    public CompanyMemberDtos.CompanyDetail company(CurrentUser user, @PathVariable Long companyId) {
+    public CompanyDetailResponse company(CurrentUser user, @PathVariable Long companyId) {
         requireAdmin(user);
         return members.company(companyId);
     }
 
     @PostMapping("/companies/{companyId}/manager")
-    public CompanyMemberDtos.ManagerReplacement replaceManager(CurrentUser user, @PathVariable long companyId,
-            @Valid @RequestBody CompanyMemberDtos.ReplaceManagerRequest request) {
+    public ManagerReplacementResponse replaceManager(CurrentUser user, @PathVariable long companyId,
+            @Valid @RequestBody ReplaceManagerRequest request) {
         return members.replaceManager(companyId, user, request);
     }
 
     @PostMapping("/members/{userId}/onboarding/reissue")
-    public CompanyMemberDtos.MemberView reissueOnboarding(CurrentUser user, @PathVariable long userId) {
-        return CompanyMemberDtos.MemberView.from(members.reissue(userId, user));
+    public CompanyMemberResponse reissueOnboarding(CurrentUser user, @PathVariable long userId) {
+        return CompanyMemberResponse.from(members.reissue(userId, user));
     }
 
     private static void requireAdmin(CurrentUser user) {
