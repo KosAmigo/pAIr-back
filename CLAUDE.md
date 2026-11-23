@@ -1,5 +1,13 @@
 # Development Rules
 
+## Git workflow
+- Before starting: `git status` must be clean (otherwise ask the user), then `git fetch` and `git pull`.
+- Branch from the latest `develop`: `feat/`, `fix/`, `refactor/`, `docs/`, `test/` or `chore/` + a short English name. No PRs.
+- Commit message: `type: 한국어 요약` + a blank line + 2–4 short bullets. No Co-Authored-By.
+- When done, merge into develop yourself: `git switch develop && git pull && git merge --no-ff <branch> && ./gradlew build && git push`. Don't push if the build fails.
+- No direct commits on `develop` (merge commits only). Never touch `main`. Never rebase or force-push pushed commits; to update a pushed branch, use `git merge origin/develop`.
+- Commit or push only when the user asks.
+
 ## Package structure (MUST)
 Enforced by `global/config/PackageRules`: a violation fails `./gradlew classes`/`build`, so IntelliJ ▶ fails before running (keep IntelliJ's default "Build and run using: Gradle"), and it also stops `PairApplication` at startup. Never weaken the check: don't edit `PackageRules` to pass, and don't set `PACKAGE_RULES_ENABLED=false` (production only). If a class fits no rule, ask the user. Background: pAIr-docs `설계/백엔드_패키지_구조.md`.
 
