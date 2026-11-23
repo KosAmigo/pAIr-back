@@ -3,16 +3,23 @@ package com.pair.web.auth;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
-import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.MailPreparationException;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+
+import com.pair.exam.service.MailLayout;
 
 /** 이메일 인증 코드 발급·발송·검증을 처리한다. */
 @Service
@@ -62,21 +69,42 @@ public class EmailVerificationService {
         }
         verifications.save(verification);
 
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(mailFrom);
-        message.setTo(email);
-        message.setSubject("[pAIr] 회원가입 이메일 인증 코드");
-        message.setText("""
+        try {
+            mail.send(codeMessage(email, code));
+        } catch (MailException e) {
+            throw new MailDeliveryException(e);
+        }
+    }
+
+    /** 시험 초대 메일과 같은 서식(머리띠·표·안내 문구)으로 만든 인증 코드 메일. 글자 본문도 함께 담는다 */
+    private MimeMessage codeMessage(String email, String code) {
+        long minutes = Math.max(1, codeLifetime.toMinutes());
+        String text = """
                 pAIr 회원가입 인증 코드입니다.
 
                 인증 코드: %s
                 코드는 발송 시각부터 %d분 동안 유효합니다.
                 본인이 요청하지 않았다면 이 메일을 무시해 주세요.
-                """.formatted(code, Math.max(1, codeLifetime.toMinutes())));
+                """.formatted(code, minutes);
+        String html = MailLayout.html("회원가입 이메일 인증 코드", "안녕하세요.",
+                List.of("pAIr 회원가입 인증 코드입니다. 아래 코드를 가입 화면에 입력해 주세요."),
+                List.of(new MailLayout.Fact("인증 코드", code),
+                        new MailLayout.Fact("유효 시간", "발송 시각부터 " + minutes + "분")),
+                null,
+                List.of("본인이 요청하지 않았다면 이 메일을 무시해 주세요.",
+                        "인증 코드는 본인만 사용하세요. 다른 사람과 공유하지 마세요."),
+                "이 메일은 pAIr 회원가입 인증을 위해 자동으로 발송되었습니다. 회신하지 않아도 됩니다.");
         try {
-            mail.send(message);
-        } catch (MailException e) {
-            throw new MailDeliveryException(e);
+            MimeMessage mime = mail.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
+            helper.setFrom(mailFrom);
+            helper.setTo(email);
+            helper.setSubject("[pAIr] 회원가입 이메일 인증 코드");
+            helper.setText(text, html);
+            helper.addInline(MailLayout.LOGO_CID, MailLayout.LOGO, "image/png");
+            return mime;
+        } catch (MessagingException e) {
+            throw new MailPreparationException(e);
         }
     }
 
