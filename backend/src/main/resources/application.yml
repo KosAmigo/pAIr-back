@@ -54,7 +54,7 @@ spring:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
     # Spring AI 자동 설정 모델은 쓰지 않는다. 자동 설정은 기본 temperature(0.7, 0.8)를 넣는데
-    # 최신 추론 모델은 temperature 를 받지 않아서, 모델은 코드(com.pair.ai.SpringAi)에서 빌더로 만든다.
+    # 최신 추론 모델은 temperature 를 받지 않아서, 모델은 코드(com.pair.infra.ai.SpringAi)에서 빌더로 만든다.
     # 키가 없을 때 서버가 아예 안 켜지는 것도 막는다(키가 없으면 그 기능을 쓸 때만 오류).
     model:
       chat: none
@@ -64,6 +64,10 @@ spring:
       audio:
         speech: none
         transcription: none
+
+# 서버 시작 때 패키지 구조·이름 규칙 검사 (global/config/PackageRules). 운영 서버에서는 PACKAGE_RULES_ENABLED=false
+package-rules:
+  enabled: ${PACKAGE_RULES_ENABLED:true}
 
 pair:
   toss:

@@ -85,7 +85,25 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
+// 패키지 구조·이름 규칙 검사(ArchitectureTest)만 돌린다. 규칙은 global/config/PackageRules 에 있다.
+// build 는 test 로, bootRun·bootJar 는 아래 dependsOn 으로 이 검사를 거친다.
+def archTest = tasks.register('archTest', Test) {
+    description = '패키지 구조·클래스 이름 규칙 검사'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching 'com.pair.ArchitectureTest' }
+    // 실패하면 어긴 클래스 목록을 콘솔에 그대로 보여 준다
+    testLogging { exceptionFormat = 'full'; events 'failed' }
+}
+
+tasks.named('bootJar') {
+    dependsOn archTest
+}
+
 tasks.named('bootRun') {
+    dependsOn archTest
     // 응시 데이터는 저장소 루트의 pilot-data/ 에 쌓는다 (.gitignore 처리됨)
     workingDir = rootProject.projectDir.parentFile
 }
