@@ -98,7 +98,7 @@ public final class PackageRules {
         if (throwable && !simple.endsWith("Exception"))
             out.add(c.getName() + ": 예외 이름은 Exception 으로 끝나야 합니다");
         if (service && !simple.endsWith("Service"))
-            out.add(c.getName() + ": @Service 이름은 Service 로 끝나야 합니다 (도우미면 @Component 로 바꿉니다)");
+            out.add(c.getName() + ": @Service 이름은 Service 로 끝나야 합니다");
         if (layer == null) {
             if (top.equals("global") && p[1].equals("config") && !c.equals(PackageRules.class)
                     && !simple.endsWith("Config") && !simple.endsWith("Properties"))
@@ -108,6 +108,11 @@ public final class PackageRules {
         switch (layer) {
             case "controller" -> {
                 if (!simple.endsWith("Controller")) out.add(c.getName() + ": controller/ 에는 XxxController 만 둡니다");
+            }
+            case "service" -> {
+                // 인터페이스·추상 클래스·정적 도우미까지 예외 없이. 데이터만 담는 클래스는 dto/ 의 XxxDto 로 옮긴다
+                if (!simple.endsWith("Service"))
+                    out.add(c.getName() + ": service/ 의 모든 클래스 이름은 Service 로 끝나야 합니다 (데이터만 담는 클래스는 dto/ 에 XxxDto 로)");
             }
             case "dto" -> {
                 if (!(simple.endsWith("Request") || simple.endsWith("Response") || simple.endsWith("Dto")))

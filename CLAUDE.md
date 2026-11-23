@@ -26,8 +26,8 @@ Inside `domain/<feature>/`, use ONLY these 6 folders, and only the ones you need
 | Folder | Holds | Class name |
 | --- | --- | --- |
 | `controller/` | `@RestController` only | `XxxController` |
-| `service/` | `@Service` classes; helpers (`@Component` or plain); internal records/value objects | `@Service` → `XxxService`; helpers → descriptive noun (no `@Service` on them) |
-| `dto/` | API request/response types, one type per file | `XxxRequest`, `XxxResponse`; parts nested inside them → `XxxDto` |
+| `service/` | logic only: `@Service`/`@Component` beans, interfaces, abstract classes, static helpers | EVERY class is `XxxService`, no exceptions (Xxx = singular noun for what it does) |
+| `dto/` | API request/response types and data-only classes (records with no logic), one type per file | `XxxRequest`, `XxxResponse`; parts nested inside them and other data-only types → `XxxDto` |
 | `repository/` | Spring Data repositories and hand-written stores | `XxxRepository`, where Xxx is the type it saves/returns |
 | `entity/` | `@Entity`, `@Embeddable`, enums used by entities | plain noun; never `Record`/`Entity` suffix; always `@Table(name = ...)` |
 | `exception/` | exceptions used only by this feature | `XxxException` |
@@ -42,7 +42,8 @@ Hard rules:
 
 | Thing | Location |
 | --- | --- |
-| Used by only one feature (even mail text, PDF building, schedulers, WebSocket handlers) | that feature's `service/` |
+| Logic used by only one feature (even mail text, PDF building, schedulers, WebSocket handlers) | that feature's `service/` as `XxxService` (e.g. `InviteMailService`, `PdfService`, `ProctorRelayService`) |
+| Data-only class (record/value object with no logic) | that feature's `dto/` as `XxxDto` (e.g. `AttemptStateDto`, `TaskDefDto`) |
 | Exception shared by several features (401/403/409 etc.) | `global/error/` |
 | Exception used by one feature | `domain/<feature>/exception/` |
 | Failure of an external call (AI, payment) | the matching `infra/` folder |
@@ -50,11 +51,12 @@ Hard rules:
 | `@ConfigurationProperties`, `@Configuration`, even if feature-specific | `global/config/` (`XxxConfig`, `XxxProperties`) |
 | HTTP client to an outside API | `infra/<area>/XxxClient` |
 | File storage (S3/local) | `infra/storage/XxxStorage` |
-| Doesn't fit anything above | `service/` of the feature that uses it |
+| Doesn't fit anything above | `service/` of the feature that uses it, named `XxxService` |
 
 ### Naming details
-- Repository name = the type it handles. The JPA repository for entity `Attempt` is `AttemptRepository`. A hand-written store for the non-entity type `AttemptState` is `AttemptStateRepository` (with implementations `DbAttemptStateRepository`, `FileAttemptStateRepository`). Never use vague names like `XxxStoreRepository` or `XxxDao`.
-- If a non-entity class would clash with an entity name, the entity keeps the plain name and the other class gets a role suffix (`Attempt` entity vs `AttemptState`, `ChatTurn` vs `ChatTurnState`).
+- `service/` has no exceptions: a parser is `CalcParserService`, a mailer is `InviteMailService`, an interface is `RelayAuthService`. Use a singular noun (`TaskCatalogService`, not `TaskCatalogsService`). Data-only types go to `dto/` as `XxxDto`, never to `service/`.
+- Repository name = the type it handles. The JPA repository for entity `Attempt` is `AttemptRepository`. A hand-written store for `AttemptStateDto` is `AttemptStateRepository` (with implementations `DbAttemptStateRepository`, `FileAttemptStateRepository`). Never use vague names like `XxxStoreRepository` or `XxxDao`.
+- If a non-entity class would clash with an entity name, the entity keeps the plain name and the other class gets a role suffix (`Attempt` entity vs `AttemptStateDto`, `ChatTurn` vs `ChatTurnStateDto`).
 - No bundle files like `XxxDtos` or `XxxResponses`. One request/response type per file.
 - Renaming an entity class must not change its table: keep `@Table(name = ...)`, and keep JSON field names when renaming DTOs.
 - UpperCamelCase, and treat acronyms as words: `JwtTokens`, `S3Client`, not `JWTTokens`.
