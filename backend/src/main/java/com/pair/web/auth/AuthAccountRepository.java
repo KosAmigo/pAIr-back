@@ -26,4 +26,6 @@ public interface AuthAccountRepository extends JpaRepository<AuthAccount, Long> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from AuthAccount a where a.companyId = :companyId order by a.id")
     List<AuthAccount> lockByCompanyId(@Param("companyId") Long companyId);
+
+    List<AuthAccount> findByCompanyIdOrderByRoleAscNameAsc(Long companyId);
 }

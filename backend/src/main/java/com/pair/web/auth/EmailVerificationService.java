@@ -54,6 +54,15 @@ public class EmailVerificationService {
 
     @Transactional
     public void sendCode(String email) {
+        sendCode(email, false);
+    }
+
+    @Transactional
+    public void sendOnboardingCode(String email) {
+        sendCode(email, true);
+    }
+
+    private void sendCode(String email, boolean noExpiry) {
         Instant now = Instant.now();
         EmailVerification verification = verifications.findByEmailForUpdate(email).orElse(null);
         if (verification != null && now.isBefore(verification.getCreatedAt().plus(resendInterval))) {
@@ -63,33 +72,35 @@ public class EmailVerificationService {
 
         String code = "%06d".formatted(RANDOM.nextInt(1_000_000));
         if (verification == null) {
-            verification = new EmailVerification(email, CODE_ENCODER.encode(code), now, now.plus(codeLifetime));
+            verification = new EmailVerification(email, CODE_ENCODER.encode(code), now, noExpiry ? null : now.plus(codeLifetime));
         } else {
-            verification.replaceCode(CODE_ENCODER.encode(code), now, now.plus(codeLifetime));
+            verification.replaceCode(CODE_ENCODER.encode(code), now, noExpiry ? null : now.plus(codeLifetime));
         }
         verifications.save(verification);
 
         try {
-            mail.send(codeMessage(email, code));
+            mail.send(codeMessage(email, code, noExpiry));
         } catch (MailException e) {
             throw new MailDeliveryException(e);
         }
     }
 
     /** 시험 초대 메일과 같은 서식(머리띠·표·안내 문구)으로 만든 인증 코드 메일. 글자 본문도 함께 담는다 */
-    private MimeMessage codeMessage(String email, String code) {
+    private MimeMessage codeMessage(String email, String code, boolean noExpiry) {
         long minutes = Math.max(1, codeLifetime.toMinutes());
+        String expiry = noExpiry ? "새 코드를 요청하거나 인증에 성공할 때까지 유효합니다."
+                : "발송 시각부터 %d분 동안 유효합니다.".formatted(minutes);
         String text = """
                 pAIr 회원가입 인증 코드입니다.
 
                 인증 코드: %s
-                코드는 발송 시각부터 %d분 동안 유효합니다.
+                %s
                 본인이 요청하지 않았다면 이 메일을 무시해 주세요.
-                """.formatted(code, minutes);
+                """.formatted(code, expiry);
         String html = MailLayout.html("회원가입 이메일 인증 코드", "안녕하세요.",
                 List.of("pAIr 회원가입 인증 코드입니다. 아래 코드를 가입 화면에 입력해 주세요."),
                 List.of(new MailLayout.Fact("인증 코드", code),
-                        new MailLayout.Fact("유효 시간", "발송 시각부터 " + minutes + "분")),
+                        new MailLayout.Fact("유효 시간", noExpiry ? "새 코드 발급 또는 인증 성공 시까지" : "발송 시각부터 " + minutes + "분")),
                 null,
                 List.of("본인이 요청하지 않았다면 이 메일을 무시해 주세요.",
                         "인증 코드는 본인만 사용하세요. 다른 사람과 공유하지 마세요."),
@@ -115,7 +126,7 @@ public class EmailVerificationService {
         if (verification == null || verification.getConsumedAt() != null) return ConsumeResult.NOT_FOUND;
 
         Instant now = Instant.now();
-        if (!verification.getExpiresAt().isAfter(now)) return ConsumeResult.EXPIRED;
+        if (verification.getExpiresAt() != null && !verification.getExpiresAt().isAfter(now)) return ConsumeResult.EXPIRED;
         if (verification.getFailedAttempts() >= maxAttempts) return ConsumeResult.LOCKED;
         if (!CODE_ENCODER.matches(code, verification.getCodeHash())) {
             verification.recordFailure();
@@ -131,7 +142,7 @@ public class EmailVerificationService {
         verifications.deleteById(email);
     }
 
-    enum ConsumeResult {
+    public enum ConsumeResult {
         CONSUMED(""),
         NOT_FOUND("이메일 인증 코드를 먼저 요청해 주세요."),
         EXPIRED("인증 코드가 만료되었습니다. 새 코드를 요청해 주세요."),
@@ -144,7 +155,7 @@ public class EmailVerificationService {
             this.message = message;
         }
 
-        String message() {
+        public String message() {
             return message;
         }
     }

@@ -53,6 +53,15 @@ public class AuthAccount {
     @Column(name = "token_version", nullable = false)
     private long tokenVersion;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified = true;
+
+    @Column(name = "password_change_required", nullable = false)
+    private boolean passwordChangeRequired;
+
+    @Column(name = "onboarding_mail_status", nullable = false, length = 10)
+    private String onboardingMailStatus = "SENT";
+
     protected AuthAccount() {}
 
     public AuthAccount(String email, String name, String passwordHash) {
@@ -64,18 +73,69 @@ public class AuthAccount {
         this.createdAt = Instant.now();
     }
 
+    public AuthAccount(String email, String name, String passwordHash, CurrentUser.Role role, Long companyId) {
+        this(email, name, passwordHash);
+        if (role != CurrentUser.Role.MANAGER && role != CurrentUser.Role.PROCTOR) {
+            throw new IllegalArgumentException("기업 계정 역할이 올바르지 않습니다.");
+        }
+        if (companyId == null) throw new IllegalArgumentException("기업 계정은 회사가 있어야 합니다.");
+        this.role = role;
+        this.companyId = companyId;
+        this.emailVerified = false;
+        this.passwordChangeRequired = true;
+        this.onboardingMailStatus = "PENDING";
+    }
+
+    public void activateAsCompanyMember(CurrentUser.Role role, Long companyId) {
+        if (role != CurrentUser.Role.MANAGER && role != CurrentUser.Role.PROCTOR) {
+            throw new IllegalArgumentException("기업 계정 역할이 올바르지 않습니다.");
+        }
+        if (companyId == null) throw new IllegalArgumentException("기업 계정은 회사가 있어야 합니다.");
+        this.role = role;
+        this.companyId = companyId;
+        this.emailVerified = true;
+        this.passwordChangeRequired = false;
+        this.onboardingMailStatus = "SENT";
+    }
+
     public Long getId() { return id; }
     public String getEmail() { return email; }
     public String getName() { return name; }
     public String getPasswordHash() { return passwordHash; }
+    public String getMemberStatus() { return memberStatus; }
     public CurrentUser.Role getRole() { return role; }
     public Long getCompanyId() { return companyId; }
     public boolean isActive() { return "ACTIVE".equals(memberStatus); }
     public long getTokenVersion() { return tokenVersion; }
+    public boolean isEmailVerified() { return emailVerified; }
+    public boolean isPasswordChangeRequired() { return passwordChangeRequired; }
+    public String getOnboardingMailStatus() { return onboardingMailStatus; }
 
     public void changePassword(String passwordHash) {
         this.passwordHash = passwordHash;
+        this.passwordChangeRequired = false;
         tokenVersion++;
+    }
+
+    public void markEmailVerified() {
+        this.emailVerified = true;
+    }
+
+    public void markOnboardingMail(String status) {
+        this.onboardingMailStatus = status;
+    }
+
+    public void changeRole(CurrentUser.Role role) {
+        this.role = role;
+        this.tokenVersion++;
+    }
+
+    public void resetOnboarding(String passwordHash) {
+        this.passwordHash = passwordHash;
+        this.emailVerified = false;
+        this.passwordChangeRequired = true;
+        this.onboardingMailStatus = "PENDING";
+        this.tokenVersion++;
     }
 
     public void withdraw(String anonymousEmail, String invalidPasswordHash, Instant now) {
@@ -84,7 +144,13 @@ public class AuthAccount {
         passwordHash = invalidPasswordHash;
         memberStatus = "WITHDRAWN";
         deletedAt = now;
+        emailVerified = false;
+        passwordChangeRequired = true;
         tokenVersion++;
+    }
+
+    public void deactivate(String anonymousEmail, String invalidPasswordHash, Instant now) {
+        withdraw(anonymousEmail, invalidPasswordHash, now);
     }
 
     public void reactivate(String email, String name, String passwordHash) {
@@ -98,5 +164,8 @@ public class AuthAccount {
         this.companyId = null;
         this.memberStatus = "ACTIVE";
         this.deletedAt = null;
+        this.emailVerified = true;
+        this.passwordChangeRequired = false;
+        this.onboardingMailStatus = "SENT";
     }
 }

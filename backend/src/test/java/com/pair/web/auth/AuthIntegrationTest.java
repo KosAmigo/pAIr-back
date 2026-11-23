@@ -254,7 +254,7 @@ class AuthIntegrationTest {
         JsonNode second = login(email, "secure-pass-123");
         long userId = first.path("user").path("id").asLong();
         String token = first.path("token").asText();
-        jdbc.update("update users set role = 'MANAGER', company_id = ? where user_id = ?", 41006L, userId);
+        jdbc.update("update users set role = 'PROCTOR', company_id = ? where user_id = ?", 41006L, userId);
         jdbc.update("insert into credit_ledger (user_id, amount, balance_after, reason, created_at) values (?, ?, ?, ?, ?)",
                 userId, 25, 225, "REFUND", Instant.now());
 
@@ -352,16 +352,17 @@ class AuthIntegrationTest {
                     now.minusSeconds(600), now.plusSeconds(600), companyId);
             mvc.perform(withdrawal(token, "secure-pass-123")).andExpect(status().isConflict());
             jdbc.update("update exam_sessions set ends_at = ? where company_id = ?", now.minusSeconds(1), companyId);
-            mvc.perform(withdrawal(token, "secure-pass-123")).andExpect(status().isNoContent());
+            mvc.perform(withdrawal(token, "secure-pass-123"))
+                    .andExpect(status().is(role.equals("MANAGER") ? 403 : 204));
         }
     }
 
     @Test
-    void cancelledAndOtherCompanySessionsDoNotBlockWithdrawalButAdminCannotWithdraw() throws Exception {
+    void cancelledAndOtherCompanySessionsDoNotBlockProctorWithdrawalButAdminCannotWithdraw() throws Exception {
         JsonNode account = signupAccount("cancelled-withdraw@example.com");
         long userId = account.path("user").path("id").asLong();
         long companyId = 41003L;
-        jdbc.update("update users set role = 'MANAGER', company_id = ? where user_id = ?", companyId, userId);
+        jdbc.update("update users set role = 'PROCTOR', company_id = ? where user_id = ?", companyId, userId);
         Instant now = Instant.now();
         jdbc.update("insert into exam_sessions (company_id, title, starts_at, ends_at, proctoring, created_by, created_at, canceled_at) values (?, ?, ?, ?, ?, ?, ?, ?)",
                 companyId, "cancelled", now.plusSeconds(600), now.plusSeconds(1200), false, userId, now, now);

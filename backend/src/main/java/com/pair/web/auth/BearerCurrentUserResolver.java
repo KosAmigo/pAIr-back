@@ -20,9 +20,12 @@ public class BearerCurrentUserResolver implements CurrentUserResolver {
 
     @Override
     public Optional<CurrentUser> resolve(HttpServletRequest request) {
-        String authorization = request.getHeader("Authorization");
-        if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) return Optional.empty();
-        String token = authorization.substring(7).trim();
-        return auth.findAccount(token).map(a -> new CurrentUser(a.getId(), a.getRole(), a.getCompanyId()));
+        return ResolvedCurrentUser.resolve(request, () -> {
+            String authorization = request.getHeader("Authorization");
+            if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) return Optional.empty();
+            String token = authorization.substring(7).trim();
+            return auth.findAccount(token).map(a -> new CurrentUser(a.getId(), a.getRole(), a.getCompanyId(),
+                    a.isEmailVerified(), a.isPasswordChangeRequired()));
+        });
     }
 }

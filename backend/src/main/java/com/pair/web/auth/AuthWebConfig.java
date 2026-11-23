@@ -12,10 +12,13 @@ public class AuthWebConfig implements WebMvcConfigurer {
 
     private final CurrentUserArgumentResolver currentUser;
     private final AttemptOwnerInterceptor attemptOwner;
+    private final OnboardingAccessInterceptor onboardingAccess;
 
-    public AuthWebConfig(CurrentUserArgumentResolver currentUser, AttemptOwnerInterceptor attemptOwner) {
+    public AuthWebConfig(CurrentUserArgumentResolver currentUser, AttemptOwnerInterceptor attemptOwner,
+            OnboardingAccessInterceptor onboardingAccess) {
         this.currentUser = currentUser;
         this.attemptOwner = attemptOwner;
+        this.onboardingAccess = onboardingAccess;
     }
 
     @Override
@@ -26,6 +29,7 @@ public class AuthWebConfig implements WebMvcConfigurer {
     /** 응시 하나를 다루는 모든 요청(/api/attempts/{id}/**)은 그 응시의 주인만 */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(onboardingAccess).addPathPatterns("/api/**");
         registry.addInterceptor(attemptOwner).addPathPatterns("/api/attempts/{id}/**");
     }
 }

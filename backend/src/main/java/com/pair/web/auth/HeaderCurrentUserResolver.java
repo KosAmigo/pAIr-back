@@ -21,15 +21,17 @@ public class HeaderCurrentUserResolver implements CurrentUserResolver {
 
     @Override
     public Optional<CurrentUser> resolve(HttpServletRequest request) {
-        String userId = request.getHeader(USER_ID);
-        String role = request.getHeader(ROLE);
-        if (userId == null || userId.isBlank() || role == null || role.isBlank()) return Optional.empty();
-        try {
-            String company = request.getHeader(COMPANY_ID);
-            return Optional.of(new CurrentUser(Long.valueOf(userId.trim()), CurrentUser.Role.valueOf(role.trim().toUpperCase()),
-                    company == null || company.isBlank() ? null : Long.valueOf(company.trim())));
-        } catch (IllegalArgumentException e) {
-            throw new UnauthorizedException("로그인 정보가 올바르지 않습니다.");
-        }
+        return ResolvedCurrentUser.resolve(request, () -> {
+            String userId = request.getHeader(USER_ID);
+            String role = request.getHeader(ROLE);
+            if (userId == null || userId.isBlank() || role == null || role.isBlank()) return Optional.empty();
+            try {
+                String company = request.getHeader(COMPANY_ID);
+                return Optional.of(new CurrentUser(Long.valueOf(userId.trim()), CurrentUser.Role.valueOf(role.trim().toUpperCase()),
+                        company == null || company.isBlank() ? null : Long.valueOf(company.trim())));
+            } catch (IllegalArgumentException e) {
+                throw new UnauthorizedException("로그인 정보가 올바르지 않습니다.");
+            }
+        });
     }
 }
