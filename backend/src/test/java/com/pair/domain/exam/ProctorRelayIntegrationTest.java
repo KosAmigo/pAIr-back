@@ -123,6 +123,30 @@ class ProctorRelayIntegrationTest {
     }
 
     @Test
+    @DisplayName("PC 가 보낸 화질 모드(watch|scan)만 휴대폰으로 전달하고, 기본은 watch 다")
+    void forwardsQualityFromPcOnly() throws Exception {
+        when(authorizer.authorize(TOKEN)).thenReturn(true);
+        Client pc = connect();
+        pc.session.sendMessage(new TextMessage("{\"type\":\"hello-pc\",\"invite\":\"" + TOKEN + "\"}"));
+        String code = nextJson(pc).get("pairCode").asText();
+        nextJson(pc);
+        Client phone = connect();
+        phone.session.sendMessage(new TextMessage("{\"type\":\"hello-phone\",\"pairCode\":\"" + code + "\"}"));
+        assertThat(nextJson(phone).get("type").asText()).isEqualTo("phone-joined");
+        JsonNode initial = nextJson(phone);
+        assertThat(initial.get("type").asText()).isEqualTo("quality");
+        assertThat(initial.get("mode").asText()).isEqualTo("watch"); // 기본값
+        nextJson(pc); // peer connected
+
+        pc.session.sendMessage(new TextMessage("{\"type\":\"quality\",\"mode\":\"turbo\"}")); // 모르는 값은 무시
+        phone.session.sendMessage(new TextMessage("{\"type\":\"quality\",\"mode\":\"scan\"}")); // 휴대폰 발은 무시
+        pc.session.sendMessage(new TextMessage("{\"type\":\"quality\",\"mode\":\"scan\"}"));
+        JsonNode forwarded = nextJson(phone);
+        assertThat(forwarded.get("mode").asText()).isEqualTo("scan");
+        assertThat(pc.got.poll(300, TimeUnit.MILLISECONDS)).isNull(); // PC 로 되돌아오는 것도 없다
+    }
+
+    @Test
     @DisplayName("JPEG 가 아니거나 너무 큰 프레임은 PC 로 넘기지 않는다")
     void rejectsBadFrames() throws Exception {
         when(authorizer.authorize(TOKEN)).thenReturn(true);

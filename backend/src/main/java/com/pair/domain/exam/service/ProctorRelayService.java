@@ -59,6 +59,7 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
     private static final String LIMITER = "relay.limiter";
     private static final String PHONE_ROLE = "phone";
     private static final String PC_ROLE = "pc";
+    private static final java.util.Set<String> QUALITY_MODES = java.util.Set.of("watch", "scan");
     private static final String BUSY = "지금은 연결이 많아 잠시 뒤 다시 시도해 주세요.";
 
     enum PhoneState { CONNECTED, DISCONNECTED, STALE;
@@ -76,6 +77,8 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
         volatile PhoneState phoneState = PhoneState.DISCONNECTED;
         volatile long lastPhoneSeen;
         volatile long emptySince;
+        /** PC 가 정한 휴대폰 화질 모드: watch(평소, 낮은 화질) | scan(책상 스캔, 높은 화질) */
+        volatile String quality = "watch";
         /** 맵에서 지워진 짝. 지워진 뒤에 붙으려는 연결은 새 짝을 만든다 */
         boolean removed;
 
@@ -143,6 +146,14 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
             case "hello-pc" -> { if (!greeted) helloPc(raw, session, msg); } // 소켓당 hello 는 한 번만
             case "hello-phone" -> { if (!greeted) helloPhone(raw, session, msg); }
             case "heartbeat" -> touchPhone(raw);
+            case "quality" -> {
+                // PC 가 정한 화질 모드(평소 watch, 책상 스캔 때만 scan)를 휴대폰으로 전달한다. 휴대폰 발·모르는 값은 무시
+                Pair pair = PC_ROLE.equals(raw.getAttributes().get(ROLE)) ? (Pair) raw.getAttributes().get(PAIR) : null;
+                String mode = msg.path("mode").asText("");
+                if (pair == null || !QUALITY_MODES.contains(mode)) return;
+                pair.quality = mode;
+                sendJson(pair.phone, json.createObjectNode().put("type", "quality").put("mode", mode));
+            }
             case "phone-status" -> {
                 Pair pair = phonePair(raw);
                 if (pair == null) return;
@@ -272,6 +283,7 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
         raw.getAttributes().put(LIMITER, new FrameRateLimitService(RelayLimitService.MAX_FRAMES_PER_SEC, RelayLimitService.MAX_EXCESS_PER_SEC));
         allowFrameBuffers(raw);
         sendJson(session, json.createObjectNode().put("type", "phone-joined"));
+        sendJson(session, json.createObjectNode().put("type", "quality").put("mode", pair.quality)); // 새로 붙은 휴대폰이 지금 화질 모드를 알게 한다
         setPhoneState(pair, PhoneState.CONNECTED);
         log.info("중계: 휴대폰 연결 (짝 {})", mask(pair.code));
     }

@@ -6,12 +6,14 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +39,14 @@ import com.pair.domain.exam.dto.ClipResponse;
 public class EvidenceClipService {
 
     public static final int MAX_FRAMES_PER_EVENT = 24;
+    /** 합계 24장 = 채널(PC 웹캠, 휴대폰)마다 최대 12장 */
+    public static final int MAX_FRAMES_PER_CHANNEL = 12;
+    /** 같은 채널의 사진은 1초 이상 간격 */
+    public static final int MIN_GAP_MS = 1000;
+    /** 사진 한 장 최대 크기 */
+    public static final int MAX_FRAME_BYTES = 100_000;
+    /** 요청 본문(base64 문자 수 합) 상한 2MB */
+    public static final long MAX_BODY_BYTES = 2L * 1024 * 1024;
     public static final int MAX_CLIPPED_EVENTS_PER_PARTICIPANT = 100;
     public static final int MIN_OFFSET_MS = -8000;
     public static final int MAX_OFFSET_MS = 4000;
@@ -80,12 +90,33 @@ public class EvidenceClipService {
             if (f.offsetMs() < MIN_OFFSET_MS || f.offsetMs() > MAX_OFFSET_MS) throw new IllegalArgumentException("증거 구간(이벤트 앞 8초~뒤 4초) 밖의 시각입니다.");
         }
 
+        long bodyChars = 0;
+        for (ClipFrameRequest f : list) bodyChars += f.image().length();
+        if (bodyChars > MAX_BODY_BYTES) throw new IllegalArgumentException("증거 사진 요청은 2MB 를 넘을 수 없습니다. 나눠서 보내 주세요.");
+
         Set<String> existing = new HashSet<>();
-        frames.findByEventIdOrderByOffsetMsAscSourceAsc(event.getId()).forEach(f -> existing.add(idOf(f.getSource(), f.getOffsetMs())));
+        Map<ProctorEvent.Source, TreeSet<Integer>> offsets = new EnumMap<>(ProctorEvent.Source.class);
+        frames.findByEventIdOrderByOffsetMsAscSourceAsc(event.getId()).forEach(f -> {
+            existing.add(idOf(f.getSource(), f.getOffsetMs()));
+            offsets.computeIfAbsent(f.getSource(), k -> new TreeSet<>()).add(f.getOffsetMs());
+        });
         Set<String> incoming = new HashSet<>();
-        for (ClipFrameRequest f : list) if (!existing.contains(idOf(f.source(), f.offsetMs()))) incoming.add(idOf(f.source(), f.offsetMs()));
+        for (ClipFrameRequest f : list) {
+            if (existing.contains(idOf(f.source(), f.offsetMs()))) continue;
+            incoming.add(idOf(f.source(), f.offsetMs()));
+            offsets.computeIfAbsent(f.source(), k -> new TreeSet<>()).add(f.offsetMs());
+        }
         if (existing.size() + incoming.size() > MAX_FRAMES_PER_EVENT) {
             throw new IllegalArgumentException("증거 사진은 이벤트마다 최대 " + MAX_FRAMES_PER_EVENT + "장입니다.");
+        }
+        // 합계 24장 = 채널(웹캠·휴대폰)마다 최대 12장, 같은 채널의 사진은 1초 이상 떨어져 있어야 한다
+        for (TreeSet<Integer> channel : offsets.values()) {
+            if (channel.size() > MAX_FRAMES_PER_CHANNEL) throw new IllegalArgumentException("증거 사진은 채널마다 최대 " + MAX_FRAMES_PER_CHANNEL + "장입니다.");
+            Integer prev = null;
+            for (int at : channel) {
+                if (prev != null && at - prev < MIN_GAP_MS) throw new IllegalArgumentException("같은 채널의 사진은 1초 이상 간격이어야 합니다.");
+                prev = at;
+            }
         }
         if (existing.isEmpty() && !incoming.isEmpty() && frames.countClippedEventsOf(p.getId()) >= MAX_CLIPPED_EVENTS_PER_PARTICIPANT) {
             throw new IllegalStateException("증거 구간이 붙은 이벤트가 너무 많습니다.");
@@ -105,7 +136,7 @@ public class EvidenceClipService {
             for (ClipFrameRequest f : list) {
                 String id = idOf(f.source(), f.offsetMs());
                 if (existing.contains(id) || !done.add(id)) continue;
-                byte[] jpeg = validator.decode(f.image());
+                byte[] jpeg = validator.decode(f.image(), MAX_FRAME_BYTES);
                 ProctorEventFrame row = frames.saveAndFlush(
                         new ProctorEventFrame(s.getId(), event.getId(), f.source(), f.offsetMs(), "pending", jpeg.length, now));
                 String key = SnapshotStorage.clipKeyOf(s.getId(), event.getId(), row.getId());
