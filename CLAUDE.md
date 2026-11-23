@@ -9,7 +9,7 @@
 - Never commit `.env`, `pilot-data/`, build output or secrets.
 
 ## Package structure (MUST)
-Enforced by `global/config/PackageRules`: a violation fails `./gradlew classes`/`build`, so IntelliJ ▶ fails before running (keep IntelliJ's default "Build and run using: Gradle"), and it also stops `PairApplication` at startup. Never weaken the check: don't edit `PackageRules` to pass, and don't set `PACKAGE_RULES_ENABLED=false` (production only). If a class fits no rule, ask the user. Background: pAIr-docs `설계/백엔드_패키지_구조.md`.
+Enforced by `global/config/PackageRulesConfig`: a violation fails `./gradlew classes`/`build`, so IntelliJ ▶ fails before running (keep IntelliJ's default "Build and run using: Gradle"), and it also stops `PairApplication` at startup. Never weaken the check: don't edit `PackageRulesConfig` to pass, and don't set `PACKAGE_RULES_ENABLED=false` (production only). If a class fits no rule, ask the user. Background: pAIr-docs `설계/백엔드_패키지_구조.md`.
 
 ```
 com.pair
@@ -19,17 +19,18 @@ com.pair
 └─ domain/<feature>/   controller/ service/ dto/ repository/ entity/ exception/
 ```
 - Only these folders. No classes directly in `domain/<feature>/`, no empty folders. A new `domain/<feature>/` is fine; new folders under `global/` or `infra/` need a team decision.
-- Folder name = class suffix:
+- Folder name = class suffix, for EVERY class in the folder with no exceptions (interfaces, helpers, schedulers too):
 
 | Folder | Class name |
 | --- | --- |
 | `controller/` | `XxxController` |
-| `service/` | `XxxService`, every class with no exceptions (interfaces, helpers, schedulers too) |
+| `service/` | `XxxService` |
 | `dto/` | `XxxRequest` / `XxxResponse` for API, `XxxDto` for other data |
 | `repository/` | `XxxRepository` (Xxx = what it stores, without `Dto`) |
 | `entity/` | plain noun (no `Record`/`Entity`), always `@Table(name = ...)`; entity enums too |
 | `exception/` | `XxxException` |
 | `global/config/` | `XxxConfig` / `XxxProperties` |
+| `global/error/` | `XxxException` / `XxxExceptionHandler` |
 
 - Has logic → `service/`. Data only → `dto/`. One type per file.
 - Used by one feature → that feature's folder. Shared exceptions → `global/error/`. External-call failures → `infra/<area>/`. Interceptors/resolvers → `global/security/`. Config/properties → `global/config/`.
