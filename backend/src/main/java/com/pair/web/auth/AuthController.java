@@ -34,6 +34,21 @@ public class AuthController {
         return ResponseEntity.accepted().body(new AuthDtos.EmailVerificationResponse("인증 코드를 이메일로 보냈습니다."));
     }
 
+    @PostMapping("/onboarding/email-verifications")
+    public ResponseEntity<AuthDtos.EmailVerificationResponse> requestOnboardingEmailVerification(
+            @RequestHeader(name = "Authorization", required = false) String authorization) {
+        auth.requestOnboardingEmailVerification(bearerToken(authorization));
+        return ResponseEntity.accepted().body(new AuthDtos.EmailVerificationResponse("인증 코드를 이메일로 보냈습니다."));
+    }
+
+    @PostMapping("/onboarding/email-verification")
+    public ResponseEntity<Void> verifyOnboardingEmail(
+            @RequestHeader(name = "Authorization", required = false) String authorization,
+            @Valid @RequestBody AuthDtos.OnboardingEmailVerificationRequest request) {
+        auth.verifyOnboardingEmail(bearerToken(authorization), request.code());
+        return ResponseEntity.noContent().build();
+    }
+
     /** 이메일 인증 코드를 확인한 뒤 일반 회원 계정을 만들고 로그인 토큰을 반환한다. */
     @PostMapping("/signup")
     public ResponseEntity<AuthDtos.AuthResponse> signup(@Valid @RequestBody AuthDtos.SignupRequest request) {

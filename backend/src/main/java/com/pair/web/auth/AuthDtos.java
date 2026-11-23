@@ -33,11 +33,15 @@ public final class AuthDtos {
 
     public record WithdrawalRequest(@NotBlank @Size(max = 72) String currentPassword) {}
 
-    public record UserView(long id, String email, String name, CurrentUser.Role role, Long companyId) {
+    public record UserView(long id, String email, String name, CurrentUser.Role role, Long companyId,
+            boolean emailVerified, boolean passwordChangeRequired) {
         static UserView from(AuthAccount account) {
-            return new UserView(account.getId(), account.getEmail(), account.getName(), account.getRole(), account.getCompanyId());
+            return new UserView(account.getId(), account.getEmail(), account.getName(), account.getRole(), account.getCompanyId(),
+                    account.isEmailVerified(), account.isPasswordChangeRequired());
         }
     }
+
+    public record OnboardingEmailVerificationRequest(@NotBlank @Pattern(regexp = "[0-9]{6}") String code) {}
 
     public record AuthResponse(String token, String refreshToken, long expiresIn, UserView user) {}
 }

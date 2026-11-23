@@ -4,9 +4,13 @@ package com.pair.web.auth;
  * 로그인한 콘솔 사용자. 컨트롤러 메서드 파라미터로 받는다 ({@link CurrentUserArgumentResolver}).
  * companyId 는 기업 회원(MANAGER·PROCTOR)만 있고 관리자(ADMIN)는 null 이다.
  */
-public record CurrentUser(Long userId, Role role, Long companyId) {
+public record CurrentUser(Long userId, Role role, Long companyId, boolean emailVerified, boolean passwordChangeRequired) {
 
     public enum Role { USER, MANAGER, PROCTOR, ADMIN }
+
+    public CurrentUser(Long userId, Role role, Long companyId) {
+        this(userId, role, companyId, true, false);
+    }
 
     public CurrentUser {
         if (userId == null || role == null) throw new IllegalArgumentException("사용자 정보가 비어 있습니다.");

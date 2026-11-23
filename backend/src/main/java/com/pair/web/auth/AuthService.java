@@ -47,6 +47,24 @@ public class AuthService {
         emailVerification.sendCode(normalizedEmail);
     }
 
+    @Transactional
+    public void requestOnboardingEmailVerification(String accessToken) {
+        AuthAccount account = lockCurrentAccount(requireAccess(accessToken));
+        if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
+        emailVerification.sendOnboardingCode(account.getEmail());
+    }
+
+    @Transactional
+    public void verifyOnboardingEmail(String accessToken, String code) {
+        AuthAccount account = lockCurrentAccount(requireAccess(accessToken));
+        if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
+        EmailVerificationService.ConsumeResult verification = emailVerification.consume(account.getEmail(), code);
+        if (verification != EmailVerificationService.ConsumeResult.CONSUMED) {
+            throw new IllegalArgumentException(verification.message());
+        }
+        account.markEmailVerified();
+    }
+
     /** 인증된 이메일로 일반 회원을 생성하고 로그인 상태로 사용할 세션 토큰을 발급한다. */
     @Transactional
     public AuthDtos.AuthResponse signup(AuthDtos.SignupRequest request) {
@@ -145,6 +163,9 @@ public class AuthService {
         if (account.getCompanyId() != null
                 && examSessions.existsByCompanyIdAndCanceledAtIsNullAndEndsAtAfter(account.getCompanyId(), now)) {
             throw new ConflictException("예정 또는 진행 중인 회사 회차가 있어 탈퇴할 수 없습니다.");
+        }
+        if (account.getRole() == CurrentUser.Role.MANAGER) {
+            throw new ForbiddenException("매니저는 먼저 위임하거나 관리자에게 교체를 요청해야 합니다.");
         }
         String anonymousEmail = withdrawnEmailHasher.hash(normalizeEmail(account.getEmail()));
         emailVerification.removeForEmail(account.getEmail());

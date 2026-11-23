@@ -22,7 +22,7 @@ public class EmailVerification {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
-    @Column(name = "expires_at", nullable = false)
+    @Column(name = "expires_at")
     private Instant expiresAt;
 
     @Column(name = "failed_attempts", nullable = false)
