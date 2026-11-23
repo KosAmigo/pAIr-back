@@ -316,7 +316,7 @@ class BizFlowTest {
     @DisplayName("POST /api/admin/task-gen 에 track=BIZ 를 내면 비개발 생성 작업이 돌고 DONE 이 된다")
     void bizJobViaApi() throws Exception {
         ai.script.add(BizFixtures.good("biz-api"));
-        String form = "{\"track\":\"BIZ\",\"jobRole\":\"서비스 기획\",\"difficulty\":\"중급\",\"topic\":\"저가 요금제\",\"trap\":\"의향을 전환율로 보정하지 않음\"}";
+        String form = "{\"track\":\"BIZ\",\"topic\":\"저가 요금제\",\"trap\":\"의향을 전환율로 보정하지 않음\"}";
         String body = mvc.perform(admin(post("/api/admin/task-gen")).contentType(MediaType.APPLICATION_JSON).content(form))
                 .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
         String jobId = json.readTree(body).get("jobId").asText();

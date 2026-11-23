@@ -140,7 +140,7 @@ pair:
     # 주제·함정 추천: 싼 모델, 짧은 출력. 추론 모델이라 생각 토큰도 상한에 들어간다
     suggest-model: gpt-6-luna
     suggest-max-tokens: 2000
-    suggest-effort: minimal
+    suggest-effort: low      # gpt-6-luna 는 none/low/medium/high/xhigh 만 받는다(minimal 은 400 오류)
 
   # 응시자가 쓰는 AI 어시스턴트.
   assistant:
@@ -148,7 +148,7 @@ pair:
     model: gpt-6-luna
     # 추론(reasoning) 모델은 생각에 쓰는 토큰도 이 한도에 포함된다. 너무 작으면 답이 비어서 온다.
     max-output-tokens: 8000
-    # 추론 강도: none, minimal, low, medium, high. 낮을수록 빠르고 싸며 한도에 덜 걸린다.
+    # 추론 강도: none, low, medium, high, xhigh (gpt-6 계열은 minimal 없음). 낮을수록 빠르고 싸며 한도에 덜 걸린다.
     reasoning-effort: low
     max-turns: 40
     # 응시자 질문 한 번의 최대 글자 수 (프론트 입력창 글자 수 표시와 같은 값)

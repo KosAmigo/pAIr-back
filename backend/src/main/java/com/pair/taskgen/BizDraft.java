@@ -19,7 +19,15 @@ public record BizDraft(
         List<DevDraft.FileDraft> csvFiles,
         String checklist,
         Trap trap,
-        List<QuestionDraft> questions) {
+        List<QuestionDraft> questions,
+        String difficulty) {
+
+    /** 난이도 없이 만든다(테스트·옛 코드용) */
+    public BizDraft(String title, String summary, String code, String category, List<String> description,
+            List<String> requirements, List<String> followUps, List<DocDraft> documents,
+            List<DevDraft.FileDraft> csvFiles, String checklist, Trap trap, List<QuestionDraft> questions) {
+        this(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, null);
+    }
 
     /** path: 자료/이름.pdf, pages: 쪽별 글 */
     public record DocDraft(String path, List<String> pages) {}

@@ -12,7 +12,7 @@ final class TaskGenFixtures {
     private TaskGenFixtures() {}
 
     static TaskGenForm form() {
-        return new TaskGenForm("DEV", "백엔드", "중급", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "SELF", 60);
+        return new TaskGenForm("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "SELF", 60);
     }
 
     static DevDraft.FileDraft f(String path, String content) {
