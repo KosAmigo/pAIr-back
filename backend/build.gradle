@@ -30,6 +30,12 @@ dependencyManagement {
     }
 }
 
+// PDFBox·AWS SDK(HttpClient)가 commons-logging.jar 를 끌고 오는데, Spring 의 spring-jcl 과 겹쳐 실행 때 경고가 난다.
+// spring-jcl 이 같은 API 를 주므로 진짜 jar 는 뺀다.
+configurations.configureEach {
+    exclude group: 'commons-logging', module: 'commons-logging'
+}
+
 dependencies {
     // 엔티티의 getter, 기본 생성자 보일러플레이트 제거 (엔티티에는 @Getter, @NoArgsConstructor 만 쓴다)
     compileOnly 'org.projectlombok:lombok'
