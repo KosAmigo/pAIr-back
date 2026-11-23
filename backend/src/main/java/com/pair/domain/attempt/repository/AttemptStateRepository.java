@@ -9,9 +9,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * 응시 기록(상태, 작업 파일, 대화, 작업 기록, 채점 리포트) 저장소.
- * 실제 응시는 DB(DbAttemptStoreRepository), 채점 툴 실험용 샘플 응시만 파일(FileAttemptStoreRepository, grader/samples)이다.
+ * 실제 응시는 DB(DbAttemptStateRepository), 채점 툴 실험용 샘플 응시만 파일(FileAttemptStateRepository, grader/samples)이다.
  */
-public interface AttemptStoreRepository {
+public interface AttemptStateRepository {
 
     /** 응시를 만들고 과제 원본 파일을 작업 파일로 넣는다 */
     void create(AttemptState a, Map<String, String> files);

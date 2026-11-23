@@ -2,7 +2,7 @@ package com.pair.domain.attempt.service;
 
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -29,12 +29,12 @@ public class RollbackService {
     private final CheckpointService checkpointService;
     private final AttemptRepository records;
     private final AttemptRegistry registry;
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
     private final CreditService credits;
     private final ChatAttachmentService attachments;
 
     public RollbackService(CheckpointRepository checkpoints, CheckpointService checkpointService,
-                           AttemptRepository records, AttemptRegistry registry, AttemptStoreRepository store, CreditService credits,
+                           AttemptRepository records, AttemptRegistry registry, AttemptStateRepository store, CreditService credits,
                            ChatAttachmentService attachments) {
         this.checkpoints = checkpoints;
         this.checkpointService = checkpointService;

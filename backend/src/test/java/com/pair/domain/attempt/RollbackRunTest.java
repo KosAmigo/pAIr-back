@@ -1,7 +1,7 @@
 package com.pair.domain.attempt;
 
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.domain.attempt.service.AttemptService;
@@ -63,7 +63,7 @@ class RollbackRunTest {
     @MockitoBean JavaMailSender mail;
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired AttemptRegistry registry;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;

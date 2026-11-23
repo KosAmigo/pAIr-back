@@ -18,19 +18,19 @@ import org.junit.jupiter.api.Test;
 
 import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 
 /** 종료 시각에 풀이·후속 질문 중이던 응시를 끝까지 넘기는 AttemptSubmitter.finishAll */
 class AttemptSubmitterFinishTest {
 
     private AttemptService service;
-    private AttemptStoreRepository store;
+    private AttemptStateRepository store;
     private AttemptSubmitter submitter;
 
     @BeforeEach
     void setUp() {
         service = mock(AttemptService.class);
-        store = mock(AttemptStoreRepository.class);
+        store = mock(AttemptStateRepository.class);
         submitter = new AttemptSubmitter(service, store);
     }
 

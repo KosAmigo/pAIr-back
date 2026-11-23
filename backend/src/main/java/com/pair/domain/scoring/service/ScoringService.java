@@ -24,7 +24,7 @@ import com.pair.infra.ai.ClaudeJudgeClient;
 import com.pair.infra.ai.Judge;
 import com.pair.infra.ai.OpenAiJudgeClient;
 import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.grader.service.PromptStore;
@@ -49,7 +49,7 @@ public class ScoringService {
     private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
     static final int D5_LATE_MINUTES = 30;
 
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
     private final TaskDefRepository tasks;
     private final CodeRunner runner;
     private final List<Judge> judges;
@@ -67,7 +67,7 @@ public class ScoringService {
         return t;
     });
 
-    public ScoringService(AttemptStoreRepository store, TaskDefRepository tasks, CodeRunner runner,
+    public ScoringService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           ClaudeJudgeClient claudeJudge, OpenAiJudgeClient openAiJudge, PairProperties props,
                           PromptStore prompts, ReferenceDocs referenceDocs, ScoringRecords records,
                           com.pair.domain.question.service.QuestionService questions) {
@@ -189,7 +189,7 @@ public class ScoringService {
      * 채점해서 리포트를 돌려준다. 저장하지 않는다(채점 툴 실험 채점은 결과를 따로 저장).
      * @param src 응시 기록을 읽을 곳 (실제 응시 또는 샘플 응시)
      */
-    public Map<String, Object> evaluate(AttemptStoreRepository src, String attemptId, Options opt) {
+    public Map<String, Object> evaluate(AttemptStateRepository src, String attemptId, Options opt) {
         return evaluate(src, attemptId, opt, live());
     }
 
@@ -210,7 +210,7 @@ public class ScoringService {
         return judges;
     }
 
-    public Map<String, Object> evaluate(AttemptStoreRepository src, String attemptId, Options opt, Calls calls) {
+    public Map<String, Object> evaluate(AttemptStateRepository src, String attemptId, Options opt, Calls calls) {
         AttemptState a = src.load(attemptId);
         TaskDef task = tasks.get(a.taskId());
         boolean dev = task.isDev();

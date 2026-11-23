@@ -22,16 +22,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * 응시 기록을 JSON 파일로 읽고 쓴다. 채점 툴 실험용 샘플 응시(grader/samples)에만 쓴다. 실제 응시는 DbAttemptStoreRepository.
+ * 응시 기록을 JSON 파일로 읽고 쓴다. 채점 툴 실험용 샘플 응시(grader/samples)에만 쓴다. 실제 응시는 DbAttemptStateRepository.
  * {root}/{id}/ 아래에 attempt.json, turns.jsonl, events.jsonl, workspace/, snapshots/, report.json
  */
-public class FileAttemptStoreRepository implements AttemptStoreRepository {
+public class FileAttemptStateRepository implements AttemptStateRepository {
 
     private final Path root;
     private final ObjectMapper json;
     private final ObjectMapper pretty;
 
-    public FileAttemptStoreRepository(Path root, ObjectMapper json) {
+    public FileAttemptStateRepository(Path root, ObjectMapper json) {
         this.root = root.toAbsolutePath();
         this.json = json;
         this.pretty = json.copy().enable(SerializationFeature.INDENT_OUTPUT);
@@ -133,7 +133,7 @@ public class FileAttemptStoreRepository implements AttemptStoreRepository {
         try {
             Path ws = workspace(id);
             Path target = ws.resolve(rel).normalize();
-            if (!target.startsWith(ws) || !AttemptStoreRepository.creatable(rel)) throw new IllegalArgumentException("이 경로에는 파일을 만들 수 없습니다: " + rel);
+            if (!target.startsWith(ws) || !AttemptStateRepository.creatable(rel)) throw new IllegalArgumentException("이 경로에는 파일을 만들 수 없습니다: " + rel);
             if (Files.exists(target)) return;
             Files.createDirectories(target.getParent());
             Files.writeString(target, "", StandardCharsets.UTF_8);

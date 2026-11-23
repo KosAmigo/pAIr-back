@@ -29,7 +29,7 @@ import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.ChatAttachmentService;
 import com.pair.domain.attempt.service.ChatTurnState;
 import com.pair.infra.sandbox.CodeRunner;
@@ -47,7 +47,7 @@ public class AttemptController {
 
     private final TaskDefRepository tasks;
     private final AttemptService attempts;
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
     private final com.pair.global.config.PairProperties props;
     private final AttemptRepository records;
     private final TaskCatalog catalog;
@@ -58,7 +58,7 @@ public class AttemptController {
     private final com.pair.domain.attempt.service.ReplayCompareService replayCompare;
     private final ChatAttachmentService chatAttachments;
 
-    public AttemptController(TaskDefRepository tasks, AttemptService attempts, AttemptStoreRepository store, com.pair.global.config.PairProperties props,
+    public AttemptController(TaskDefRepository tasks, AttemptService attempts, AttemptStateRepository store, com.pair.global.config.PairProperties props,
             AttemptRepository records, TaskCatalog catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
             com.pair.domain.attempt.service.RollbackService rollbacks, com.pair.domain.attempt.service.ReplayTreeService replayTree,
             com.pair.domain.question.service.QuestionService questions, com.pair.domain.attempt.service.ReplayCompareService replayCompare,

@@ -29,7 +29,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.grader.service.PromptVersionState;
 import com.pair.domain.scoring.service.ScoringRecords;
 import com.pair.domain.scoring.service.ScoringService;
@@ -61,7 +61,7 @@ class QuestionApiTest {
     @Autowired ObjectMapper json;
     @Autowired AuthService auth;
     @Autowired AttemptService attempts;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired TaskRepository tasks;
     @Autowired TaskQuestionRepository questions;
     @Autowired QuestionChoiceRepository choices;

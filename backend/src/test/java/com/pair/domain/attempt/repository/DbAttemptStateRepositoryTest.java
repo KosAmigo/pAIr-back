@@ -33,7 +33,7 @@ import com.pair.domain.task.TestTasks;
 /** 응시 기록이 DB 에 저장되고 그대로 다시 읽히는지 (H2 메모리 DB) */
 @SpringBootTest
 @ActiveProfiles("examtest")
-class DbAttemptStoreRepositoryTest {
+class DbAttemptStateRepositoryTest {
 
     @TempDir
     static Path dataDir;
@@ -43,7 +43,7 @@ class DbAttemptStoreRepositoryTest {
         r.add("pair.data-dir", () -> dataDir.toString());
     }
 
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired AttemptRegistry registry;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;
@@ -64,7 +64,7 @@ class DbAttemptStoreRepositoryTest {
 
     @Test
     void 실제_응시는_DB_저장소를_쓴다() {
-        assertThat(store).isInstanceOf(DbAttemptStoreRepository.class);
+        assertThat(store).isInstanceOf(DbAttemptStateRepository.class);
     }
 
     @Test
@@ -152,8 +152,8 @@ class DbAttemptStoreRepositoryTest {
 
     @Test
     void 이벤트_이름_변환() {
-        assertThat(DbAttemptStoreRepository.dbType("firstValid")).isEqualTo("FIRST_VALID");
-        assertThat(DbAttemptStoreRepository.appType("FIRST_VALID")).isEqualTo("firstValid");
-        assertThat(DbAttemptStoreRepository.appType(DbAttemptStoreRepository.dbType("followups"))).isEqualTo("followups");
+        assertThat(DbAttemptStateRepository.dbType("firstValid")).isEqualTo("FIRST_VALID");
+        assertThat(DbAttemptStateRepository.appType("FIRST_VALID")).isEqualTo("firstValid");
+        assertThat(DbAttemptStateRepository.appType(DbAttemptStateRepository.dbType("followups"))).isEqualTo("followups");
     }
 }

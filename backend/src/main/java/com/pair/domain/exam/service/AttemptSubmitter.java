@@ -10,10 +10,10 @@ import org.springframework.stereotype.Component;
 import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 
 /**
- * 회차와 응시 파일(AttemptStoreRepository) 사이의 경계. 응시 행(DB attempts)은 회차 서비스가 만들고, 여기서는 파일만 다룬다.
+ * 회차와 응시 파일(AttemptStateRepository) 사이의 경계. 응시 행(DB attempts)은 회차 서비스가 만들고, 여기서는 파일만 다룬다.
  * submitAll/submitOne 은 아직 풀고 있는(SOLVING) 응시만 제출한다. 이미 제출했거나 후속 질문 단계면 건드리지 않는다.
  * 제출 뒤 후속 질문·채점 큐는 AttemptService 가 이어 받는다.
  * finishAll 은 시험 종료 시각에 쓴다. 후속 질문 단계에서 멈춘 응시를 빈 답으로 마무리해 채점까지 보낸다.
@@ -23,9 +23,9 @@ public class AttemptSubmitter {
     private static final Logger log = LoggerFactory.getLogger(AttemptSubmitter.class);
 
     private final AttemptService attempts;
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
 
-    public AttemptSubmitter(AttemptService attempts, AttemptStoreRepository store) {
+    public AttemptSubmitter(AttemptService attempts, AttemptStateRepository store) {
         this.attempts = attempts;
         this.store = store;
     }

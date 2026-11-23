@@ -1,7 +1,7 @@
 package com.pair.domain.attempt.service;
 
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -38,7 +38,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 @Service
 public class AttemptService {
 
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
     private final TaskDefRepository tasks;
     private final CodeRunner runner;
     private final AssistantClient assistant;
@@ -54,7 +54,7 @@ public class AttemptService {
     private final JavaDiagnostics diagnostics;
     private final TaskMaterialService materials;
 
-    public AttemptService(AttemptStoreRepository store, TaskDefRepository tasks, CodeRunner runner,
+    public AttemptService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
                           TaskCatalog catalog, AttemptRegistry registry, CheckpointService checkpoints, CreditService credits,
                           ChatTurnRepository chatRecords, TransactionTemplate transactions,
@@ -392,7 +392,7 @@ public class AttemptService {
     /** 읽기 전용 파일(로그·자료 경로, 또는 과제에서 read_only 로 정한 파일)은 고칠 수 없다 */
     private void requireWritable(String id, String path) {
         boolean flagged = id.chars().allMatch(Character::isDigit) && materials.readOnlyForAttempt(Long.parseLong(id), path);
-        if (AttemptStoreRepository.readOnlyPath(path) || flagged) {
+        if (AttemptStateRepository.readOnlyPath(path) || flagged) {
             throw new IllegalArgumentException("읽기 전용 파일은 고칠 수 없습니다: " + path);
         }
     }

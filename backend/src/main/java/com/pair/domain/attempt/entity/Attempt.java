@@ -1,7 +1,7 @@
 package com.pair.domain.attempt.entity;
 
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
-import com.pair.domain.attempt.repository.DbAttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
+import com.pair.domain.attempt.repository.DbAttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptState;
 import java.time.Instant;
 
@@ -23,7 +23,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * 응시 1건의 목록 정보 (ERD attempts): 누가(자가진단 회원 / 실전 대상자), 어떤 과제를, 어떤 상태로, 언제 시작·제출했는지.
- * 작업 파일(attempt_files)·대화(chat_turns)·작업 기록(attempt_events)·리포트(attempt_reports)는 DbAttemptStoreRepository 가 다룬다.
+ * 작업 파일(attempt_files)·대화(chat_turns)·작업 기록(attempt_events)·리포트(attempt_reports)는 DbAttemptStateRepository 가 다룬다.
  */
 @Entity
 @Table(name = "attempts")
@@ -118,7 +118,7 @@ public class Attempt {
         return new Attempt(Mode.LIVE, null, participantId, taskId, model, at);
     }
 
-    /** 응시 상태 전체를 저장한다(AttemptStoreRepository.save). questions·answers 는 JSON 문자열 */
+    /** 응시 상태 전체를 저장한다(AttemptStateRepository.save). questions·answers 는 JSON 문자열 */
     public void apply(AttemptState a, String questionsJson, String answersJson) {
         sync(a.status(), a.submittedAt(), a.followupsDoneAt());
         this.provider = a.provider();

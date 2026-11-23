@@ -25,7 +25,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.scoring.repository.ScoringRepository;
 import com.pair.domain.task.entity.QuestionChoice;
 import com.pair.domain.task.repository.QuestionChoiceRepository;
@@ -47,7 +47,7 @@ public class QuestionService {
     static final int SHORT_MAX_CHARS = 200;
 
     private final AttemptRepository attempts;
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
     private final TaskQuestionRepository questions;
     private final QuestionChoiceRepository choices;
     private final ShortAnswerKeyRepository keys;
@@ -56,7 +56,7 @@ public class QuestionService {
     private final QuestionResultRepository results;
     private final ScoringRepository scorings;
 
-    public QuestionService(AttemptRepository attempts, AttemptStoreRepository store, TaskQuestionRepository questions,
+    public QuestionService(AttemptRepository attempts, AttemptStateRepository store, TaskQuestionRepository questions,
                            QuestionChoiceRepository choices, ShortAnswerKeyRepository keys,
                            ChoiceAnswerRepository choiceAnswers, TextAnswerRepository textAnswers,
                            QuestionResultRepository results, ScoringRepository scorings) {

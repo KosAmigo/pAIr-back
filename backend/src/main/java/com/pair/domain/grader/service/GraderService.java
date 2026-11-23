@@ -28,7 +28,7 @@ import jakarta.annotation.PreDestroy;
 
 import com.pair.infra.ai.BatchClient;
 import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.global.config.PairProperties;
 import com.pair.domain.scoring.service.ScoringService;
 import com.pair.domain.task.service.TaskDef;
@@ -59,8 +59,8 @@ public class GraderService {
     private final ScoringService scoring;
     private final PromptStore prompts;
     private final TaskDefRepository tasks;
-    private final AttemptStoreRepository mine;
-    private final AttemptStoreRepository samples;
+    private final AttemptStateRepository mine;
+    private final AttemptStateRepository samples;
     private final Path samplesDir;
     private final Path runsDir;
     private final PairProperties props;
@@ -75,7 +75,7 @@ public class GraderService {
         return t;
     });
 
-    public GraderService(ScoringService scoring, PromptStore prompts, TaskDefRepository tasks, AttemptStoreRepository mine,
+    public GraderService(ScoringService scoring, PromptStore prompts, TaskDefRepository tasks, AttemptStateRepository mine,
                          PairProperties props, ObjectMapper json, BatchClient batch) {
         this.batch = batch;
         this.scoring = scoring;
@@ -83,7 +83,7 @@ public class GraderService {
         this.tasks = tasks;
         this.mine = mine;
         this.samplesDir = Path.of(props.grader().dir(), "samples").toAbsolutePath();
-        this.samples = new com.pair.domain.attempt.repository.FileAttemptStoreRepository(samplesDir, json);
+        this.samples = new com.pair.domain.attempt.repository.FileAttemptStateRepository(samplesDir, json);
         this.runsDir = Path.of(props.grader().dir(), "runs").toAbsolutePath();
         this.props = props;
         this.json = json;
@@ -131,7 +131,7 @@ public class GraderService {
     }
 
     private AttemptRow row(String source, String id, String label) {
-        AttemptStoreRepository src = store(source);
+        AttemptStateRepository src = store(source);
         try {
             AttemptState a = src.load(id);
             if (a.followupsDoneAt() == null) return null; // 후속 질문까지 끝나야 채점할 수 있다
@@ -166,7 +166,7 @@ public class GraderService {
         }
     }
 
-    private AttemptStoreRepository store(String source) {
+    private AttemptStateRepository store(String source) {
         if (SAMPLE.equals(source)) return samples;
         if (MINE.equals(source)) return mine;
         throw new IllegalArgumentException("응시 출처는 sample 또는 mine 입니다: " + source);
@@ -218,7 +218,7 @@ public class GraderService {
     }
 
     private AttemptEstimate estimateOne(AttemptRef ref, int judgeRepeat) {
-        AttemptStoreRepository src = store(ref.source());
+        AttemptStateRepository src = store(ref.source());
         JsonNode rep = src.readReport(ref.id());
         String basis = "report";
         if (rep == null || !rep.has("tokens")) {
@@ -254,7 +254,7 @@ public class GraderService {
 
     /** 같은 과제의 지난 채점 기록 중 아무거나(샘플 먼저) 하나를 기준으로 쓴다. */
     private JsonNode averageReport(String taskId) {
-        for (AttemptStoreRepository src : List.of(samples, mine)) {
+        for (AttemptStateRepository src : List.of(samples, mine)) {
             for (String id : src.ids()) {
                 try {
                     if (!src.load(id).taskId().equals(taskId)) continue;

@@ -2,7 +2,7 @@ package com.pair.domain.attempt.service;
 
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,13 +30,13 @@ public class CheckpointService {
 
     public record View(Long checkpointId, int turnNo, String label, Instant createdAt) {}
 
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
     private final TaskDefRepository tasks;
     private final CheckpointRepository checkpoints;
     private final CheckpointFileRepository checkpointFiles;
     private final AttemptRepository records;
 
-    public CheckpointService(AttemptStoreRepository store, TaskDefRepository tasks, CheckpointRepository checkpoints,
+    public CheckpointService(AttemptStateRepository store, TaskDefRepository tasks, CheckpointRepository checkpoints,
                              CheckpointFileRepository checkpointFiles, AttemptRepository records) {
         this.store = store;
         this.tasks = tasks;

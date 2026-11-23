@@ -42,7 +42,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import com.pair.infra.ai.AiUnavailableException;
 import com.pair.infra.ai.AssistantClient;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
@@ -64,7 +64,7 @@ class CreditIntegrationTest {
     @Autowired CreditLedgerRepository ledger;
     @Autowired AttemptService attempts;
     @Autowired AttemptRegistry registry;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired CheckpointService checkpoints;
     @Autowired TaskRepository tasks;
     @Autowired MockMvc mvc;

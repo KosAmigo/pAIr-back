@@ -1,6 +1,6 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,7 +46,7 @@ class DiagnosticsApiTest {
     }
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired AuthService auth;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;

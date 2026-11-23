@@ -25,7 +25,7 @@ import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
 import com.pair.domain.attempt.service.AttemptService;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
@@ -43,7 +43,7 @@ class AttemptOwnerTest {
     @Autowired AuthService auth;
     @Autowired AttemptService attempts;
     @Autowired AttemptRegistry registry;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired TaskRepository tasks;
     @MockitoBean JavaMailSender mail; // 가입은 이메일 인증 코드가 필요해 메일을 가짜로 받는다
 

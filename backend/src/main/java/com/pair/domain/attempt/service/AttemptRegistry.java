@@ -2,7 +2,7 @@ package com.pair.domain.attempt.service;
 
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
-import com.pair.domain.attempt.repository.DbAttemptStoreRepository;
+import com.pair.domain.attempt.repository.DbAttemptStateRepository;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 응시 행(DB attempts)을 만들고 찾는다. 응시 ID 는 DB 가 만든 attempt_id 를 문자열로 쓴다.
- * 응시 상태·작업 파일·대화 등 나머지는 DbAttemptStoreRepository 가 같은 행과 하위 테이블에 저장한다.
+ * 응시 상태·작업 파일·대화 등 나머지는 DbAttemptStateRepository 가 같은 행과 하위 테이블에 저장한다.
  */
 @Component
 public class AttemptRegistry {

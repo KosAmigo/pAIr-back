@@ -1,6 +1,6 @@
 package com.pair.domain.attempt;
 
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.service.EditProposals;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,7 +54,7 @@ class AttemptGuardsTest {
     }
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired AuthService auth;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;

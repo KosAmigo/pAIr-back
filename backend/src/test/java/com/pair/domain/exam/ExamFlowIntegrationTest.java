@@ -43,7 +43,7 @@ import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
@@ -113,7 +113,7 @@ class ExamFlowIntegrationTest {
     @Autowired com.pair.domain.exam.service.ConnectionGrace grace;
     @Autowired SessionResultService results;
     @Autowired ExamParticipantRepository participants;
-    @Autowired AttemptStoreRepository attemptStore;
+    @Autowired AttemptStateRepository attemptStore;
     @Autowired ObjectMapper json;
     @Autowired ReminderService reminders;
     @Autowired SnapshotStorage storage;

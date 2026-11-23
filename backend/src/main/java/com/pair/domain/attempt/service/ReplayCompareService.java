@@ -2,7 +2,7 @@ package com.pair.domain.attempt.service;
 
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,10 +42,10 @@ public class ReplayCompareService {
 
     private final AttemptRepository records;
     private final ReplayReports reports;
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
     private final TaskDefRepository tasks;
 
-    public ReplayCompareService(AttemptRepository records, ReplayReports reports, AttemptStoreRepository store, TaskDefRepository tasks) {
+    public ReplayCompareService(AttemptRepository records, ReplayReports reports, AttemptStateRepository store, TaskDefRepository tasks) {
         this.records = records;
         this.reports = reports;
         this.store = store;

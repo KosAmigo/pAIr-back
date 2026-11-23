@@ -34,7 +34,7 @@ import com.pair.domain.task.service.TaskCatalog;
  * 응시 행(attempts)은 AttemptRegistry 가 먼저 만들고, 여기서는 그 행을 고치기만 한다.
  */
 @Component
-public class DbAttemptStoreRepository implements AttemptStoreRepository {
+public class DbAttemptStateRepository implements AttemptStateRepository {
 
     private static final TypeReference<List<String>> STRINGS = new TypeReference<>() {};
 
@@ -50,7 +50,7 @@ public class DbAttemptStoreRepository implements AttemptStoreRepository {
     /** DB task_id → 과제 내용 code. 과제 code 는 바뀌지 않아 한 번 읽으면 둔다 */
     private final Map<Long, String> taskCodes = new ConcurrentHashMap<>();
 
-    public DbAttemptStoreRepository(AttemptRepository records, AttemptFileRepository files, ChatTurnRepository turns,
+    public DbAttemptStateRepository(AttemptRepository records, AttemptFileRepository files, ChatTurnRepository turns,
                           AttemptEventRepository events, AttemptReportRepository reports, TaskCatalog catalog,
                           ObjectMapper json, ScoringReportReader scoringReports) {
         this.records = records;
@@ -128,7 +128,7 @@ public class DbAttemptStoreRepository implements AttemptStoreRepository {
     @Override
     @Transactional
     public void createWorkspaceFile(String id, String path) {
-        if (!AttemptStoreRepository.creatable(path)) throw new IllegalArgumentException("이 경로에는 파일을 만들 수 없습니다: " + path);
+        if (!AttemptStateRepository.creatable(path)) throw new IllegalArgumentException("이 경로에는 파일을 만들 수 없습니다: " + path);
         Long attemptId = key(id);
         if (files.existsByAttemptIdAndPath(attemptId, path)) return;
         files.save(new AttemptFile(attemptId, path, "", Instant.now()));

@@ -1,6 +1,6 @@
 package com.pair.domain.attempt.service;
 
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -69,7 +69,7 @@ class ChatAttachmentTest {
     }
 
     @Autowired AttemptService attempts;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired AttemptRegistry registry;
     @Autowired AuthService auth;
     @Autowired CreditService credits;

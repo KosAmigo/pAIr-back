@@ -22,7 +22,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import com.pair.domain.attempt.service.AttemptState;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistry;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.grader.service.PromptVersionState;
 import com.pair.domain.scoring.service.ScoringService.CheckOutcome;
 import com.pair.domain.scoring.service.ScoringService.ItemResult;
@@ -47,7 +47,7 @@ class ScoringSaveOrderTest {
 
     @Autowired ScoringService scoring;
     @Autowired ScoringRecords records;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired AttemptRegistry registry;
     @Autowired TaskRepository taskRecords;
     @Autowired com.pair.domain.scoring.repository.PromptVersionRepository promptVersions;

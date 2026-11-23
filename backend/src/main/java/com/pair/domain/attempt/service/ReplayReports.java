@@ -1,7 +1,7 @@
 package com.pair.domain.attempt.service;
 
 import com.pair.domain.attempt.entity.Attempt;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
@@ -15,9 +15,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 @Component
 class ReplayReports {
 
-    private final AttemptStoreRepository store;
+    private final AttemptStateRepository store;
 
-    ReplayReports(AttemptStoreRepository store) {
+    ReplayReports(AttemptStateRepository store) {
         this.store = store;
     }
 

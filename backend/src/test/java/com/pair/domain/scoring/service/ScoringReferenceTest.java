@@ -26,7 +26,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.pair.infra.ai.EmbeddingClient;
 import com.pair.infra.ai.Judge;
 import com.pair.domain.attempt.service.AttemptState;
-import com.pair.domain.attempt.repository.AttemptStoreRepository;
+import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.grader.service.PromptVersionState;
 import com.pair.domain.task.entity.DocumentPage;
 import com.pair.domain.task.repository.DocumentPageRepository;
@@ -60,7 +60,7 @@ class ScoringReferenceTest {
     @Autowired ReferenceDocs referenceDocs;
     @Autowired TaskDefRepository tasks;
     @Autowired TaskCatalog catalog;
-    @Autowired AttemptStoreRepository store;
+    @Autowired AttemptStateRepository store;
     @Autowired TaskRepository taskRecords;
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
