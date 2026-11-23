@@ -87,6 +87,16 @@ class TaskConsoleIntegrationTest {
     }
 
     @Test
+    @DisplayName("과제 목록·상세에 competencies 가 있고, 손으로 만든 과제는 빈 배열이다")
+    void competenciesField() throws Exception {
+        mvc.perform(admin(get("/api/console/tasks"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].competencies").isArray())
+                .andExpect(jsonPath("$[0].competencies").isEmpty());
+        mvc.perform(admin(get("/api/console/tasks/pricing-plan-live")))
+                .andExpect(jsonPath("$.summary.competencies").isArray());
+    }
+
+    @Test
     @DisplayName("공개·숨김·상세는 관리자만, 없는 과제는 404")
     void adminOnly() throws Exception {
         mvc.perform(manager(post("/api/console/tasks/order-deadlock/publish"))).andExpect(status().isForbidden());

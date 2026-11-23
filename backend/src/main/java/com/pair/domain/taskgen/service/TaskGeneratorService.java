@@ -50,6 +50,9 @@ public abstract class TaskGeneratorService<D> {
         return java.util.Map.of();
     }
 
+    /** Draft 에서 모델이 정한 역량(검증 전 값) */
+    protected abstract List<String> draftCompetencies(D draft);
+
     /** 한 트랜잭션으로 저장하고 과제 code 를 돌려준다 */
     protected abstract String save(TaskGenRequest form, D draft, GenReport report, long adminId);
 
@@ -88,7 +91,10 @@ public abstract class TaskGeneratorService<D> {
         boolean passed = results.stream().allMatch(GenCheckResultDto::ok);
         onStep.accept(STEP_SAVING);
         long seconds = Math.round((System.nanoTime() - started) / 1e9);
-        String code = save(form, draft, new GenReport(model, attempts, seconds, in, out, passed, form, results, retryError, details(draft)), adminId);
+        // 요청에 역량이 있으면 그대로, 비어 있으면 모델이 정한 값(검증해서 잘못된 key 는 버림)을 쓴다. 보고서 form 에도 이 값이 남는다
+        TaskGenRequest saved = form.competencies() != null && !form.competencies().isEmpty() ? form
+                : form.withCompetencies(TaskGenRequest.pickCompetencies(draftCompetencies(draft)));
+        String code = save(saved, draft, new GenReport(model, attempts, seconds, in, out, passed, saved, results, retryError, details(draft)), adminId);
         return new Outcome(code, passed, attempts, results);
     }
 

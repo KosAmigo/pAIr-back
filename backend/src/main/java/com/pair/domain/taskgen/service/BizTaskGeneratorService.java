@@ -57,7 +57,7 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
 
     @Override
     protected String system(TaskGenRequest form) {
-        return SYSTEM.formatted(form.minutes(), depth(form.minutes()));
+        return SYSTEM.formatted(form.minutes(), depth(form.minutes())) + TaskGenRequest.COMPETENCY_PROMPT;
     }
 
     @Override
@@ -90,6 +90,11 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
         m.put("solverModel", props.solverModel());
         if (draft.trap() != null) m.put("trap", draft.trap());
         return m;
+    }
+
+    @Override
+    protected List<String> draftCompetencies(BizDraftDto draft) {
+        return draft.competencies();
     }
 
     @Override

@@ -29,11 +29,12 @@ public class TaskConsoleService {
     /**
      * id: 과제 code. type: dev | biz (응시 화면 TaskDefDto.type 과 같은 값).
      * track: DEV/BIZ. generated: AI 가 만든 과제(_gen/report.json 있음). checksOk: 그 확인 검사가 모두 통과했는지(report 가 없으면 null).
+     * competencies: 이 과제가 특히 보는 역량 key(settings.competencies, 없으면 빈 목록).
      * usage: SELF 자가진단 / LIVE 기업 실전(회차에 거는 과제). parentId: 실전 복사본이면 원본 code
      */
     public record TaskSummary(String id, String type, String title, int minutes, Task.Usage usage, String parentId,
             Task.Status status, Instant publishedAt, Instant updatedAt, String track, String difficulty, String category,
-            String summary, Instant createdAt, boolean generated, Boolean checksOk) {}
+            String summary, Instant createdAt, boolean generated, Boolean checksOk, List<String> competencies) {}
 
     private final TaskRepository records;
     private final TaskCatalogService catalog;
@@ -56,7 +57,7 @@ public class TaskConsoleService {
         var codes = catalog.codes(all.stream().map(Task::getParentTaskId).filter(java.util.Objects::nonNull).toList());
         Map<Long, Boolean> reports = new HashMap<>(); // 과제 id → checksOk. 키가 있으면 AI 생성 과제(값은 null 일 수 있음)
         for (TaskFile f : files.findByPath(GeneratedTaskRepository.REPORT_PATH)) reports.put(f.getTaskId(), checksOk(f.getContent()));
-        return all.stream().map(t -> summary(t, t.getParentTaskId() == null ? null : codes.get(t.getParentTaskId()), reports)).toList();
+        return all.stream().map(t -> summary(t, t.getParentTaskId() == null ? null : codes.get(t.getParentTaskId()), reports, competenciesOf(t))).toList();
     }
 
     /** 검수 전(HIDDEN)인 원본 과제만 용도를 바꿀 수 있다. 공개 뒤에는 응시 기록이 용도에 묶인다 */
@@ -113,12 +114,25 @@ public class TaskConsoleService {
         String parent = t.getParentTaskId() == null ? null : catalog.require(t.getParentTaskId()).getCode();
         Map<Long, Boolean> reports = new HashMap<>();
         files.findByTaskIdAndPath(t.getId(), GeneratedTaskRepository.REPORT_PATH).ifPresent(f -> reports.put(t.getId(), checksOk(f.getContent())));
-        return summary(t, parent, reports);
+        return summary(t, parent, reports, competenciesOf(t));
     }
 
-    private static TaskSummary summary(Task t, String parentCode, Map<Long, Boolean> reports) {
+    private List<String> competenciesOf(Task t) {
+        if (t.getSettings() == null) return List.of();
+        try {
+            JsonNode arr = json.readTree(t.getSettings()).get("competencies");
+            if (arr == null || !arr.isArray()) return List.of();
+            List<String> out = new java.util.ArrayList<>();
+            for (JsonNode n : arr) if (n.isTextual()) out.add(n.asText());
+            return out;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private static TaskSummary summary(Task t, String parentCode, Map<Long, Boolean> reports, List<String> competencies) {
         return new TaskSummary(t.getCode(), t.getTrack().toLowerCase(), t.getTitle(), t.getTimeLimitMin(), t.getUsage(), parentCode,
                 t.getStatus(), t.getPublishedAt(), t.getUpdatedAt(), t.getTrack(), t.getDifficulty(), t.getCategory(), t.getSummary(),
-                t.getCreatedAt(), reports.containsKey(t.getId()), reports.get(t.getId()));
+                t.getCreatedAt(), reports.containsKey(t.getId()), reports.get(t.getId()), competencies);
     }
 }

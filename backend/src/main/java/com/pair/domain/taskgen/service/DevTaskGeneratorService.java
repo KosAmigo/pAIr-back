@@ -51,7 +51,7 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
 
     @Override
     protected String system(TaskGenRequest form) {
-        return SYSTEM.formatted(form.minutes(), depth(form.minutes()));
+        return SYSTEM.formatted(form.minutes(), depth(form.minutes())) + TaskGenRequest.COMPETENCY_PROMPT;
     }
 
     @Override
@@ -76,6 +76,11 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
     @Override
     protected List<GenCheckService<DevDraftDto>> checks(TaskGenRequest form, DevDraftDto draft) {
         return DevCheckService.forDraft(runner, draft);
+    }
+
+    @Override
+    protected List<String> draftCompetencies(DevDraftDto draft) {
+        return draft.competencies();
     }
 
     @Override

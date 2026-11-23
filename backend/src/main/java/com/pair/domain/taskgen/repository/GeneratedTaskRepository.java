@@ -119,7 +119,7 @@ public class GeneratedTaskRepository {
         Task t = new Task(id, code, cut(d.title(), 200), "DEV", form.minutes(), form.usageValue(),
                 Task.Status.HIDDEN, null, adminId, now);
         t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), difficultyOf(d.difficulty()));
-        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), settings(d, form.minutes()));
+        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), settings(d, form));
         records.save(t);
 
         List<TaskFile> rows = new ArrayList<>();
@@ -165,7 +165,7 @@ public class GeneratedTaskRepository {
         Task t = new Task(id, code, cut(d.title(), 200), "BIZ", form.minutes(), form.usageValue(),
                 Task.Status.HIDDEN, null, adminId, now);
         t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), difficultyOf(d.difficulty()));
-        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings(form.minutes()));
+        t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings(form));
         records.save(t);
 
         Map<String, Long> fileIds = new LinkedHashMap<>();
@@ -219,12 +219,13 @@ public class GeneratedTaskRepository {
         return code;
     }
 
-    private String bizSettings(int minutes) {
+    private String bizSettings(TaskGenRequest form) {
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("openFile", "기획안.md");
         s.put("editableFile", "기획안.md");
         s.put("requiredHeadings", BIZ_HEADINGS);
-        s.put("d4Minutes", d4Minutes(minutes));
+        s.put("d4Minutes", d4Minutes(form.minutes()));
+        s.put("competencies", form.competencies() == null ? List.of() : form.competencies());
         return toJson(s);
     }
 
@@ -256,13 +257,14 @@ public class GeneratedTaskRepository {
         return v.length() > 40 ? v.substring(0, 40).replaceAll("-+$", "") : v;
     }
 
-    private String settings(DevDraftDto d, int minutes) {
+    private String settings(DevDraftDto d, TaskGenRequest form) {
         String open = d.files().stream().map(DevDraftDto.FileDraft::path).filter(p -> p.startsWith("src/")).findFirst().orElse(null);
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("openFile", open);
         s.put("editableFile", null);
         s.put("requiredHeadings", List.of());
-        s.put("d4Minutes", d4Minutes(minutes));
+        s.put("d4Minutes", d4Minutes(form.minutes()));
+        s.put("competencies", form.competencies() == null ? List.of() : form.competencies());
         return toJson(s);
     }
 

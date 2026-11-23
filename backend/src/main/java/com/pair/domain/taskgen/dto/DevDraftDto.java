@@ -17,13 +17,21 @@ public record DevDraftDto(
         List<FileDraft> files,
         List<FileDraft> hiddenTests,
         List<FileDraft> solution,
-        String difficulty) {
+        String difficulty,
+        List<String> competencies) {
+
+    /** 역량 없이 만든다(테스트·옛 코드용) */
+    public DevDraftDto(String title, String summary, String code, String category, List<String> description,
+            List<String> requirements, String answer, List<FileDraft> files, List<FileDraft> hiddenTests,
+            List<FileDraft> solution, String difficulty) {
+        this(title, summary, code, category, description, requirements, answer, files, hiddenTests, solution, difficulty, null);
+    }
 
     /** 난이도 없이 만든다(테스트·옛 코드용) */
     public DevDraftDto(String title, String summary, String code, String category, List<String> description,
             List<String> requirements, String answer, List<FileDraft> files, List<FileDraft> hiddenTests,
             List<FileDraft> solution) {
-        this(title, summary, code, category, description, requirements, answer, files, hiddenTests, solution, null);
+        this(title, summary, code, category, description, requirements, answer, files, hiddenTests, solution, null, null);
     }
 
     public record FileDraft(String path, String content) {}
