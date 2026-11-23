@@ -16,6 +16,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pair.domain.attempt.dto.AttemptDtos.CheckpointLabelRequest;
+import com.pair.domain.attempt.dto.AttemptDtos.StartRequest;
+import com.pair.domain.attempt.dto.AttemptDtos.SaveRequest;
+import com.pair.domain.attempt.dto.AttemptDtos.ChatRequest;
+import com.pair.domain.attempt.dto.AttemptDtos.FollowUpRequest;
+import com.pair.domain.attempt.dto.AttemptDtos.TurnView;
+import com.pair.domain.attempt.dto.AttemptDtos.EditRequest;
+import com.pair.domain.attempt.dto.AttemptDtos.DiagnosticsRequest;
+import com.pair.domain.attempt.dto.AttemptDtos.CursorRequest;
 import com.pair.domain.attempt.service.Attempt;
 import com.pair.domain.attempt.entity.AttemptRecord;
 import com.pair.domain.attempt.repository.AttemptRecordRepository;
@@ -34,7 +43,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 @RestController
 @RequestMapping("/api")
-public class ApiController {
+public class AttemptController {
 
     private final TaskRepository tasks;
     private final AttemptService attempts;
@@ -42,14 +51,14 @@ public class ApiController {
     private final com.pair.global.config.PairProperties props;
     private final AttemptRecordRepository records;
     private final TaskCatalog catalog;
+    private final com.pair.domain.question.service.QuestionService questions;
     private final com.pair.domain.attempt.service.CheckpointService checkpoints;
     private final com.pair.domain.attempt.service.RollbackService rollbacks;
     private final com.pair.domain.attempt.service.ReplayTreeService replayTree;
-    private final com.pair.domain.question.service.QuestionService questions;
     private final com.pair.domain.attempt.service.ReplayCompareService replayCompare;
     private final ChatAttachmentService chatAttachments;
 
-    public ApiController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.global.config.PairProperties props,
+    public AttemptController(TaskRepository tasks, AttemptService attempts, AttemptStore store, com.pair.global.config.PairProperties props,
             AttemptRecordRepository records, TaskCatalog catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
             com.pair.domain.attempt.service.RollbackService rollbacks, com.pair.domain.attempt.service.ReplayTreeService replayTree,
             com.pair.domain.question.service.QuestionService questions, com.pair.domain.attempt.service.ReplayCompareService replayCompare,
@@ -60,38 +69,12 @@ public class ApiController {
         this.props = props;
         this.records = records;
         this.catalog = catalog;
+        this.questions = questions;
         this.checkpoints = checkpoints;
         this.rollbacks = rollbacks;
         this.replayTree = replayTree;
-        this.questions = questions;
         this.replayCompare = replayCompare;
         this.chatAttachments = chatAttachments;
-    }
-
-    public record CheckpointLabelRequest(String label) {}
-
-    public record StartRequest(String taskId) {}
-
-    public record SaveRequest(String content) {}
-
-    public record ChatRequest(String message, List<ChatAttachmentService.Ref> attachments) {}
-
-    public record FollowUpRequest(List<String> answers) {}
-
-    public record TurnView(int turn, String role, String time, String text, List<AttemptService.EditView> edits,
-            List<ChatAttachmentService.View> attachments) {}
-
-    public record EditRequest(int turn, int index, String action) {}
-
-    /** 자가진단 과제 목록 (응시자용). track=dev|biz 로 직군을 거를 수 있다 */
-    @GetMapping("/tasks")
-    public List<TaskCatalog.Summary> taskList(@RequestParam(required = false) String track) {
-        return catalog.selfTasks(track);
-    }
-
-    @GetMapping("/tasks/{taskId}")
-    public TaskDef task(@PathVariable String taskId) {
-        return catalog.publicSelfDefinition(taskId);
     }
 
     @PostMapping("/attempts")
@@ -193,11 +176,6 @@ public class ApiController {
     public Map<String, List<CodeRunner.CompileDiagnostic>> diagnostics(@PathVariable String id, @RequestBody DiagnosticsRequest req) {
         return Map.of("diagnostics", attempts.diagnostics(id, req.files()));
     }
-
-    public record DiagnosticsRequest(Map<String, String> files) {}
-
-    /** 커서 앞 "식." 의 멤버 자동 완성. offset 은 path 파일 안의 글자 위치(0부터). */
-    public record CursorRequest(Map<String, String> files, String path, int offset) {}
 
     @PostMapping("/attempts/{id}/complete")
     public Map<String, List<JavaDiagnostics.Completion>> complete(@PathVariable String id, @RequestBody CursorRequest req) {
@@ -360,21 +338,6 @@ public class ApiController {
             if (list != null && t instanceof com.fasterxml.jackson.databind.node.ObjectNode o) o.set("attachments", mapper.valueToTree(list));
         }
         return copy;
-    }
-
-    /** 풀이 화면의 문항(객관식·단답형)과 저장한 답. 정답 정보는 내보내지 않는다 */
-    @GetMapping("/attempts/{id}/questions")
-    public List<com.pair.domain.question.service.QuestionService.QuestionView> questions(@PathVariable String id) {
-        return questions.list(Long.parseLong(id));
-    }
-
-    /** 문항 답 저장(덮어쓰기). 빈 답은 답 지우기. 풀이 중에만 */
-    @PutMapping("/attempts/{id}/questions/{questionId}/answer")
-    public org.springframework.http.ResponseEntity<String> answer(@PathVariable String id, @PathVariable Long questionId,
-            @RequestBody com.pair.domain.question.service.QuestionService.AnswerRequest req) throws com.fasterxml.jackson.core.JsonProcessingException {
-        // 답 지우기(빈 답)는 JSON null 을 돌려준다
-        String body = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(questions.answer(Long.parseLong(id), questionId, req));
-        return org.springframework.http.ResponseEntity.ok().contentType(org.springframework.http.MediaType.APPLICATION_JSON).body(body);
     }
 
     private static TurnView view(Attempt a, ChatTurn t, List<AttemptService.EditView> edits,
