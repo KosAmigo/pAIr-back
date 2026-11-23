@@ -77,4 +77,21 @@ public interface ProctorEventRepository extends JpaRepository<ProctorEvent, Long
             order by e.id
             """)
     List<ProctorEvent> findExpiredSnapshots(@Param("endedBefore") Instant endedBefore, Pageable page);
+
+    /** 기본 보관 기간이 지난 회차 중 아직 지우지 않은 사진이 남은 회차 (연장 여부는 서비스가 가른다) */
+    @Query("""
+            select distinct p.session.id from ProctorEvent e, ExamParticipant p
+            where p.id = e.participantId and p.session.endsAt < :endedBefore
+              and e.snapshotKey is not null and e.snapshotDeletedAt is null
+            """)
+    List<Long> findSessionIdsWithLiveSnapshots(@Param("endedBefore") Instant endedBefore);
+
+    /** 한 회차의 아직 지우지 않은 사진 */
+    @Query("""
+            select e from ProctorEvent e, ExamParticipant p
+            where p.id = e.participantId and p.session.id = :sessionId
+              and e.snapshotKey is not null and e.snapshotDeletedAt is null
+            order by e.id
+            """)
+    List<ProctorEvent> findLiveSnapshotsOfSession(@Param("sessionId") Long sessionId, Pageable page);
 }

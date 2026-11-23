@@ -64,10 +64,13 @@ public class ExamConsoleController {
     private final com.pair.exam.service.NoticeService notices;
     private final ConnectionGrace grace;
     private final ConsoleAccess access;
+    private final com.pair.exam.service.SnapshotRetentionService retention;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
             AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGrace grace, ConsoleAccess access,
-            com.pair.exam.service.EnvCheckService envCheck, com.pair.exam.service.NoticeService notices) {
+            com.pair.exam.service.EnvCheckService envCheck, com.pair.exam.service.NoticeService notices,
+            com.pair.exam.service.SnapshotRetentionService retention) {
+        this.retention = retention;
         this.envCheck = envCheck;
         this.notices = notices;
         this.sessions = sessions;
@@ -201,6 +204,20 @@ public class ExamConsoleController {
     public ResponseEntity<byte[]> snapshot(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId) {
         access.requireSession(user, sessionId);
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(proctor.snapshot(sessionId, eventId));
+    }
+
+    /** 감독 사진 보관 현황 (삭제 예정 시각, 연장 가능 여부, 연장 이력). 감독관도 볼 수 있다 */
+    @GetMapping("/{sessionId}/retention")
+    public ExamDtos.RetentionView retention(CurrentUser user, @PathVariable Long sessionId) {
+        access.requireSession(user, sessionId);
+        return retention.view(sessionId);
+    }
+
+    /** 감독 사진 보관 연장: 삭제 예정 2일 전부터 7일씩 최대 2번. 감독관·매니저 모두 가능, 누가 했는지 이력에 남는다 */
+    @PostMapping("/{sessionId}/retention/extend")
+    public ExamDtos.RetentionView extendRetention(CurrentUser user, @PathVariable Long sessionId) {
+        access.requireSession(user, sessionId);
+        return retention.extend(sessionId, user.userId());
     }
 
     /** 종료된 회차에서 채점으로 넘어가지 못한 응시를 다시 넘긴다 (자동 제출이 포기한 건 복구) */

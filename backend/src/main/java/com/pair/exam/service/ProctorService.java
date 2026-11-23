@@ -50,10 +50,18 @@ public class ProctorService {
     private final Clock clock;
     private final com.pair.attempt.AttemptRecordRepository attempts;
     private final TransactionTemplate tx;
+    private final com.pair.exam.repository.ExamSessionRepository sessions;
+    private final com.pair.exam.repository.SnapshotRetentionExtensionRepository extensions;
+    private final SnapshotRetentionService retention;
 
     public ProctorService(ExamParticipantRepository participants, ProctorEventRepository events, SnapshotValidator snapshots,
             SnapshotStorage storage, ObjectMapper json, ExamProperties props, Clock clock,
-            com.pair.attempt.AttemptRecordRepository attempts, PlatformTransactionManager txManager) {
+            com.pair.attempt.AttemptRecordRepository attempts, PlatformTransactionManager txManager,
+            com.pair.exam.repository.ExamSessionRepository sessions,
+            com.pair.exam.repository.SnapshotRetentionExtensionRepository extensions, SnapshotRetentionService retention) {
+        this.sessions = sessions;
+        this.extensions = extensions;
+        this.retention = retention;
         this.attempts = attempts;
         this.tx = new TransactionTemplate(txManager);
         this.participants = participants;
@@ -189,22 +197,30 @@ public class ProctorService {
         return storage.get(e.getSnapshotKey()).orElseThrow(() -> new NoSuchElementException("사진 파일이 없습니다."));
     }
 
-    /** 회차 종료 뒤 보관 기간(기본 30일)이 지난 사진 파일을 지우고 기록만 남긴다. @return 지운 장수 */
+    /** 회차 종료 뒤 보관 기간(기본 7일, 연장 반영)이 지난 사진 파일을 지우고 기록만 남긴다. @return 지운 장수 */
     @Transactional
     public int purgeExpiredSnapshots() {
         Instant now = clock.instant();
-        Instant before = now.minus(Duration.ofDays(props.snapshotRetentionDays()));
+        Instant baseBefore = now.minus(Duration.ofDays(props.snapshotRetentionDays()));
+        List<Long> endedSessions = events.findSessionIdsWithLiveSnapshots(baseBefore);
+        if (endedSessions.isEmpty()) return 0;
+        java.util.Map<Long, Long> extended = new java.util.HashMap<>();
+        extensions.countBySessionIds(endedSessions).forEach(c -> extended.put(c.getSessionId(), c.getCount()));
         int total = 0;
-        List<ProctorEvent> batch;
-        do {
-            batch = events.findExpiredSnapshots(before, PageRequest.of(0, PURGE_BATCH));
-            for (ProctorEvent e : batch) {
-                storage.delete(e.getSnapshotKey());
-                e.markSnapshotDeleted(now);
-            }
-            events.flush();
-            total += batch.size();
-        } while (batch.size() == PURGE_BATCH);
+        for (Long sessionId : endedSessions) {
+            Instant endsAt = sessions.findById(sessionId).map(ExamSession::getEndsAt).orElse(null);
+            if (endsAt == null || retention.expiryOf(endsAt, extended.getOrDefault(sessionId, 0L)).isAfter(now)) continue;
+            List<ProctorEvent> batch;
+            do {
+                batch = events.findLiveSnapshotsOfSession(sessionId, PageRequest.of(0, PURGE_BATCH));
+                for (ProctorEvent e : batch) {
+                    storage.delete(e.getSnapshotKey());
+                    e.markSnapshotDeleted(now);
+                }
+                events.flush();
+                total += batch.size();
+            } while (batch.size() == PURGE_BATCH);
+        }
         return total;
     }
 

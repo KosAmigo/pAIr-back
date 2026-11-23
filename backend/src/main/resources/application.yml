@@ -119,7 +119,7 @@ pair:
       access-key: ${AWS_ACCESS_KEY_ID:}
       secret-key: ${AWS_SECRET_ACCESS_KEY:}
     # 감독 사진 보관 기간: 회차 종료 뒤 며칠. 지나면 파일을 지우고 snapshot_deleted_at 을 남긴다
-    snapshot-retention-days: 30
+    snapshot-retention-days: 7
     # 사진 1장 최대 크기 (cam-proctor 는 320px JPEG 로 보통 10~20KB)
     snapshot-max-bytes: 200000
     # CSV 한 번에 올릴 수 있는 대상자 수

@@ -713,7 +713,7 @@ class ExamFlowIntegrationTest {
     // ── 감독 이벤트·사진 ──
 
     @Test
-    @DisplayName("카메라 이벤트와 사진 1장을 저장하고, 회차 종료 30일이 지나면 사진만 지운다")
+    @DisplayName("카메라 이벤트와 사진 1장을 저장하고, 회차 종료 7일이 지나면 사진만 지운다")
     void proctorEventAndPurge() {
         SessionSummary s = createSession(110L, true);
         String token = startWithConsent(s, "cam@test.dev");
@@ -726,15 +726,75 @@ class ExamFlowIntegrationTest {
         assertThat(view.snapshot()).isEqualTo("ok");
         assertThat(proctor.snapshot(s.id(), view.id())).isEqualTo(JPEG);
 
-        clock.set(s.endsAt().plus(Duration.ofDays(29)));
-        assertThat(proctor.purgeExpiredSnapshots()).isZero(); // 아직 30일 전
-        clock.set(s.endsAt().plus(Duration.ofDays(30)).plusSeconds(1));
+        clock.set(s.endsAt().plus(Duration.ofDays(6)));
+        assertThat(proctor.purgeExpiredSnapshots()).isZero(); // 아직 7일 전
+        clock.set(s.endsAt().plus(Duration.ofDays(7)).plusSeconds(1));
         assertThat(proctor.purgeExpiredSnapshots()).isEqualTo(1);
         assertThatThrownBy(() -> proctor.snapshot(s.id(), view.id())).hasMessageContaining("삭제된 사진");
 
         Long pid = participant(s.id(), "cam@test.dev").getId();
         assertThat(proctor.eventsOf(s.id(), pid)).extracting(e -> e.type() + "/" + e.snapshot())
                 .containsExactly("NO_FACE/deleted", "TAB_HIDDEN/null");
+    }
+
+    // ── 보관 연장 (삭제 2일 전부터, 7일씩 최대 2번, 이력) ──
+
+    @Autowired com.pair.exam.service.SnapshotRetentionService retention;
+
+    private Long sessionWithPhoto() {
+        SessionSummary s = createSession(140L, true);
+        String token = startWithConsent(s, "ext@test.dev");
+        proctor.record(token, camEvent(s.startsAt().plusSeconds(30), jpegB64()));
+        return s.id();
+    }
+
+    @Test
+    @DisplayName("보관 연장: 삭제 예정 2일 전부터 7일씩 최대 2번, 이력을 남기고 삭제 배치가 연장을 따른다")
+    void retentionExtension() {
+        Long sid = sessionWithPhoto();
+        Instant end = sessions.detail(sid).session().endsAt();
+
+        clock.set(end.plus(Duration.ofDays(4)));
+        var early = retention.view(sid);
+        assertThat(early.expiresAt()).isEqualTo(end.plus(Duration.ofDays(7)));
+        assertThat(early.canExtend()).isFalse();
+        assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("2일");
+
+        clock.set(end.plus(Duration.ofDays(5)));
+        var first = retention.extend(sid, 9L);
+        assertThat(first.expiresAt()).isEqualTo(end.plus(Duration.ofDays(14)));
+        assertThat(first.extensionsUsed()).isEqualTo(1);
+        assertThat(first.canExtend()).isFalse(); // 새 삭제 예정(14일)의 2일 전이 아직 아니다
+
+        clock.set(end.plus(Duration.ofDays(8)));
+        proctor.purgeExpiredSnapshots();
+        assertThat(photoState(sid)).isEqualTo("ok"); // 연장돼서 안 지운다
+
+        clock.set(end.plus(Duration.ofDays(12)));
+        var second = retention.extend(sid, 10L);
+        assertThat(second.expiresAt()).isEqualTo(end.plus(Duration.ofDays(21)));
+        assertThat(second.history()).extracting(h -> h.extendedBy()).containsExactly(9L, 10L);
+
+        clock.set(end.plus(Duration.ofDays(19)));
+        assertThat(retention.view(sid).canExtend()).isFalse();
+        assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("최대");
+
+        clock.set(end.plus(Duration.ofDays(21)).plusSeconds(1));
+        proctor.purgeExpiredSnapshots();
+        assertThat(photoState(sid)).isEqualTo("deleted");
+    }
+
+    private String photoState(Long sessionId) {
+        return proctor.eventsOfSession(sessionId).get(0).snapshot();
+    }
+
+    @Test
+    @DisplayName("이미 삭제 예정 시각이 지났으면 연장할 수 없다")
+    void retentionCannotExtendAfterExpiry() {
+        Long sid = sessionWithPhoto();
+        Instant end = sessions.detail(sid).session().endsAt();
+        clock.set(end.plus(Duration.ofDays(7)).plusSeconds(1));
+        assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("삭제");
     }
 
     // ── 환경 점검 사진 (방 360도·책상 위) ──
@@ -788,7 +848,7 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
-    @DisplayName("환경 점검 사진: 다른 회차 번호로는 볼 수 없고, 회차 종료 30일 뒤 사진만 지운다")
+    @DisplayName("환경 점검 사진: 다른 회차 번호로는 볼 수 없고, 회차 종료 7일 뒤 사진만 지운다")
     void envScanScopeAndPurge() {
         SessionSummary s = createSession(130L, true);
         SessionSummary other = createSession(131L, true);
@@ -800,9 +860,9 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> envScan.image(other.id(), photo.id())).isInstanceOf(java.util.NoSuchElementException.class);
         assertThatThrownBy(() -> envScan.photosOf(other.id(), pid)).isInstanceOf(java.util.NoSuchElementException.class);
 
-        clock.set(s.endsAt().plus(Duration.ofDays(29)));
+        clock.set(s.endsAt().plus(Duration.ofDays(6)));
         assertThat(envScan.purgeExpired()).isZero();
-        clock.set(s.endsAt().plus(Duration.ofDays(30)).plusSeconds(1));
+        clock.set(s.endsAt().plus(Duration.ofDays(7)).plusSeconds(1));
         assertThat(envScan.purgeExpired()).isEqualTo(1);
         assertThatThrownBy(() -> envScan.image(s.id(), photo.id())).hasMessageContaining("삭제된 사진");
         assertThat(envScan.photosOf(s.id(), pid)).singleElement().extracting(v -> v.deleted()).isEqualTo(true);
