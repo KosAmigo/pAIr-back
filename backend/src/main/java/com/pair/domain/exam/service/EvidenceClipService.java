@@ -81,12 +81,12 @@ public class EvidenceClipService {
         if (now.isAfter(s.getEndsAt().plus(LATE_GRACE))) throw new IllegalStateException("끝난 시험의 증거 사진은 받지 않습니다.");
         ProctorEvent event = events.findByParticipantIdAndClientId(p.getId(), clientId)
                 .orElseThrow(() -> new NoSuchElementException("없는 이벤트입니다."));
-        if (event.getSource() == ProctorEvent.Source.BROWSER) throw new IllegalArgumentException("카메라 이벤트에만 증거 사진을 붙입니다.");
+        if (!event.getSource().isCamera()) throw new IllegalArgumentException("카메라 이벤트에만 증거 사진을 붙입니다.");
 
         List<ClipFrameRequest> list = req.frames();
         if (list.size() > MAX_FRAMES_PER_EVENT) throw new IllegalArgumentException("증거 사진은 이벤트마다 최대 " + MAX_FRAMES_PER_EVENT + "장입니다.");
         for (ClipFrameRequest f : list) {
-            if (f.source() == ProctorEvent.Source.BROWSER) throw new IllegalArgumentException("증거 사진은 카메라(PC 웹캠·휴대폰)에서만 받습니다.");
+            if (!f.source().isCamera()) throw new IllegalArgumentException("증거 사진은 카메라(PC 웹캠·휴대폰)에서만 받습니다.");
             if (f.offsetMs() < MIN_OFFSET_MS || f.offsetMs() > MAX_OFFSET_MS) throw new IllegalArgumentException("증거 구간(이벤트 앞 8초~뒤 4초) 밖의 시각입니다.");
         }
 

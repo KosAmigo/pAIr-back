@@ -128,8 +128,8 @@ public class ProctorService {
         if (!attempts.existsByParticipantId(p.getId())) throw new IllegalStateException("시작하지 않은 시험입니다.");
 
         byte[] jpeg = req.snapshot() == null || req.snapshot().isBlank() ? null : snapshots.decode(req.snapshot());
-        if (jpeg != null && req.type().source() == ProctorEvent.Source.BROWSER) {
-            throw new IllegalArgumentException("브라우저 이벤트에는 사진을 붙이지 않습니다.");
+        if (jpeg != null && !req.type().source().isCamera()) {
+            throw new IllegalArgumentException("브라우저 이벤트와 화면 공유 이벤트에는 사진을 붙이지 않습니다.");
         }
 
         if (req.clientId() != null) {

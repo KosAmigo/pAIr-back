@@ -201,4 +201,193 @@ class ProctorRelayIntegrationTest {
         phone.session.close();
         assertThat(nextJson(pc).get("phone").asText()).isEqualTo("disconnected");
     }
+
+    // ── 감독관 실시간 보기 (시그널링만 중계, 영상은 서버를 지나지 않는다) ──
+
+    @MockitoBean com.pair.domain.exam.service.ViewerAccessService viewerAccess;
+
+    /** 이 테스트의 응시자(대상자) 번호. 짝은 서버 메모리에 남으므로 테스트마다 다르게 한다 */
+    private long participantId() {
+        return 1000L + SEQ.get();
+    }
+
+    private Client connectPc(long sessionId, long participantId) throws Exception {
+        when(authorizer.authorize(TOKEN)).thenReturn(true);
+        when(authorizer.identify(TOKEN)).thenReturn(java.util.Optional.of(new com.pair.domain.exam.dto.RelayIdentityDto(sessionId, participantId)));
+        Client pc = connect();
+        pc.session.sendMessage(new TextMessage("{\"type\":\"hello-pc\",\"invite\":\"" + TOKEN + "\"}"));
+        assertThat(nextJson(pc).get("type").asText()).isEqualTo("paired");
+        assertThat(nextJson(pc).get("type").asText()).isEqualTo("peer");
+        return pc;
+    }
+
+    /**
+     * 감독관이 이미 열려 있는 짝에 PC 가 (다시) 붙는 경우. paired 다음에 peer 와 viewer-request 3개가 오는데,
+     * peer 는 전송 스레드로, viewer-request 는 바로 나가므로 서로의 순서는 보장되지 않는다. 프런트도 순서에 기대지 않는다.
+     */
+    private Client connectPcWithViewers(long sessionId, long participantId) throws Exception {
+        when(authorizer.authorize(TOKEN)).thenReturn(true);
+        when(authorizer.identify(TOKEN)).thenReturn(java.util.Optional.of(new com.pair.domain.exam.dto.RelayIdentityDto(sessionId, participantId)));
+        Client pc = connect();
+        pc.session.sendMessage(new TextMessage("{\"type\":\"hello-pc\",\"invite\":\"" + TOKEN + "\"}"));
+        assertThat(nextJson(pc).get("type").asText()).isEqualTo("paired");
+        java.util.List<String> types = new java.util.ArrayList<>();
+        java.util.Set<String> channels = new java.util.TreeSet<>();
+        for (int i = 0; i < 4; i++) {
+            JsonNode m = nextJson(pc);
+            types.add(m.get("type").asText());
+            if ("viewer-request".equals(m.get("type").asText())) channels.add(m.get("channel").asText());
+        }
+        assertThat(types).containsExactlyInAnyOrder("peer", "viewer-request", "viewer-request", "viewer-request");
+        assertThat(channels).containsExactly("phone", "screen", "webcam");
+        return pc;
+    }
+
+    private Client openViewer(long sessionId, long participantId) throws Exception {
+        Client viewer = connect();
+        viewer.session.sendMessage(new TextMessage("{\"type\":\"watch\",\"sessionId\":" + sessionId + ",\"participantId\":" + participantId
+                + ",\"auth\":{\"Authorization\":\"Bearer test\"}}"));
+        return viewer;
+    }
+
+    private void allow(long sessionId, long participantId) {
+        when(viewerAccess.check(org.mockito.ArgumentMatchers.anyMap(), org.mockito.ArgumentMatchers.eq(sessionId),
+                org.mockito.ArgumentMatchers.eq(participantId))).thenReturn(com.pair.domain.exam.dto.ViewerAccessDto.allowed(5L));
+    }
+
+    /** 응시자 PC 가 받는 viewer-request 세 개(채널마다)를 읽고 viewer 번호를 돌려준다 */
+    private String readViewerRequests(Client pc) throws Exception {
+        String viewer = null;
+        java.util.Set<String> channels = new java.util.TreeSet<>();
+        for (int i = 0; i < 3; i++) {
+            JsonNode m = nextJson(pc);
+            assertThat(m.get("type").asText()).isEqualTo("viewer-request");
+            viewer = m.get("viewer").asText();
+            channels.add(m.get("channel").asText());
+        }
+        assertThat(channels).containsExactly("phone", "screen", "webcam");
+        return viewer;
+    }
+
+    @Test
+    @DisplayName("감독관이 열면 응시자 PC 에 채널마다 영상 요청이 가고, 시그널링은 서로에게만 전달되며, 닫으면 viewer-gone 이 간다")
+    void viewerFlow() throws Exception {
+        long sid = 7, pid = participantId();
+        allow(sid, pid);
+        Client pc = connectPc(sid, pid);
+        Client viewer = openViewer(sid, pid);
+
+        assertThat(nextJson(viewer).get("state").asText()).isEqualTo("watching");
+        String viewerId = readViewerRequests(pc);
+
+        pc.session.sendMessage(new TextMessage("{\"type\":\"view-rtc\",\"channel\":\"webcam\",\"viewer\":\"" + viewerId
+                + "\",\"signal\":{\"kind\":\"offer\",\"sdp\":\"v=0\"}}"));
+        JsonNode offer = nextJson(viewer);
+        assertThat(offer.get("type").asText()).isEqualTo("view-rtc");
+        assertThat(offer.get("channel").asText()).isEqualTo("webcam");
+        assertThat(offer.get("signal").get("kind").asText()).isEqualTo("offer");
+
+        viewer.session.sendMessage(new TextMessage("{\"type\":\"view-rtc\",\"channel\":\"webcam\",\"signal\":{\"kind\":\"answer\",\"sdp\":\"v=0\"}}"));
+        JsonNode answer = nextJson(pc);
+        assertThat(answer.get("viewer").asText()).isEqualTo(viewerId); // 서버가 감독관 번호를 붙인다
+        assertThat(answer.get("signal").get("kind").asText()).isEqualTo("answer");
+
+        viewer.session.close();
+        JsonNode gone = nextJson(pc);
+        assertThat(gone.get("type").asText()).isEqualTo("viewer-gone");
+        assertThat(gone.get("viewer").asText()).isEqualTo(viewerId);
+    }
+
+    @Test
+    @DisplayName("권한이 없으면 denied 를 받고 응시자 PC 에는 아무 요청도 가지 않는다")
+    void viewerDenied() throws Exception {
+        long sid = 8, pid = participantId();
+        when(viewerAccess.check(org.mockito.ArgumentMatchers.anyMap(), org.mockito.ArgumentMatchers.eq(sid), org.mockito.ArgumentMatchers.eq(pid)))
+                .thenReturn(com.pair.domain.exam.dto.ViewerAccessDto.denied());
+        Client pc = connectPc(sid, pid);
+        Client viewer = openViewer(sid, pid);
+
+        JsonNode state = nextJson(viewer);
+        assertThat(state.get("state").asText()).isEqualTo("denied");
+        assertThat(pc.got.poll(500, TimeUnit.MILLISECONDS)).isNull();
+    }
+
+    @Test
+    @DisplayName("한 응시자를 동시에 2명까지만 볼 수 있고, 세 번째 감독관은 full 을 받는다")
+    void viewerFull() throws Exception {
+        long sid = 9, pid = participantId();
+        allow(sid, pid);
+        connectPc(sid, pid);
+        Client first = openViewer(sid, pid);
+        Client second = openViewer(sid, pid);
+        Client third = openViewer(sid, pid);
+
+        assertThat(nextJson(first).get("state").asText()).isEqualTo("watching");
+        assertThat(nextJson(second).get("state").asText()).isEqualTo("watching");
+        assertThat(nextJson(third).get("state").asText()).isEqualTo("full");
+
+        first.session.close();
+        Thread.sleep(300); // 서버가 닫힘을 처리할 시간
+        Client fourth = openViewer(sid, pid);
+        assertThat(nextJson(fourth).get("state").asText()).isEqualTo("watching"); // 한 명이 나가면 다시 들어올 수 있다
+    }
+
+    @Test
+    @DisplayName("응시자 PC 가 끊기면 감독관은 offline 을 받고, PC 가 다시 붙으면 watching 과 영상 요청이 다시 온다")
+    void pcReconnect() throws Exception {
+        long sid = 10, pid = participantId();
+        allow(sid, pid);
+        Client pc = connectPc(sid, pid);
+        Client viewer = openViewer(sid, pid);
+        assertThat(nextJson(viewer).get("state").asText()).isEqualTo("watching");
+        readViewerRequests(pc);
+
+        pc.session.close();
+        assertThat(nextJson(viewer).get("state").asText()).isEqualTo("offline");
+
+        Client again = connectPcWithViewers(sid, pid);
+        assertThat(nextJson(viewer).get("state").asText()).isEqualTo("watching");
+    }
+
+    @Test
+    @DisplayName("방향에 맞지 않는 신호(감독관의 offer)와 모르는 채널은 전달하지 않는다")
+    void viewerSignalDirection() throws Exception {
+        long sid = 11, pid = participantId();
+        allow(sid, pid);
+        Client pc = connectPc(sid, pid);
+        Client viewer = openViewer(sid, pid);
+        nextJson(viewer);
+        readViewerRequests(pc);
+
+        viewer.session.sendMessage(new TextMessage("{\"type\":\"view-rtc\",\"channel\":\"webcam\",\"signal\":{\"kind\":\"offer\",\"sdp\":\"v=0\"}}"));
+        viewer.session.sendMessage(new TextMessage("{\"type\":\"view-rtc\",\"channel\":\"audio\",\"signal\":{\"kind\":\"request\"}}"));
+        viewer.session.sendMessage(new TextMessage("{\"type\":\"view-rtc\",\"channel\":\"screen\",\"signal\":{\"kind\":\"request\"}}"));
+
+        JsonNode next = nextJson(pc); // 위의 두 개는 버려지고 request 하나만 온다
+        assertThat(next.get("channel").asText()).isEqualTo("screen");
+        assertThat(next.get("signal").get("kind").asText()).isEqualTo("request");
+    }
+
+    @Test
+    @DisplayName("응시자 PC 가 모르는 viewer 번호로 보낸 신호는 아무에게도 가지 않는다")
+    void pcSignalToUnknownViewer() throws Exception {
+        long sid = 12, pid = participantId();
+        allow(sid, pid);
+        Client pc = connectPc(sid, pid);
+        Client viewer = openViewer(sid, pid);
+        nextJson(viewer);
+        readViewerRequests(pc);
+
+        pc.session.sendMessage(new TextMessage("{\"type\":\"view-rtc\",\"channel\":\"webcam\",\"viewer\":\"v999999\",\"signal\":{\"kind\":\"offer\",\"sdp\":\"v=0\"}}"));
+        assertThat(viewer.got.poll(500, TimeUnit.MILLISECONDS)).isNull();
+    }
+
+    @Test
+    @DisplayName("연습(사전 테스트) 짝은 감독관이 열 수 없다: 응시자 번호가 없어 offline")
+    void practicePairNotWatchable() throws Exception {
+        long sid = 13, pid = participantId();
+        allow(sid, pid);
+        Client viewer = openViewer(sid, pid);
+        assertThat(nextJson(viewer).get("state").asText()).isEqualTo("offline"); // 이 응시자의 PC 가 붙은 적이 없다
+    }
 }

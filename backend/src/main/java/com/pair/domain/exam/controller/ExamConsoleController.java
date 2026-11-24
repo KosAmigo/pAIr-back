@@ -1,6 +1,7 @@
 package com.pair.domain.exam.controller;
 
 import com.pair.domain.exam.dto.ClipResponse;
+import com.pair.domain.exam.dto.EnvCheckFailureResponse;
 import com.pair.domain.exam.dto.EnvCheckResponse;
 import com.pair.domain.exam.dto.NoticeRequest;
 import com.pair.domain.exam.dto.NoticeResponse;
@@ -269,6 +270,13 @@ public class ExamConsoleController {
         access.requireSession(user, sessionId);
         EnvCheckResponse view = envCheck.view(sessionId, participantId);
         return view == null ? ResponseEntity.noContent().build() : ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(view);
+    }
+
+    /** 환경 점검에 실패한 항목이 있는데도 입장한 응시자 모음 ("점검 미통과 입장자" 탭). 감독관도 볼 수 있다 */
+    @GetMapping("/{sessionId}/env-check-failures")
+    public List<EnvCheckFailureResponse> envCheckFailures(CurrentUser user, @PathVariable Long sessionId) {
+        access.requireSession(user, sessionId);
+        return envCheck.failuresOf(sessionId);
     }
 
     /** 응시자에게 안내 메시지 보내기 (시험 전·중). 감독관도 보낼 수 있다 */

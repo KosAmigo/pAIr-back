@@ -88,6 +88,8 @@ class JavaDiagnosticsTest {
     @Test
     void runsConcurrentlyWithoutMixingResults() throws Exception {
         String bad = "public class A {\n    int x = \"s\";\n}\n";
+        // 처음 호출은 javac 를 읽어 오느라 느리다. 예열하지 않으면 자리를 기다리는 요청이 2초 한도를 넘겨 거절될 수 있다
+        diagnostics.check(Map.of("src/A.java", "public class A {}\n"));
         var pool = java.util.concurrent.Executors.newFixedThreadPool(8);
         try {
             List<java.util.concurrent.Future<Integer>> fs = new java.util.ArrayList<>();
