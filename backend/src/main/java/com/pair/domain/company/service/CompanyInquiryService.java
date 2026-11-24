@@ -88,18 +88,17 @@ public class CompanyInquiryService {
         if (inquiry.getStatus() != CompanyInquiry.Status.PENDING) throw new IllegalStateException("이미 처리된 기업 문의입니다.");
         List<CompanyInquiryMember> roster = members.findByInquiryIdOrderById(inquiryId);
         validateRoster(roster.stream().map(m -> new InquiryMemberInputDto(m.getName(), m.getEmail(), m.getRole())).toList());
-        for (CompanyInquiryMember member : roster) {
-            if (accounts.existsByEmailIgnoreCase(member.getEmail())) {
-                throw new ConflictException("이미 가입된 이메일입니다. 명단을 수정한 뒤 다시 승인해 주세요: " + member.getEmail());
-            }
+        List<String> registered = accounts.findRegisteredEmails(
+                roster.stream().map(m -> normalizeEmail(m.getEmail())).toList());
+        if (!registered.isEmpty()) {
+            throw new ConflictException("이미 가입된 이메일입니다. 명단을 수정한 뒤 다시 승인해 주세요: " + registered.get(0));
         }
 
         Company company = companies.saveAndFlush(new Company(inquiry.getCompanyName(), inquiry.getBusinessNo(),
                 inquiry.getContactName(), Instant.now()));
         inquiry.approve(company.getId(), adminId, Instant.now());
-        for (CompanyInquiryMember member : roster) {
-            corporateAccounts.create(member.getEmail(), member.getName(), member.getRole(), company.getId());
-        }
+        corporateAccounts.createAll(roster.stream()
+                .map(m -> new InquiryMemberDto(m.getName(), m.getEmail(), m.getRole())).toList(), company.getId());
         return CompanyResponse.from(company);
     }
 
@@ -117,10 +116,10 @@ public class CompanyInquiryService {
         if (inquiry.getStatus() != CompanyInquiry.Status.PENDING) throw new IllegalStateException("처리 전 문의만 명단을 바꿀 수 있습니다.");
         List<InquiryMemberInputDto> roster = parseCsv(csv);
         validateRoster(roster);
-        for (InquiryMemberInputDto member : roster) {
-            if (accounts.existsByEmailIgnoreCase(normalizeEmail(member.email()))) {
-                throw new ConflictException("이미 가입된 이메일입니다. 명단을 수정해 주세요: " + member.email());
-            }
+        List<String> registered = accounts.findRegisteredEmails(
+                roster.stream().map(m -> normalizeEmail(m.email())).toList());
+        if (!registered.isEmpty()) {
+            throw new ConflictException("이미 가입된 이메일입니다. 명단을 수정해 주세요: " + registered.get(0));
         }
         members.deleteByInquiryId(inquiryId);
         members.saveAll(roster.stream().map(m -> new CompanyInquiryMember(inquiryId, m.name().trim(),

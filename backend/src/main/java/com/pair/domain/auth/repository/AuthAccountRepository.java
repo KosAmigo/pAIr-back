@@ -1,6 +1,7 @@
 package com.pair.domain.auth.repository;
 
 import com.pair.domain.auth.entity.AuthAccount;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.List;
 
@@ -16,6 +17,14 @@ public interface AuthAccountRepository extends JpaRepository<AuthAccount, Long> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<AuthAccount> findByEmailIgnoreCase(String email);
     boolean existsByEmailIgnoreCase(String email);
+
+    /** 이메일은 소문자로 넘긴다. */
+    @Query("select a.email from AuthAccount a where lower(a.email) in :emails order by a.id")
+    List<String> findRegisteredEmails(@Param("emails") Collection<String> emails);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from AuthAccount a where lower(a.email) in :emails order by a.id")
+    List<AuthAccount> lockByEmailIn(@Param("emails") Collection<String> emails);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from AuthAccount a where a.id = :id")

@@ -115,7 +115,7 @@ public class CompanyMemberService {
                 newManager.getId(), oldManager == null ? "no active former manager" :
                         "formerManagerUserId=" + oldManager.getId(), Instant.now()));
         return new ManagerReplacementResponse(companyId, newManager.getId(),
-                "새 매니저 계정을 생성하고 인증 안내 메일을 발송했습니다.");
+                "새 매니저 계정을 생성했습니다. 인증 안내 메일을 곧 발송합니다.");
     }
 
     @Transactional
