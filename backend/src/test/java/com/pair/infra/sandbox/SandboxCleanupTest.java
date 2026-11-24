@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.pair.global.config.PairProperties;
 
 /** 서버가 죽어도 실행 컨테이너가 남지 않는지: 시작할 때 남은 것을 지우고, 컨테이너도 스스로 끝난다. Docker 와 pair-sandbox 이미지가 있을 때만 돈다. */
+@Tag("slow") // 실제 Docker 로 컨테이너를 만들고 수십 초 기다린다
 @EnabledIf("com.pair.infra.sandbox.SandboxRunnerTest#dockerReady")
 class SandboxCleanupTest {
 
@@ -68,7 +70,8 @@ class SandboxCleanupTest {
         Files.createDirectories(file.getParent());
         Files.writeString(file, """
                 package shop;
-                import org.junit.jupiter.api.Test;
+                import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
                 class LoopTest { @Test void loop() { while (true) { } } }
                 """);
         if (Files.getFileStore(src).supportsFileAttributeView("posix")) {
