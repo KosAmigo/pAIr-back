@@ -1,5 +1,7 @@
 package com.pair.domain.attempt;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.auth.dto.AuthResponse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -14,10 +16,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.RequestBuilder;
 
@@ -30,14 +29,10 @@ import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /** 응시 하나를 다루는 요청(/api/attempts/{id}/**)은 자가진단 응시의 주인만 보낼 수 있다 */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class AttemptOwnerTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class AttemptOwnerTest extends BearerIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired AuthService auth;
@@ -45,7 +40,6 @@ class AttemptOwnerTest {
     @Autowired AttemptRegistryService registry;
     @Autowired AttemptStateRepository store;
     @Autowired TaskRepository tasks;
-    @MockitoBean JavaMailSender mail; // 가입은 이메일 인증 코드가 필요해 메일을 가짜로 받는다
 
     AuthResponse owner;
     AuthResponse other;

@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -40,6 +42,7 @@ import com.pair.global.security.HeaderCurrentUserResolver;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("examtest")
+@Tag("slow")
 class TaskSuggestionServiceTest {
 
     @TempDir

@@ -1,5 +1,7 @@
 package com.pair.domain.credit;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.auth.dto.AuthResponse;
 import com.pair.domain.credit.entity.CreditLedger;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
@@ -31,13 +33,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.mail.javamail.JavaMailSender;
 
 import com.pair.infra.ai.AiUnavailableException;
 import com.pair.infra.ai.AssistantClient;
@@ -54,10 +51,8 @@ import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class CreditIntegrationTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class CreditIntegrationTest extends BearerIntegrationTest {
     @Autowired AuthService auth;
     @Autowired AuthAccountRepository accounts;
     @Autowired CreditService credits;
@@ -68,8 +63,6 @@ class CreditIntegrationTest {
     @Autowired CheckpointService checkpoints;
     @Autowired TaskRepository tasks;
     @Autowired MockMvc mvc;
-    @MockitoBean AssistantClient assistant;
-    @MockitoBean JavaMailSender mail;
 
     @BeforeEach
     void seed() {

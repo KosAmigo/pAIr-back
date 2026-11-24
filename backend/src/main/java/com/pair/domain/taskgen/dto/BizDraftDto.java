@@ -50,7 +50,16 @@ public record BizDraftDto(
     /** path: 자료/이름.pdf, pages: 쪽별 글 */
     public record DocDraft(String path, List<String> pages) {}
 
-    public record Trap(String description, String evidence) {}
+    /**
+     * correctConclusion: 정답 결론, wrongConclusion: 함정에 빠졌을 때의 결론(추천안·통과 여부). 옛 형식에는 없다
+     */
+    public record Trap(String description, String evidence, String correctConclusion, String wrongConclusion) {
+
+        /** 결론 없이 만든다(테스트·옛 코드용) */
+        public Trap(String description, String evidence) {
+            this(description, evidence, null, null);
+        }
+    }
 
     public enum Type { SINGLE, SHORT }
 

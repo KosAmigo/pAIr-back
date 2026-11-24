@@ -1,5 +1,7 @@
 package com.pair.domain.auth;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.auth.dto.EmailVerificationRequest;
 import com.pair.domain.auth.dto.LoginRequest;
 import com.pair.domain.auth.dto.PasswordChangeRequest;
@@ -34,13 +36,8 @@ import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -52,10 +49,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.infra.mail.MailLayout;
 
 /** 가입·로그인·로그아웃과 토큰 기반 권한 확인 흐름을 H2 DB로 검증한다. */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class AuthIntegrationTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class AuthIntegrationTest extends BearerIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
@@ -65,7 +60,6 @@ class AuthIntegrationTest {
     @Autowired AuthAccountRepository accounts;
     @Autowired CompanyRepository companies;
     @Autowired PlatformTransactionManager transactions;
-    @MockitoBean JavaMailSender mail;
 
     @Test
     void signupLoginMeAndLogout() throws Exception {

@@ -1,5 +1,7 @@
 package com.pair.domain.attempt;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.service.AttemptService;
@@ -8,7 +10,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -17,15 +18,7 @@ import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
@@ -44,18 +37,8 @@ import jakarta.persistence.EntityManagerFactory;
  * 대시보드·복기 화면이 응시마다 부르는 리포트 조회의 비용(쿼리 수, 읽는 첨부 원문)을 고정한다.
  * 원격 DB 에서는 쿼리 한 번이 왕복 한 번이고 읽는 글자가 곧 전송량이라, 화면이 응시 수만큼 이 조회를 부르면 그대로 느려진다.
  */
-@SpringBootTest(properties = {"pair.auth.mode=bearer", "spring.jpa.properties.hibernate.generate_statistics=true"})
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class ReportQueryCostTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class ReportQueryCostTest extends BearerIntegrationTest {
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
@@ -65,8 +48,6 @@ class ReportQueryCostTest {
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
     @Autowired MockMvc mvc;
-    @MockitoBean JavaMailSender mail;
-    @MockitoBean AssistantClient assistant;
 
     String token;
     String devId;

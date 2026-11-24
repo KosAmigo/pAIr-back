@@ -51,7 +51,9 @@ final class TaskGenFixtures {
                                 List.of(f("src/shop/Cart.java", CART_START.replace("sum += 1;", "sum += 7;")))),
                         new DevDraftDto.WrongFix("두 번째 쿠폰만 막아 세 장일 때 틀린다",
                                 List.of(f("src/shop/Cart.java", CART_START.replace("sum += 2;", "sum += 8;"))))),
-                "AI 가 고친 코드가 다른 쿠폰 조합에서도 맞는지 어떻게 확인했나요?");
+                "AI 가 고친 코드가 다른 쿠폰 조합에서도 맞는지 어떻게 확인했나요?",
+                List.of(new DevDraftDto.AltSolution("합계를 식으로 한 번에 더한다(정답과 구조가 다름)",
+                        List.of(f("src/shop/Cart.java", CART_SOLVED.replace("sum += 11;", "sum += 10 + 1;"))))));
     }
 
     /** Draft 의 일부만 바꾼 복사본 */
@@ -64,6 +66,7 @@ final class TaskGenFixtures {
         List<String> description, requirements, trapKeywords;
         List<DevDraftDto.FileDraft> files, hiddenTests, solution;
         List<DevDraftDto.WrongFix> wrongFixes;
+        List<DevDraftDto.AltSolution> altSolutions;
         String difficulty;
         List<String> competencies;
 
@@ -83,6 +86,7 @@ final class TaskGenFixtures {
             trapKeywords = d.trapKeywords();
             wrongFixes = d.wrongFixes();
             taskFollowUp = d.taskFollowUp();
+            altSolutions = d.altSolutions();
         }
 
         Dev code(String v) { code = v; return this; }
@@ -94,6 +98,7 @@ final class TaskGenFixtures {
         Dev solution(List<DevDraftDto.FileDraft> v) { solution = v; return this; }
         Dev trapKeywords(List<String> v) { trapKeywords = v; return this; }
         Dev wrongFixes(List<DevDraftDto.WrongFix> v) { wrongFixes = v; return this; }
+        Dev altSolutions(List<DevDraftDto.AltSolution> v) { altSolutions = v; return this; }
         Dev taskFollowUp(String v) { taskFollowUp = v; return this; }
         Dev difficulty(String v) { difficulty = v; return this; }
         Dev competencies(List<String> v) { competencies = v; return this; }
@@ -108,7 +113,7 @@ final class TaskGenFixtures {
 
         DevDraftDto build() {
             return new DevDraftDto(title, summary, code, category, description, requirements, answer, files, hiddenTests, solution,
-                    difficulty, competencies, trapKeywords, wrongFixes, taskFollowUp);
+                    difficulty, competencies, trapKeywords, wrongFixes, taskFollowUp, altSolutions);
         }
     }
 

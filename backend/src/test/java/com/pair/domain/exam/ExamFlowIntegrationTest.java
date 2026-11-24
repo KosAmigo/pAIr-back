@@ -1,5 +1,7 @@
 package com.pair.domain.exam;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -77,6 +79,7 @@ import com.pair.domain.exam.dto.SessionSummaryResponse;
 @SpringBootTest
 @ActiveProfiles("examtest")
 @RecordApplicationEvents
+@Tag("slow")
 class ExamFlowIntegrationTest {
 
     static final Instant T0 = Instant.parse("2026-12-01T00:00:00Z");

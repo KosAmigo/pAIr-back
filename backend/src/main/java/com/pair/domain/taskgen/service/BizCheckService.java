@@ -16,19 +16,25 @@ import java.util.regex.Pattern;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-/** 비개발 과제 검사 10개 (설계 6장 + 검수 결과로 더한 3개) */
+/** 비개발 과제 검사 12개 (설계 6장 + 검수 결과로 더한 3개) */
 public final class BizCheckService {
 
-    static final String FORMAT = "형식";
-    static final String CSV = "CSV 형식";
-    static final String CALC = "단답형 검산";
-    static final String SOURCES = "근거 문서 2개 이상";
-    static final String TRAP = "함정 근거가 자료에 있음";
-    static final String LEAK = "정답 노출 없음";
-    static final String SOLVE = "다른 회사 모델이 풀기";
-    static final String TRAP_WORDS = "함정 핵심어 노출 없음";
-    static final String WRONG_ANSWERS = "단답 오답이 인정 답안과 다름";
-    static final String FOLLOW_UP = "후속 질문이 과제에 맞음";
+    // 기준 문서(pAIr-docs 설계/좋은_과제_기준.md) 번호 대응. M5 는 BizSoloSolveService 가 맡는다(afterChecks).
+    static final String FORMAT = "형식"; // M1 전제(5장 형식, 문항 구성)
+    static final String CSV = "CSV 형식"; // M1 전제
+    static final String CALC = "단답형 검산"; // M1, 4장 BIZ(모든 계산을 자료의 숫자로 다시 할 수 있다)
+    static final String SOURCES = "근거 문서 2개 이상"; // M1, Q4, 4장 BIZ
+    static final String TRAP = "함정 근거가 자료에 있음"; // Q3(함정의 근거가 자료에 사실로 있다)
+    static final String LEAK = "정답 노출 없음"; // M4(2장 경계: 설명·요구사항에 정답 수치)
+    static final String SOLVE = "다른 회사 모델이 풀기"; // M1(풀 수 있는지). M5 가 아니다
+    static final String TRAP_WORDS = "함정 핵심어 노출 없음"; // M4
+    static final String WRONG_ANSWERS = "단답 오답이 인정 답안과 다름"; // M2(인정 답안), M3(오답이 함정 값)
+    static final String FOLLOW_UP = "후속 질문이 과제에 맞음"; // M4
+    static final String EVIDENCE_STYLE = "함정 근거가 사실 진술임"; // M4, 4장 BIZ(사실 진술, 해석 지시 금지)
+    static final String CONCLUSION = "함정이 결론을 바꿈"; // M3
+
+    /** 근거 문장이 응시자에게 해석을 지시하는 말투 */
+    private static final Pattern DIRECTIVE = Pattern.compile("판단하지\\s*않|해서는\\s*안|하면\\s*안\\s*된|혼동하지|만으로.*하지\\s*않");
 
     private static final Pattern NAME = Pattern.compile("자료/[\\p{L}\\p{N}_ ()\\-]+\\.(csv|pdf)");
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -147,6 +153,14 @@ public final class BizCheckService {
                 check(FOLLOW_UP, d -> {
                     if (ctx.problem != null) return skipped();
                     return followUp(d);
+                }),
+                check(EVIDENCE_STYLE, d -> {
+                    if (ctx.problem != null) return skipped();
+                    return evidenceStyle(d);
+                }),
+                check(CONCLUSION, d -> {
+                    if (ctx.problem != null) return skipped();
+                    return conclusion(d);
                 }));
     }
 
@@ -197,6 +211,27 @@ public final class BizCheckService {
             }
         }
         return bad.isEmpty() ? ok("단답형 " + n + "개의 흔한 오답이 모두 인정 답안과 다릅니다.") : fail(String.join(" / ", bad));
+    }
+
+    /** 함정 근거 문장에 "~만으로 판단하지 않는다" 같은 해석 지시가 있으면 경고(warn) */
+    static GenCheckResultDto evidenceStyle(BizDraftDto d) {
+        Matcher m = DIRECTIVE.matcher(d.trap().evidence());
+        return m.find() ? warnResult("함정 근거 문장이 사실 진술이 아니라 해석 지시처럼 쓰였어요: '" + m.group() + "'. 측정 범위나 집계 정의 같은 사실로 쓰고 다른 내용 속에 섞으세요")
+                : ok("함정 근거 문장에 해석 지시 말투가 없습니다.");
+    }
+
+    /** 함정에 빠진 결론이 정답 결론과 같으면 fail(다시 생성), 결론 필드가 없으면 warn */
+    static GenCheckResultDto conclusion(BizDraftDto d) {
+        String right = d.trap().correctConclusion(), wrong = d.trap().wrongConclusion();
+        if (blank(right) || blank(wrong)) return warnResult("trap.correctConclusion·wrongConclusion 이 없어 함정이 결론을 바꾸는지 확인하지 못했어요");
+        if (normalize(right).equals(normalize(wrong))) {
+            return fail("함정에 빠진 계산의 결론과 정답 결론이 같습니다(" + shorten(right) + "). 함정에 빠지면 추천안·통과 여부가 달라지도록 수치를 다시 정하세요.");
+        }
+        return ok("함정에 빠지면 결론이 달라집니다.");
+    }
+
+    private static String normalize(String s) {
+        return s.replaceAll("[\\s\\p{Punct}。、·…]+", "").toLowerCase();
     }
 
     /** 3번째 후속 질문이 과제 맞춤이어야 하고 함정 핵심어가 들어 있으면 안 된다 */
@@ -361,7 +396,7 @@ public final class BizCheckService {
         return name.substring(0, name.lastIndexOf('.'));
     }
 
-    private static boolean close(Double a, Double b) {
+    static boolean close(Double a, Double b) {
         return a != null && b != null && Math.abs(a - b) <= Math.max(0.01, Math.abs(b) * 0.005);
     }
 
@@ -395,7 +430,7 @@ public final class BizCheckService {
             @Override
             public GenCheckResultDto run(BizDraftDto d) {
                 GenCheckResultDto r = body.apply(d);
-                return new GenCheckResultDto(name, r.ok(), r.detail());
+                return new GenCheckResultDto(name, r.ok(), r.detail(), r.level());
             }
         };
     }
@@ -406,6 +441,11 @@ public final class BizCheckService {
 
     private static GenCheckResultDto fail(String detail) {
         return new GenCheckResultDto("", false, detail);
+    }
+
+    /** 통과하지 못했지만 다시 생성하지 않고 알리기만 하는 결과 */
+    private static GenCheckResultDto warnResult(String detail) {
+        return new GenCheckResultDto("", false, detail, GenCheckResultDto.WARN);
     }
 
     private static GenCheckResultDto skipped() {

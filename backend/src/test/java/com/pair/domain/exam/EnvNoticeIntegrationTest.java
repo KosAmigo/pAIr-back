@@ -1,5 +1,7 @@
 package com.pair.domain.exam;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.exam.dto.EnvCheckFailureResponse;
 import com.pair.domain.exam.dto.EnvCheckResponse;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +49,7 @@ import jakarta.mail.internet.MimeMessage;
 @SpringBootTest
 @ActiveProfiles("examtest")
 @RecordApplicationEvents
+@Tag("slow")
 class EnvNoticeIntegrationTest {
 
     static final Instant T0 = Instant.parse("2026-12-01T00:00:00Z");

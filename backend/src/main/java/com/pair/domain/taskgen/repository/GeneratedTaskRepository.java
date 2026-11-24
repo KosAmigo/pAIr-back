@@ -18,10 +18,16 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
+import java.sql.SQLException;
+import java.util.function.IntFunction;
+
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -71,18 +77,14 @@ public class GeneratedTaskRepository {
     /** 검수자가 볼 수 있게 HIDDEN 으로 저장하는 그럴듯한 오답의 폴더 */
     public static final String SOLO_DIR = "_gen/solo/";
     public static final String WRONG_FIX_DIR = "_gen/wrong-fixes/";
+    /** 정답과 구조가 다른 올바른 풀이(altSolutions). 검수자가 숨은 테스트가 공정한지 볼 수 있게 HIDDEN 으로 저장 */
+    public static final String ALT_SOLUTION_DIR = "_gen/alt-solutions/";
 
     /** 60분 기준 d4 시점(분). 시간이 짧으면 비례해서 줄인다 */
     private static final List<Integer> D4_BASE = List.of(20, 30, 40, 50);
 
     public static List<Integer> d4Minutes(int minutes) {
         return D4_BASE.stream().map(m -> m * minutes / 60).toList();
-    }
-
-    /** 모델이 정한 난이도. 초급·중급·고급이 아니면 중급 */
-    public static String difficultyOf(String v) {
-        String s = v == null ? "" : v.strip();
-        return TaskGenRequest.DIFFICULTIES.contains(s) ? s : "중급";
     }
 
     private final TaskRepository records;
@@ -97,11 +99,13 @@ public class GeneratedTaskRepository {
     private final ShortAnswerKeyRepository answerKeys;
     private final QuestionSourceRepository sources;
     private final DocumentPageRepository pages;
+    private final TransactionTemplate tx;
 
     public GeneratedTaskRepository(TaskRepository records, TaskFileRepository files,
             TaskQuestionRepository questions, JdbcTemplate jdbc, ObjectMapper json, Clock clock, PdfService pdf,
             TaskFileStorage storage, QuestionChoiceRepository choices, ShortAnswerKeyRepository answerKeys,
-            QuestionSourceRepository sources, DocumentPageRepository pages) {
+            QuestionSourceRepository sources, DocumentPageRepository pages, PlatformTransactionManager txManager) {
+        this.tx = new TransactionTemplate(txManager);
         this.pdf = pdf;
         this.storage = storage;
         this.choices = choices;
@@ -117,21 +121,25 @@ public class GeneratedTaskRepository {
     }
 
     /** 저장하고 과제 code 를 돌려준다. code 가 겹치면 -2, -3 … 을 붙인다 */
-    @Transactional
     public String saveDev(TaskGenRequest form, DevDraftDto d, TaskGeneratorService.GenReport report, long adminId) {
         return saveDev(form, d, report, adminId, Map.of());
     }
 
     /** soloFiles: "AI 혼자 바로 풀림" 검사에서 AI 가 낸 풀이. 키는 "1/src/x/Y.java"(시도 번호/경로) */
-    @Transactional
     public String saveDev(TaskGenRequest form, DevDraftDto d, TaskGeneratorService.GenReport report, long adminId, Map<String, String> soloFiles) {
-        String code = uniqueCode(d.code(), d.title());
+        return withCodeRetry(attempt -> tx.execute(status -> saveDevOnce(form, d, report, adminId, soloFiles, attempt)));
+    }
+
+    /** 한 번의 시도(= 한 트랜잭션). attempt 가 클수록 code 번호를 건너뛴다 */
+    private String saveDevOnce(TaskGenRequest form, DevDraftDto d, TaskGeneratorService.GenReport report, long adminId,
+            Map<String, String> soloFiles, int attempt) {
+        String code = uniqueCode(d.code(), d.title(), "dev-task", attempt);
         Instant now = clock.instant();
         long id = nextTaskId();
 
         Task t = new Task(id, code, cut(d.title(), 200), "DEV", form.minutes(), form.usageValue(),
                 Task.Status.HIDDEN, null, adminId, now);
-        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), difficultyOf(d.difficulty()));
+        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), TaskGenRequest.difficultyOf(form.minutes()));
         t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), settings(d, form));
         records.save(t);
 
@@ -151,6 +159,15 @@ public class GeneratedTaskRepository {
                 rows.add(file(id, dir + "reason.md", orElse(w.reason(), "(이유 없음)"), TaskFile.HIDDEN, true));
                 // 정답 코드처럼 .java 로 컴파일되지 않게 끝에 .txt 를 붙인다
                 if (w.files() != null) for (var f : w.files()) rows.add(file(id, dir + f.path() + ".txt", f.content(), TaskFile.HIDDEN, true));
+            }
+        }
+        if (d.altSolutions() != null) {
+            int n = 0;
+            for (var a : d.altSolutions()) {
+                n++;
+                String dir = ALT_SOLUTION_DIR + n + "/";
+                rows.add(file(id, dir + "note.md", orElse(a.note(), "(설명 없음)"), TaskFile.HIDDEN, true));
+                if (a.files() != null) for (var f : a.files()) rows.add(file(id, dir + f.path() + ".txt", f.content(), TaskFile.HIDDEN, true));
             }
         }
         files.saveAll(rows);
@@ -175,8 +192,11 @@ public class GeneratedTaskRepository {
      * 문서는 PDF 로 만들어 저장소에 올리고(storage_key, content 비움) 쪽 글은 document_pages 에 넣는다.
      * DB 저장이 실패하면(롤백) 이미 올린 PDF 도 지운다.
      */
-    @Transactional
     public String saveBiz(TaskGenRequest form, BizDraftDto d, TaskGeneratorService.GenReport report, long adminId) {
+        return withCodeRetry(attempt -> tx.execute(status -> saveBizOnce(form, d, report, adminId, attempt)));
+    }
+
+    private String saveBizOnce(TaskGenRequest form, BizDraftDto d, TaskGeneratorService.GenReport report, long adminId, int attempt) {
         List<String> uploaded = new ArrayList<>();
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -186,13 +206,13 @@ public class GeneratedTaskRepository {
                 }
             });
         }
-        String code = uniqueCode(d.code(), d.title(), "biz-task");
+        String code = uniqueCode(d.code(), d.title(), "biz-task", attempt);
         Instant now = clock.instant();
         long id = nextTaskId();
 
         Task t = new Task(id, code, cut(d.title(), 200), "BIZ", form.minutes(), form.usageValue(),
                 Task.Status.HIDDEN, null, adminId, now);
-        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), difficultyOf(d.difficulty()));
+        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), TaskGenRequest.difficultyOf(form.minutes()));
         t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings(form));
         records.save(t);
 
@@ -265,16 +285,44 @@ public class GeneratedTaskRepository {
         return f.map(TaskFile::getContent).orElseThrow(() -> new NoSuchElementException("AI 생성 확인 결과가 없는 과제입니다: " + code));
     }
 
-    private String uniqueCode(String wanted, String title) {
-        return uniqueCode(wanted, title, "dev-task");
+    /** 저장 시도 최대 횟수. 동시에 같은 code 로 저장하면 유니크 제약이 걸려 다음 번호로 다시 시도한다 */
+    static final int MAX_CODE_ATTEMPTS = 5;
+
+    /**
+     * code 중복(tasks.code 유니크 위반)으로 실패하면 다음 번호로 처음부터 다시 저장한다.
+     * 시도마다 새 트랜잭션이라, 실패한 시도의 tasks/task_files 는 롤백으로 남지 않고 과제 id 도 다시 받는다.
+     * 이 메서드는 트랜잭션 밖에서 불려야 한다(바깥 트랜잭션이 있으면 롤백 뒤 이어 쓸 수 없다).
+     */
+    private String withCodeRetry(IntFunction<String> attemptSave) {
+        DataIntegrityViolationException last = null;
+        for (int attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
+            try {
+                return attemptSave.apply(attempt);
+            } catch (DataIntegrityViolationException e) {
+                if (!isCodeConflict(e)) throw e;
+                last = e;
+            }
+        }
+        throw last;
     }
 
-    private String uniqueCode(String wanted, String title, String fallback) {
+    /** 유니크 제약 위반인지(SQLState 23505, H2 도 같음). 다른 무결성 오류(길이 초과 등)는 재시도해도 소용없다 */
+    private static boolean isCodeConflict(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof SQLException sql && "23505".equals(sql.getSQLState())) return true;
+            if (t.getClass().getSimpleName().contains("ConstraintViolation") && String.valueOf(t.getMessage()).toLowerCase().contains("code")) return true;
+        }
+        return false;
+    }
+
+    private String uniqueCode(String wanted, String title, String fallback, int attempt) {
         String base = slug(wanted);
         if (base.isEmpty()) base = slug(title);
         if (base.isEmpty()) base = fallback;
-        String code = base;
-        for (int n = 2; records.findByCode(code).isPresent(); n++) code = base + "-" + n;
+        // 첫 시도는 base, 다시 시도할 때는 이미 충돌한 번호를 건너뛴다 (조회에 안 보여도 -2, -3 … 로 올라간다)
+        int n = attempt == 0 ? 1 : attempt + 1;
+        String code = n == 1 ? base : base + "-" + n;
+        while (records.findByCode(code).isPresent()) code = base + "-" + (++n);
         return code;
     }
 

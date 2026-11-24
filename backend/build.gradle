@@ -83,6 +83,21 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // 스프링 테스트 컨텍스트를 최대 64개 들고 있어(src/test/resources/spring.properties) 기본 512MB 로는 메모리가 모자란다
+    maxHeapSize = '2g'
+    // 테스트를 JVM 여러 개로 나눠 동시에 돌린다. JVM 마다 메모리 DB(H2)가 따로라 서로 섞이지 않는다
+    maxParallelForks = Math.max(1, Math.min(3, Runtime.runtime.availableProcessors().intdiv(2)))
+}
+
+// 작업 중에 빠르게 돌리는 테스트: @Tag("slow")(스프링 통합·실제 JVM 실행 등)를 뺀다. 머지 전에는 ./gradlew build 로 전체를 돌린다.
+tasks.register('fastTest', Test) {
+    description = '느린 테스트(@Tag slow)를 빼고 빠른 테스트만 돌린다'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { excludeTags 'slow' }
+    maxHeapSize = '2g'
+    maxParallelForks = Math.max(1, Math.min(3, Runtime.runtime.availableProcessors().intdiv(2)))
 }
 
 // 패키지 구조·이름 규칙 검사(ArchitectureTest)만 돌린다. 규칙은 global/config/PackageRulesConfig 에 있다.

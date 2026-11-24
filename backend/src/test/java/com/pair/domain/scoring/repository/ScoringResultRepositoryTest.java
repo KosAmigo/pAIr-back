@@ -1,12 +1,13 @@
 package com.pair.domain.scoring.repository;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.scoring.service.RubricService;
 import com.pair.domain.scoring.service.ScoringCatalogService;
 import com.pair.domain.scoring.service.TestPromptVersions;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -14,12 +15,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistryService;
@@ -37,17 +33,7 @@ import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 
 /** 실제 응시 채점 결과가 채점 테이블에 저장되는지 (H2, 채점 모델 호출 없음) */
-@SpringBootTest
-@ActiveProfiles("examtest")
-class ScoringResultRepositoryTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+class ScoringResultRepositoryTest extends ExamIntegrationTest {
 
     @Autowired ScoringResultRepository records;
     @Autowired ScoringCatalogService catalog;

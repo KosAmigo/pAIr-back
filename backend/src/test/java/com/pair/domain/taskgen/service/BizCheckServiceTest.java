@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import com.pair.infra.ai.AiUnavailableException;
 
 /** 일부러 망가뜨린 Draft 에서 해당 검사만 실패하는지 (실제 PdfService, 가짜 풀이 모델) */
+@Tag("slow")
 class BizCheckServiceTest {
 
     private final PdfService pdf = new PdfService();
@@ -32,10 +35,10 @@ class BizCheckServiceTest {
     }
 
     @Test
-    @DisplayName("정상 Draft 는 검사 10개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
+    @DisplayName("정상 Draft 는 검사 12개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
     void allPass() {
         var results = run(BizFixtures.good("c"));
-        assertThat(results).hasSize(10).allMatch(GenCheckResultDto::ok, results.toString());
+        assertThat(results).hasSize(12).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
         assertThat(solver.lastPrompt).contains("자료/설문 요약.pdf (2쪽)").contains("34%가 라이트").contains("1) 34%").contains("월,요금제,가입자 수");
         assertThat(solver.calls.get()).isEqualTo(1);
@@ -66,8 +69,8 @@ class BizCheckServiceTest {
     @DisplayName("함정 근거 문장이 자료에 없으면 '함정 근거' 만 실패하고, 공백 차이는 무시한다")
     void trapEvidence() {
         BizDraftDto d = BizFixtures.good("c");
-        assertThat(failed(edit(d, b -> b.trap(new BizDraftDto.Trap("함정", "자료 어디에도 없는 문장입니다 정말로 없어요."))))).containsExactly(BizCheckService.TRAP);
-        assertThat(failed(edit(d, b -> b.trap(new BizDraftDto.Trap("함정", "현재  이용자 설문에서는\n34%가 라이트로 옮길 의향이 있다고 답했습니다."))))).isEmpty();
+        assertThat(failed(edit(d, b -> b.trap(new BizDraftDto.Trap("함정", "자료 어디에도 없는 문장입니다 정말로 없어요.", "A안", "B안"))))).containsExactly(BizCheckService.TRAP);
+        assertThat(failed(edit(d, b -> b.trap(new BizDraftDto.Trap("함정", "현재  이용자 설문에서는\n34%가 라이트로 옮길 의향이 있다고 답했습니다.", "A안", "B안"))))).isEmpty();
     }
 
     @Test
@@ -226,5 +229,32 @@ class BizCheckServiceTest {
         assertThat(result(keyword, BizCheckService.FOLLOW_UP).detail()).contains("전환율");
         var same = edit(d, b -> b.followUps(List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "채택하지 않은 제안은?")));
         assertThat(failed(same)).containsExactly(BizCheckService.FOLLOW_UP);
+    }
+
+    @Test
+    @DisplayName("함정 근거가 '~만으로 판단하지 않는다' 같은 지시문이면 경고(warn)만 하고 다시 생성하지는 않는다")
+    void evidenceDirective() {
+        var r = BizCheckService.evidenceStyle(edit(BizFixtures.good("c"), x -> x.trap(new BizDraftDto.Trap("함정",
+                "이 값만으로 하루 인력 충족 여부를 판단하지 않는다."))));
+        assertThat(r.ok()).isFalse();
+        assertThat(r.needsRegeneration()).isFalse();
+        for (String ev : List.of("두 값을 더해서는 안 된다는 점", "혼동하지 말 것")) {
+            assertThat(BizCheckService.evidenceStyle(edit(BizFixtures.good("c"), b -> b.trap(new BizDraftDto.Trap("함정", ev))))
+                    .ok()).isFalse();
+        }
+        assertThat(BizCheckService.evidenceStyle(BizFixtures.good("c")).ok()).isTrue();
+    }
+
+    @Test
+    @DisplayName("함정에 빠진 결론이 정답 결론과 같으면 fail(다시 생성), 다르면 통과, 필드가 없으면 warn")
+    void conclusionDiffers() {
+        var same = BizCheckService.conclusion(edit(BizFixtures.good("c"), b -> b.trap(new BizDraftDto.Trap("함정", "근거 문장입니다 충분히 깁니다", "보류한다.", "보류 한다"))));
+        assertThat(same.ok()).isFalse();
+        assertThat(same.needsRegeneration()).isTrue();
+        var missing = BizCheckService.conclusion(edit(BizFixtures.good("c"), b -> b.trap(new BizDraftDto.Trap("함정", "근거 문장입니다 충분히 깁니다"))));
+        assertThat(missing.ok()).isFalse();
+        assertThat(missing.needsRegeneration()).isFalse();
+        assertThat(BizCheckService.conclusion(BizFixtures.good("c")).ok()).isTrue();
+        assertThat(failed(edit(BizFixtures.good("c"), b -> b.trap(new BizDraftDto.Trap("함정", BizFixtures.EVIDENCE, "A안", "A안"))))).containsExactly(BizCheckService.CONCLUSION);
     }
 }

@@ -1,5 +1,7 @@
 package com.pair.domain.company;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.company.dto.InviteAcceptRequest;
 import com.pair.domain.company.dto.ReplaceManagerRequest;
 import com.pair.domain.company.service.CompanyAccountMailService;
@@ -45,6 +47,7 @@ import com.pair.global.security.CurrentUser;
 @SpringBootTest(properties = "pair.auth.mode=bearer")
 @AutoConfigureMockMvc
 @ActiveProfiles("examtest")
+@Tag("slow")
 class CompanyOnboardingIntegrationTest {
 
     @Autowired MockMvc mvc;
