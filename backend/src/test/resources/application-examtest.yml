@@ -30,3 +30,5 @@ pair:
       secret: dGVzdC1vbmx5LXNpZ25pbmcta2V5LTMyaXRlbXMtbG9uZw==
   exam:
     scheduler-enabled: false
+    # 감독관 실시간 보기 시그널링 테스트(ProctorRelayIntegrationTest)가 쓴다. 운영 기본값은 꺼짐
+    live-view-enabled: true
