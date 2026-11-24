@@ -122,8 +122,11 @@ public class EmailVerificationService {
         }
     }
 
-    /** 별도 트랜잭션으로 성공 코드를 소비하고 실패 횟수를 보존한다. */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    /**
+     * 호출한 쪽 트랜잭션에서 코드를 소비한다. 커넥션을 하나 더 쓰지 않고, 가입이 실패하면 코드 소비도 함께 취소된다.
+     * 실패 횟수를 남기려면 호출하는 쪽이 noRollbackFor = EmailVerificationException.class 를 지정하고 그 예외를 던져야 한다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
     public ConsumeResult consume(String email, String code) {
         EmailVerification verification = verifications.findByEmailForUpdate(email).orElse(null);
         if (verification == null || verification.getConsumedAt() != null) return ConsumeResult.NOT_FOUND;

@@ -8,6 +8,7 @@ import com.pair.domain.auth.dto.UserResponse;
 import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.entity.RefreshSession;
+import com.pair.domain.auth.exception.EmailVerificationException;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.repository.RefreshSessionRepository;
 import com.pair.domain.company.entity.Company;
@@ -73,26 +74,26 @@ public class AuthService {
         emailVerification.sendOnboardingCode(account.getEmail());
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = EmailVerificationException.class)
     public void verifyOnboardingEmail(String accessToken, String code) {
         AuthAccount account = lockCurrentAccount(requireAccess(accessToken));
         if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
         EmailVerificationService.ConsumeResult verification = emailVerification.consume(account.getEmail(), code);
         if (verification != EmailVerificationService.ConsumeResult.CONSUMED) {
-            throw new IllegalArgumentException(verification.message());
+            throw new EmailVerificationException(verification.message());
         }
         account.markEmailVerified();
     }
 
     /** 인증된 이메일로 일반 회원을 생성하고 로그인 상태로 사용할 세션 토큰을 발급한다. */
-    @Transactional
+    @Transactional(noRollbackFor = EmailVerificationException.class)
     public AuthResponse signup(SignupRequest request) {
         requireBcryptLength(request.password());
         String email = normalizeEmail(request.email());
         if (accounts.existsByEmailIgnoreCase(email)) throw new ConflictException("이미 가입된 이메일입니다.");
         EmailVerificationService.ConsumeResult verification = emailVerification.consume(email, request.code());
         if (verification != EmailVerificationService.ConsumeResult.CONSUMED) {
-            throw new IllegalArgumentException(verification.message());
+            throw new EmailVerificationException(verification.message());
         }
 
         AuthAccount account = accounts.findByEmailIgnoreCase(withdrawnEmailHasher.hash(email)).orElse(null);
