@@ -42,7 +42,15 @@ com.pair
 - Java 21, Spring Boot. API requests and responses use `dto/` types.
 - Put transactions on service methods. Watch for N+1 queries.
 
+## Tests (keep the build fast)
+- Spring integration tests extend a shared base in `global/config`: `ExamIntegrationTest` (dev header auth) or `BearerIntegrationTest` (Bearer token auth). They share one Spring context, so don't add `@MockitoBean`, `@DynamicPropertySource`, `@TestPropertySource`, `properties=` or `@ActiveProfiles` to a subclass: any difference starts a new context and slows every build. Set per-test mock behaviour with `when(...)` in `@BeforeEach`.
+- Need a mock bean or property the bases don't have? Add it to the base only if most tests can share it; otherwise ask the user first.
+- Shared contexts share the H2 data. Don't depend on rows other tests left (e.g. counting all tasks); clean or filter your own data.
+- Tag slow tests `@Tag("slow")`: Spring contexts (the bases already have it), real JVM/code runs, anything over ~10s.
+- Don't change `src/test/resources/spring.properties` (context cache 64: closing a context drops the shared H2 tables) or the test memory/fork settings in `build.gradle` without asking.
+
 ## Finishing a task
 - Add tests for new or changed business logic.
-- Run `./gradlew build` (tests + structure check) and report changed files and results briefly.
+- While working, run `./gradlew fastTest` (skips `@Tag("slow")`, about 1 min).
+- Before merging into develop, run `./gradlew build` (all tests + structure check, about 5 min) and report changed files and results briefly.
 - Read only the files the task needs. Don't add docs or extra agents unless needed. Ask before large refactors.
