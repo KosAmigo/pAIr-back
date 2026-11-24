@@ -6,6 +6,7 @@ import com.pair.infra.mail.MailDeliveryException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 import jakarta.mail.MessagingException;
@@ -146,6 +147,11 @@ public class EmailVerificationService {
     @Transactional
     public void removeForEmail(String email) {
         verifications.deleteById(email);
+    }
+
+    @Transactional
+    public void removeForEmails(Collection<String> emails) {
+        verifications.deleteAllByIdInBatch(emails);
     }
 
     public enum ConsumeResult {

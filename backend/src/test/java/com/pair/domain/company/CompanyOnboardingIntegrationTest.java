@@ -9,6 +9,7 @@ import com.pair.domain.company.service.CompanyInquiryService;
 import com.pair.domain.company.service.CompanyInviteService;
 import com.pair.domain.company.service.CompanyMemberService;
 import com.pair.domain.company.service.CorporateAccountService;
+import com.pair.domain.company.service.CorporateCredentialService;
 import com.pair.domain.auth.AuthTestSupport;
 import com.pair.domain.auth.dto.LoginRequest;
 import com.pair.domain.auth.dto.WithdrawalRequest;
@@ -22,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
@@ -30,8 +32,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Duration;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -39,6 +45,7 @@ import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -68,6 +75,7 @@ class CompanyOnboardingIntegrationTest {
     @Autowired CompanyInviteService invites;
     @Autowired CompanyMemberService members;
     @Autowired CorporateAccountService corporateAccounts;
+    @Autowired CorporateCredentialService credentials;
     @Autowired AuthAccountRepository accounts;
     @Autowired AuthService auth;
     @Autowired JdbcTemplate jdbc;
@@ -172,6 +180,70 @@ class CompanyOnboardingIntegrationTest {
     }
 
     @Test
+    void approvalDoesNotWaitForMailAndContinuesAfterOneFailure() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String managerEmail = "manager-" + suffix + "@test.dev";
+        String proctorEmail = "proctor-" + suffix + "@test.dev";
+        CountDownLatch sending = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(inv -> {
+            AuthAccount target = inv.getArgument(0);
+            if (!target.getEmail().equals(managerEmail)) return null;
+            sending.countDown();
+            release.await(10, TimeUnit.SECONDS);
+            throw new MailDeliveryException(new MailSendException("smtp down"));
+        }).when(mailer).sendCredentials(any(AuthAccount.class), anyString());
+        var inquiry = inquiries.submit("회사 " + suffix, "사업자" + suffix, "담당자", "contact-" + suffix + "@test.dev",
+                null, csv(managerEmail + ",MANAGER\n" + proctorEmail + ",PROCTOR"));
+        try {
+            inquiries.approve(inquiry.id(), admin(suffix).getId());
+            assertThat(sending.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThat(accountNow(managerEmail).getOnboardingMailStatus()).isEqualTo("PENDING");
+        } finally {
+            release.countDown();
+        }
+        assertThat(account(managerEmail).getOnboardingMailStatus()).isEqualTo("FAILED");
+        assertThat(account(proctorEmail).getOnboardingMailStatus()).isEqualTo("SENT");
+    }
+
+    @Test
+    void rejectedApprovalSendsNoMail() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        AuthAccount admin = admin(suffix);
+        var inquiry = inquiries.submit("회사 " + suffix, "사업자" + suffix, "담당자", "contact-" + suffix + "@test.dev",
+                null, csv("manager-" + suffix + "@test.dev,MANAGER\n" + admin.getEmail().toUpperCase() + ",PROCTOR"));
+        assertThatThrownBy(() -> inquiries.approve(inquiry.id(), admin.getId()))
+                .isInstanceOf(com.pair.global.error.ConflictException.class).hasMessageContaining(admin.getEmail());
+        assertThat(accounts.existsByEmailIgnoreCase("manager-" + suffix + "@test.dev")).isFalse();
+        verify(mailer, never()).sendCredentials(any(AuthAccount.class), anyString());
+    }
+
+    @Test
+    void reissueDuringMailIsNotOverwrittenByOlderIssue() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        AuthAccount admin = admin(suffix);
+        AtomicBoolean first = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            if (!first.getAndSet(false)) return null;
+            // 첫 메일을 보내는 사이 재발급됐고, 첫 메일은 실패했다
+            members.reissue(inv.<AuthAccount>getArgument(0).getId(),
+                    new CurrentUser(admin.getId(), CurrentUser.Role.ADMIN, null));
+            throw new MailDeliveryException(new MailSendException("smtp down"));
+        }).when(mailer).sendCredentials(any(AuthAccount.class), anyString());
+        AuthAccount manager = approvedManager(suffix, admin);
+        assertThat(manager.getOnboardingMailStatus()).isEqualTo("SENT");
+        ArgumentCaptor<String> passwords = ArgumentCaptor.forClass(String.class);
+        verify(mailer, times(2)).sendCredentials(any(AuthAccount.class), passwords.capture());
+        assertThatThrownBy(() -> auth.login(new LoginRequest(manager.getEmail(), passwords.getAllValues().get(0))))
+                .isInstanceOf(UnauthorizedException.class);
+        assertThat(auth.login(new LoginRequest(manager.getEmail(), passwords.getAllValues().get(1))).token()).isNotBlank();
+
+        credentials.issue(manager.getId(), "outdated-placeholder");
+        assertThat(accounts.findById(manager.getId()).orElseThrow().getPasswordHash()).isEqualTo(manager.getPasswordHash());
+        verify(mailer, times(2)).sendCredentials(any(AuthAccount.class), anyString());
+    }
+
+    @Test
     void withdrawnMemberRejoinsAsProctorWithSameAccountAndCanWithdrawAgain() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         String email = "rejoin-" + suffix + "@test.dev";
@@ -190,6 +262,7 @@ class CompanyOnboardingIntegrationTest {
         assertThat(created.isActive()).isTrue();
         assertThat(created.isEmailVerified()).isFalse();
         assertThat(created.isPasswordChangeRequired()).isTrue();
+        mailed(created.getId());
     }
 
     @Test
@@ -289,14 +362,14 @@ class CompanyOnboardingIntegrationTest {
                 new ReplaceManagerRequest("새 매니저", "replacement-" + suffix + "@test.dev"));
 
         AuthAccount withdrawn = accounts.findById(oldManager.getId()).orElseThrow();
-        AuthAccount newManager = accounts.findById(replaced.managerUserId()).orElseThrow();
+        AuthAccount newManager = mailed(replaced.managerUserId());
         assertThat(withdrawn.getMemberStatus()).isEqualTo("WITHDRAWN");
         assertThat(withdrawn.getTokenVersion()).isGreaterThan(oldTokenVersion);
         assertThat(newManager.getRole()).isEqualTo(CurrentUser.Role.MANAGER);
         assertThat(newManager.isPasswordChangeRequired()).isTrue();
 
         members.reissue(newManager.getId(), new CurrentUser(admin.getId(), CurrentUser.Role.ADMIN, null));
-        AuthAccount reissued = accounts.findById(newManager.getId()).orElseThrow();
+        AuthAccount reissued = mailed(newManager.getId());
         assertThat(reissued.isEmailVerified()).isFalse();
         assertThat(reissued.isPasswordChangeRequired()).isTrue();
         assertThat(reissued.getOnboardingMailStatus()).isEqualTo("SENT");
@@ -307,9 +380,13 @@ class CompanyOnboardingIntegrationTest {
     }
 
     private AuthAccount approvedManager(String suffix) {
+        return approvedManager(suffix, admin(suffix));
+    }
+
+    private AuthAccount approvedManager(String suffix, AuthAccount admin) {
         var inquiry = inquiries.submit("회사 " + suffix, "사업자" + suffix, "담당자", "contact-" + suffix + "@test.dev",
                 null, csv("manager-" + suffix + "@test.dev,MANAGER"));
-        inquiries.approve(inquiry.id(), admin(suffix).getId());
+        inquiries.approve(inquiry.id(), admin.getId());
         return account("manager-" + suffix + "@test.dev");
     }
 
@@ -324,8 +401,18 @@ class CompanyOnboardingIntegrationTest {
         return accounts.saveAndFlush(account);
     }
 
+    /** 메일은 커밋 뒤 다른 스레드에서 보내므로 처리가 끝날 때까지 기다린다 */
     private AuthAccount account(String email) {
+        return mailed(accountNow(email).getId());
+    }
+
+    private AuthAccount accountNow(String email) {
         return accounts.findAll().stream().filter(a -> a.getEmail().equalsIgnoreCase(email)).findFirst().orElseThrow();
+    }
+
+    private AuthAccount mailed(Long id) {
+        return Awaitility.await().atMost(Duration.ofSeconds(20)).until(() -> accounts.findById(id).orElseThrow(),
+                a -> !a.getOnboardingMailStatus().equals("PENDING"));
     }
 
     private static byte[] csv(String entries) {
