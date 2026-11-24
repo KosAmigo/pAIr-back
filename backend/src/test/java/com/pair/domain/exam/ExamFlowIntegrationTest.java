@@ -826,6 +826,29 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
+    @DisplayName("화면 공유 이벤트: 종류와 시각만 저장하고 사진·증거 구간은 받지 않는다. 사진 없음을 누락으로 표시하지 않는다")
+    void screenShareEventsHaveNoImages() {
+        SessionSummaryResponse s = createSession(154L, true);
+        String token = startWithConsent(s, "screen@test.dev");
+        var at = s.startsAt().plusSeconds(20);
+
+        for (var type : List.of(ProctorEvent.Type.SCREEN_STOPPED, ProctorEvent.Type.SCREEN_PARTIAL, ProctorEvent.Type.SCREEN_RESTARTED)) {
+            var view = proctor.record(token, new ProctorEventRequest(type, ProctorEvent.Source.SCREEN, at, 0, null, null, null,
+                    "scr-" + type.name().toLowerCase().replace('_', '-') + "-1"));
+            assertThat(view.source()).isEqualTo(ProctorEvent.Source.SCREEN);
+            assertThat(view.snapshot()).isNull();
+            assertThat(view.snapshotMissing()).isNull(); // 카메라 이벤트와 달리 사진이 없어도 "업로드 실패"가 아니다
+        }
+
+        var request = new ProctorEventRequest(ProctorEvent.Type.SCREEN_STOPPED, ProctorEvent.Source.SCREEN, at, 0, null, null, jpegB64(),
+                "scr-with-photo");
+        assertThatThrownBy(() -> proctor.record(token, request)).hasMessageContaining("사진을 붙이지 않습니다");
+
+        assertThatThrownBy(() -> clips.upload(token, "scr-screen-stopped-1", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, 0))))).hasMessageContaining("카메라 이벤트");
+    }
+
+    @Test
     @DisplayName("증거 구간: 채널(웹캠·휴대폰)마다 최대 12장, 같은 채널은 1초 이상 간격, 사진 한 장은 100KB 이하")
     void clipChannelRules() {
         SessionSummaryResponse s = createSession(153L, true);
