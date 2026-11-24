@@ -1,6 +1,12 @@
-# 개발용 인프라: 초대 메일 확인용 SMTP(Mailpit). DB 는 AWS RDS 를 쓴다 (application-secret.yml)
-#   docker compose up -d
+# 개발용 인프라: 초대 메일 확인용 SMTP(Mailpit)는 기본으로 켜지고, Redis 는 필요할 때만 켠다.
+#   docker compose up -d                    메일 서버만 (기존과 같음)
+#   docker compose --profile redis up -d    + Redis
 #   메일함: http://localhost:8025
+#
+# DB 는 AWS RDS 를 쓴다 (application-secret.yml). 로컬 PostgreSQL 이 필요하면 스키마(V1)가
+# pgvector 확장을 쓰므로 일반 postgres 이미지가 아니라 pgvector/pgvector 이미지를 써야 한다.
+# Redis 는 아직 앱에서 쓰지 않는다 (채점 큐 작업용으로 미리 준비).
+# 데이터를 지우고 처음부터 시작: docker compose --profile redis down -v
 name: pair
 services:
   mailpit:
@@ -9,3 +15,18 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  redis:
+    profiles: ["redis"]
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  redis-data:
