@@ -1,6 +1,22 @@
 server:
   port: 8180
 
+# 모니터링 (Prometheus + Grafana). 지표는 사용자용 포트(8180)와 분리한 관리 포트에서만 연다.
+# 운영에서는 이 포트를 보안 그룹·방화벽으로 내부망에만 열어야 한다 (지표에 내부 상태가 드러난다).
+management:
+  server:
+    port: ${PAIR_MANAGEMENT_PORT:8181}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: pair-backend
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
 spring:
   application:
     name: pair-backend
