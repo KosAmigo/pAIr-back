@@ -28,6 +28,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.global.security.InviteTokenService;
 import com.pair.domain.credit.service.CreditService;
@@ -47,10 +48,12 @@ public class AuthService {
     private final ExamSessionRepository examSessions;
     private final WithdrawnEmailHashService withdrawnEmailHasher;
     private final CompanyRepository companies;
+    private final TransactionTemplate tx;
 
     public AuthService(AuthAccountRepository accounts, RefreshSessionRepository sessions, JwtTokens tokens,
             CreditService credits, EmailVerificationService emailVerification, ExamSessionRepository examSessions,
-            WithdrawnEmailHashService withdrawnEmailHasher, CompanyRepository companies) {
+            WithdrawnEmailHashService withdrawnEmailHasher, CompanyRepository companies, TransactionTemplate tx) {
+        this.tx = tx;
         this.accounts = accounts;
         this.sessions = sessions;
         this.tokens = tokens;
@@ -67,11 +70,15 @@ public class AuthService {
         emailVerification.sendCode(normalizedEmail);
     }
 
-    @Transactional
+    /** 계정 확인만 짧은 트랜잭션으로 하고, 메일 발송은 트랜잭션 밖에서 한다. */
     public void requestOnboardingEmailVerification(String accessToken) {
-        AuthAccount account = lockCurrentAccount(requireAccess(accessToken));
-        if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
-        emailVerification.sendOnboardingCode(account.getEmail());
+        JwtTokens.VerifiedToken jwt = requireAccess(accessToken);
+        String email = tx.execute(status -> {
+            AuthAccount account = lockCurrentAccount(jwt);
+            if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
+            return account.getEmail();
+        });
+        emailVerification.sendOnboardingCode(email);
     }
 
     @Transactional(noRollbackFor = EmailVerificationException.class)
