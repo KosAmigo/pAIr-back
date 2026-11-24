@@ -61,6 +61,12 @@ public class ApiExceptionHandler {
         return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
     }
 
+    /** 빌드·실행을 너무 자주 누름 */
+    @ExceptionHandler(com.pair.domain.attempt.exception.TooManyRunsException.class)
+    ResponseEntity<Map<String, String>> tooManyRuns(RuntimeException e) {
+        return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     ResponseEntity<Map<String, String>> notFound(NoSuchElementException e) {
         return body(HttpStatus.NOT_FOUND, e.getMessage());
