@@ -162,7 +162,7 @@ class BizFlowTest {
 
         assertThat(o.passed()).isTrue();
         assertThat(o.attempts()).isEqualTo(1);
-        assertThat(o.checks()).hasSize(10);
+        assertThat(o.checks()).hasSize(12);
         assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
 
@@ -224,7 +224,7 @@ class BizFlowTest {
 
         // report.json: 함정, 검사 7개
         var report = json.readTree(writer.report("biz-pass"));
-        assertThat(report.get("checks")).hasSize(10);
+        assertThat(report.get("checks")).hasSize(12);
         assertThat(report.get("details").get("trap").get("evidence").asText()).isEqualTo(BizFixtures.EVIDENCE);
         assertThat(report.get("details").get("solverModel").asText()).isEqualTo("claude-sonnet-5-5");
         assertThat(report.get("form").get("track").asText()).isEqualTo("BIZ");
@@ -333,7 +333,7 @@ class BizFlowTest {
         var j = json.readTree(done);
         assertThat(j.get("status").asText()).as(done).isEqualTo("DONE");
         assertThat(j.get("taskCode").asText()).isEqualTo("biz-api");
-        assertThat(j.get("checks")).hasSize(10);
+        assertThat(j.get("checks")).hasSize(12);
         assertThat(records.findByCode("biz-api").orElseThrow().getTrack()).isEqualTo("BIZ");
         assertThat(pdfFilesOnDisk()).isPositive();
     }

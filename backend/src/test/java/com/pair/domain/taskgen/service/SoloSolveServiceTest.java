@@ -125,7 +125,9 @@ class SoloSolveServiceTest {
         assertThat(r.check().ok()).isFalse();
         assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
         assertThat(r.check().needsRegeneration()).isFalse();
-        assertThat(r.check().detail()).isEqualTo("응시자 AI(gpt-6-luna)가 설명만 보고 2번 모두 바로 풀었어요. 함정을 깊게 하거나 자가진단용으로 쓰세요");
+        assertThat(r.check().detail()).startsWith("응시자 AI(gpt-6-luna)가 설명만 보고 2번 모두 바로 풀었어요.")
+                .contains("AI 가 본 자료: 설명, 요구사항 1줄").contains("AI 가 바로 고친 곳: src/calc/Calc.java")
+                .endsWith("함정을 깊게 하거나 자가진단용으로 쓰세요");
         assertThat(r.files()).containsOnlyKeys("1/src/calc/Calc.java", "2/src/calc/Calc.java");
         assertThat(r.inputTokens()).isEqualTo(200);
         assertThat(r.outputTokens()).isEqualTo(100);
@@ -137,6 +139,27 @@ class SoloSolveServiceTest {
             assertThat(src.get("src/calc/Calc.java")).isEqualTo(RIGHT);
             assertThat(src).containsKeys("test/calc/CalcTest.java", "test/calc/HiddenCalcTest.java");
         });
+    }
+
+    @Test
+    @DisplayName("strict(LIVE)면 2번 모두 풀릴 때 fail 이라 다시 생성 대상이고, 설명에 풀이 요지와 '다시 설계 지시' 가 들어간다")
+    void bothSolvedStrict() {
+        ai.script.add(answer(RIGHT));
+        ai.script.add(answer(RIGHT));
+        var r = service().run(draft(), true);
+
+        assertThat(r.check().ok()).isFalse();
+        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.FAIL);
+        assertThat(r.check().needsRegeneration()).isTrue();
+        assertThat(r.check().detail()).contains("AI 가 바로 고친 곳").contains("다시 설계 지시").contains("한 줄에서 바로 보이지 않게");
+    }
+
+    @Test
+    @DisplayName("strict 라도 한 번이라도 못 풀면 ok 이다")
+    void oneFailsHiddenStrict() {
+        ai.script.add(answer(RIGHT));
+        ai.script.add(answer(WRONG));
+        assertThat(service().run(draft(), true).check().ok()).isTrue();
     }
 
     @Test

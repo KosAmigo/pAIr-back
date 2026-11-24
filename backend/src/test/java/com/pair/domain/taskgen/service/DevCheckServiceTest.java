@@ -39,14 +39,16 @@ class DevCheckServiceTest {
             f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"), f("NOTES.md", NOTES));
 
     @Test
-    @DisplayName("정상 Draft 는 검사 11개를 모두 통과하고, 같은 실행은 한 번만 돈다 (기본 3번 + 오답 2번)")
+    @DisplayName("정상 Draft 는 검사 13개를 모두 통과하고, 같은 실행은 한 번만 돈다 (기본 3번 + 오답 2번 + 다른 풀이 1번)")
     void allPass() {
         var results = run(TaskGenFixtures.good(), TaskGenFixtures.form());
-        assertThat(results).hasSize(11).allMatch(GenCheckResultDto::ok, results.toString());
+        assertThat(results).hasSize(13).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(results).extracting(GenCheckResultDto::level).containsOnly("fail", "warn");
         assertThat(results).filteredOn(r -> r.name().equals(DevCheckService.AMOUNT)).extracting(GenCheckResultDto::level).containsExactly("warn");
-        assertThat(results).filteredOn(r -> !r.name().equals(DevCheckService.AMOUNT)).extracting(GenCheckResultDto::level).containsOnly("fail");
-        assertThat(runner.calls.get()).isEqualTo(5);
+        assertThat(results).filteredOn(r -> r.name().equals(DevCheckService.NO_SOLUTION_TEXT)).extracting(GenCheckResultDto::level).containsExactly("warn");
+        assertThat(results).filteredOn(r -> !r.name().equals(DevCheckService.AMOUNT) && !r.name().equals(DevCheckService.NO_SOLUTION_TEXT))
+                .extracting(GenCheckResultDto::level).containsOnly("fail");
+        assertThat(runner.calls.get()).isEqualTo(6);
     }
 
     @Test
@@ -246,6 +248,114 @@ class DevCheckServiceTest {
 
     // ── 5. 후속 질문 ─────────────────────
 
+    private static DevDraftDto.AltSolution alt(String note, String cart) {
+        return new DevDraftDto.AltSolution(note, List.of(f("src/shop/Cart.java", cart)));
+    }
+
+    @Test
+    @DisplayName("다른 풀이가 하나라도 숨은 테스트에 떨어지면 fail: 어떤 테스트가 어떤 풀이를 떨어뜨렸는지 적고 재생성 대상이다")
+    void altSolutionFails() {
+        var good = TaskGenFixtures.good();
+        var d = edit(good, b -> b.altSolutions(List.of(
+                alt("락 안에서 조회", CART_SOLVED.replace("sum += 11;", "sum += 10 + 1;")),
+                alt("락 밖에서 조회", CART_SOLVED.replace(" // FIXED", "").replace("sum += 12;", "sum += 10 + 2;")))));
+        assertThat(failedNames(d)).containsExactly(DevCheckService.ALT_SOLUTIONS);
+        var r = result(d, DevCheckService.ALT_SOLUTIONS, null);
+        assertThat(r.needsRegeneration()).isTrue();
+        assertThat(r.level()).isEqualTo("fail");
+        assertThat(r.detail()).contains("shop.HiddenCartTest.couponOnce").contains("다른 풀이 2 (락 밖에서 조회)")
+                .doesNotContain("다른 풀이 1 (락 안에서 조회) 을 떨어뜨렸습니다").contains("대기 장치").contains("결과");
+    }
+
+    @Test
+    @DisplayName("다른 풀이가 모두 통과하면 통과, 컴파일 안 되거나 경로가 src/ 가 아니면 fail")
+    void altSolutionPassesOrBroken() {
+        var good = TaskGenFixtures.good();
+        var r = result(good, DevCheckService.ALT_SOLUTIONS, null);
+        assertThat(r.ok()).isTrue();
+        assertThat(r.detail()).contains("1개 모두");
+
+        var badPath = edit(good, b -> b.altSolutions(List.of(new DevDraftDto.AltSolution("경로 이상",
+                List.of(f("test/shop/HiddenCartTest.java", CART_SOLVED))))));
+        assertThat(result(badPath, DevCheckService.ALT_SOLUTIONS, null).needsRegeneration()).isTrue();
+        assertThat(result(badPath, DevCheckService.ALT_SOLUTIONS, null).detail()).contains("다른 풀이 1의 파일 경로");
+
+        var empty = edit(good, b -> b.altSolutions(List.of(new DevDraftDto.AltSolution("파일 없음", List.of()))));
+        assertThat(result(empty, DevCheckService.ALT_SOLUTIONS, null).ok()).isFalse();
+    }
+
+    @Test
+    @DisplayName("다른 풀이가 없으면(옛 형식) warn 이라 재생성하지 않고, 정답과 똑같은 풀이도 warn")
+    void altSolutionMissingIsWarn() {
+        var none = edit(TaskGenFixtures.good(), b -> b.altSolutions(null));
+        var r = result(none, DevCheckService.ALT_SOLUTIONS, null);
+        assertThat(r.ok()).isFalse();
+        assertThat(r.level()).isEqualTo("warn");
+        assertThat(r.needsRegeneration()).isFalse();
+        assertThat(r.detail()).contains("altSolutions");
+        assertThat(result(edit(none, b -> b.altSolutions(List.of())), DevCheckService.ALT_SOLUTIONS, null).level()).isEqualTo("warn");
+
+        var same = edit(none, b -> b.altSolutions(List.of(alt("똑같음", CART_SOLVED.replace("    int", "      int")))));
+        var rs = result(same, DevCheckService.ALT_SOLUTIONS, null);
+        assertThat(rs.level()).isEqualTo("warn");
+        assertThat(rs.detail()).contains("정답과 같아");
+    }
+
+    @Test
+    @DisplayName("다른 풀이는 앞의 2개만 돌린다")
+    void altSolutionMaxTwo() {
+        var many = edit(TaskGenFixtures.good(), b -> b.altSolutions(List.of(
+                alt("1", CART_SOLVED.replace("sum += 11;", "sum += 10 + 1;")), alt("2", CART_SOLVED.replace("sum += 12;", "sum += 10 + 2;")),
+                alt("3(돌리지 않음)", CART_SOLVED.replace(" // FIXED", "")))));
+        assertThat(failedNames(many)).isEmpty();
+        assertThat(runner.calls.get()).isEqualTo(7); // 기본 3 + 오답 2 + 다른 풀이 2
+    }
+
+    @Test
+    @DisplayName("요구사항·NOTES 의 해법 문장은 warn: 계산식을 말로 쓰거나 '~해야 합니다/~하도록 고치면' 이 있으면 걸리고, 현상·불변식 문장은 안 걸린다")
+    void solutionTextWarn() {
+        var good = TaskGenFixtures.good();
+        assertThat(result(good, DevCheckService.NO_SOLUTION_TEXT, null).ok()).isTrue();
+
+        var req = edit(good, b -> b.requirements(List.of("결제액 1원당 100분의 1점을 주고 가장 큰 정수로 맞춘다.", "승인된 주문 수는 재고를 넘지 않는다.")));
+        var rr = result(req, DevCheckService.NO_SOLUTION_TEXT, null);
+        assertThat(rr.ok()).isFalse();
+        assertThat(rr.level()).isEqualTo("warn");
+        assertThat(rr.needsRegeneration()).isFalse();
+        assertThat(rr.detail()).contains("요구사항: 결제액 1원당").doesNotContain("승인된 주문 수는");
+
+        var notes = edit(good, b -> b.files(List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
+                f("NOTES.md", NOTES + "재고 확인과 차감은 한 번에 확정해야 합니다.\n"))));
+        assertThat(result(notes, DevCheckService.NO_SOLUTION_TEXT, null).detail()).contains("NOTES.md: 재고 확인과 차감은 한 번에 확정해야 합니다");
+        assertThat(result(notes, DevCheckService.NO_SOLUTION_TEXT, null).needsRegeneration()).isFalse();
+    }
+
+    @Test
+    @DisplayName("해법 문장 패턴: 실제 예시 문장 몇 개로 오탐·미탐을 조정한다")
+    void solutionPatterns() {
+        for (String hit : List.of("재고 차감과 확인을 한 번에 확정해야 합니다.", "락을 하나로 합치도록 고치면 해결됩니다.", "상태를 먼저 바꿔야 한다.",
+                "금액에서 차감액을 뺀 뒤 100으로 나눈다.", "합계를 곱해 내림한다.", "점수는 결제액의 100분의 1이며 가장 큰 정수를 쓴다.")) {
+            assertThat(DevCheckService.NOTES_HINT.matcher(hit).find() || DevCheckService.REQ_HINT.matcher(hit).find()).as(hit).isTrue();
+        }
+        for (String miss : List.of("상품 A의 수량이 1인 상태에서 서로 다른 주문 두 건이 접수됐고 조회값은 -1이었습니다.",
+                "같은 주문번호를 다시 보내도 잔여 수량은 그대로 유지된다.", "승인 개수는 재고 수량을 넘지 않는다.", "내림차순으로 정렬된 목록을 반환한다.",
+                "구매 금액 101원, 차감액 2원이면 5점이 기대된다.", "담당자는 재전송이 새 주문으로 취급되지 않는지 확인해 달라고 요청했습니다.")) {
+            assertThat(DevCheckService.NOTES_HINT.matcher(miss).find() || DevCheckService.REQ_HINT.matcher(miss).find()).as(miss).isFalse();
+        }
+    }
+
+    @Test
+    @DisplayName("단서 문장: 해법 문장이거나 AI 풀이가 바꾼 줄의 식별자가 든 문장만 고르고 최대 5개")
+    void clueSentences() {
+        var d = edit(TaskGenFixtures.good(), b -> b.requirements(List.of("available() 는 항상 0 이상을 돌려준다.", "금액을 올바르게 계산한다.",
+                "락을 하나로 합치도록 고친다.")).files(List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
+                f("NOTES.md", NOTES + "한 번에 확정해야 합니다."))));
+        var clues = DevCheckService.clueSentences(d, "src/shop/Cart.java -synchronized void reserve() +available()");
+        assertThat(clues).contains("[요구사항] available() 는 항상 0 이상을 돌려준다.", "[요구사항] 락을 하나로 합치도록 고친다.", "[NOTES.md] 한 번에 확정해야 합니다.")
+                .doesNotContain("[요구사항] 금액을 올바르게 계산한다.");
+        assertThat(clues.size()).isLessThanOrEqualTo(5);
+    }
+
     @Test
     @DisplayName("맞춤 후속 질문이 비었거나 핵심어·숨은 테스트 이름이 있으면 '후속 질문이 과제에 맞음' 만 실패한다")
     void followUp() {
@@ -276,7 +386,9 @@ class DevCheckServiceTest {
                 null, null, List.of("부호 반전", "마이너스"),
                 List.of(new DevDraftDto.WrongFix("음수를 0 으로 바꾼다", List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return n < 0 ? 0 : n; } }\n"))),
                         new DevDraftDto.WrongFix("음수에 1 을 더한다", List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return n < 0 ? n + 1 : n; } }\n")))),
-                "AI 가 고친 코드를 다른 입력으로도 확인했나요?");
+                "AI 가 고친 코드를 다른 입력으로도 확인했나요?",
+                List.of(new DevDraftDto.AltSolution("Math.abs 로 바로 구한다",
+                        List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return Math.abs(n); } }\n")))));
         var results = DevCheckService.forDraft(local, d).stream().map(c -> c.run(d)).toList();
         assertThat(results.stream().filter(GenCheckResultDto::needsRegeneration)).isEmpty();
         assertThat(results.stream().filter(r -> !r.ok()).map(GenCheckResultDto::name)).containsExactly(DevCheckService.AMOUNT); // 분량 경고만

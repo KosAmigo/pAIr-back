@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.CodeRunner.RunResult;
 
-/** 개발 과제 검사 11개 (설계 6장 + 검수 결과로 더한 5개). 실행은 CodeRunner 인터페이스로만 한다 */
+/** 개발 과제 검사 13개 (설계 6장 + 검수 결과로 더한 7개). 실행은 CodeRunner 인터페이스로만 한다 */
 final class DevCheckService {
 
     static final String FORMAT = "형식";
@@ -27,6 +27,8 @@ final class DevCheckService {
     static final String AMOUNT = "분량 대비 시간";
     static final String MATERIALS = "과제 종류별 필수 자료";
     static final String FOLLOW_UP = "후속 질문이 과제에 맞음";
+    static final String ALT_SOLUTIONS = "다른 방식의 올바른 풀이도 통과";
+    static final String NO_SOLUTION_TEXT = "요구사항·메모에 해법 문장 없음";
 
     static final long TIME_LIMIT_MS = 30_000;
 
@@ -40,6 +42,23 @@ final class DevCheckService {
     private static final int MIN_MATERIAL_CHARS = 200;
     private static final Pattern HINT = Pattern.compile(
             "(//|/\\*|\\*).*(버그|bug|TODO|FIXME|함정|일부러|잘못된|문제가 있)", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * 접수 메모(NOTES.md·INCIDENT.md)에서 해법을 알려 주는 말. 현상·재현 값만 적어야 하는 글이라 "~해야 합니다", "~하도록" 같은 말이 없어야 한다.
+     * 넓게 잡으면 오탐이 늘어 말끝 형태까지 맞춘다(경고만 하므로 약간의 오탐은 허용)
+     */
+    static final Pattern NOTES_HINT = Pattern.compile(
+            "해야\\s*(합니다|한다|함|해요)|하도록|도록\\s*(고[치친쳐]|수정|바[꾸꾼꿔]|변경)|고쳐야|고치면|고친다면|수정해야|수정하면|바꿔야|바꾸면|한\\s*번에\\s*확정|확정해야|일치시켜야");
+    /** 요구사항에서 해법·계산 결합 방식을 말로 푼 것. 입력→기대 출력, 불변식만 있어야 한다 */
+    static final Pattern REQ_HINT = Pattern.compile(
+            "하도록|도록\\s*(고[치친쳐]|수정|바[꾸꾼꿔]|변경)|고쳐야|고치면|수정해야|바꿔야|바꾸면|곱해|곱한|곱하여|곱하고|(나눈|나누어|뺀|더한|합친)\\s*(뒤|후|값에|금액에)"
+                    + "|내림(?!차순)|올림|버림|\\d+분의\\s*\\d+|가장\\s*(큰|작은)\\s*정수|한\\s*번에\\s*확정");
+    private static final int MAX_CLUES = 5;
+    private static final int CLUE_CHARS = 110;
+    /** 풀이가 바꾼 줄에서 문장과 겹침을 볼 때 뺄 흔한 말 */
+    private static final java.util.Set<String> COMMON_TOKENS = java.util.Set.of("return", "public", "private", "protected", "static", "final",
+            "void", "this", "else", "class", "String", "boolean", "long", "int", "new", "null", "true", "false", "synchronized", "throw",
+            "throws", "import", "package", "List", "Map", "Math");
 
     private DevCheckService() {}
 
@@ -104,7 +123,112 @@ final class DevCheckService {
                 }),
                 warn(AMOUNT, d -> amount(d, form == null ? 60 : form.minutes())),
                 check(MATERIALS, DevCheckService::materials),
-                check(FOLLOW_UP, DevCheckService::followUp));
+                check(FOLLOW_UP, DevCheckService::followUp),
+                // 다른 방식의 올바른 풀이가 없으면 warn(옛 형식 호환), 있는데 떨어지면 fail 이라 결과마다 등급이 다르다
+                checkOwnLevel(ALT_SOLUTIONS, d -> {
+                    if (!runs.formatOk()) return skipped();
+                    return altSolutions(d, runs);
+                }),
+                warn(NO_SOLUTION_TEXT, DevCheckService::solutionText));
+    }
+
+    // ── 다른 풀이, 해법 문장 ─────────────────────────────
+
+    /**
+     * 정답과 구조가 다른 올바른 풀이 1~2개가 숨은+공개 테스트를 모두 통과해야 한다. 하나라도 떨어지면 fail
+     * (숨은 테스트가 특정 구현 구조를 전제해 올바른 풀이를 떨어뜨리는 경우). 없으면 warn.
+     */
+    private static GenCheckResultDto altSolutions(DevDraftDto d, DevRunService runs) {
+        List<DevDraftDto.AltSolution> alts = d.altSolutions() == null ? List.of() : d.altSolutions();
+        if (alts.isEmpty()) {
+            return warnResult("정답과 다른 방식의 올바른 풀이(altSolutions)가 없어 숨은 테스트가 올바른 풀이를 떨어뜨리는지 확인하지 못했습니다.");
+        }
+        String p = DevRunService.altSolutionProblem(d);
+        if (p != null) return fail(p);
+        Map<String, String> solution = DevRunService.toMap(d.solution());
+        boolean same = alts.stream().allMatch(a -> {
+            Map<String, String> m = DevRunService.toMap(a.files());
+            return m.size() == solution.size() && m.entrySet().stream()
+                    .allMatch(e -> solution.containsKey(e.getKey()) && noSpace(solution.get(e.getKey())).equals(noSpace(e.getValue())));
+        });
+        if (same) return warnResult("다른 풀이가 정답과 같아 확인이 되지 않습니다. 락 위치·자료구조·메서드 분리 등 구조가 다른 풀이를 쓰세요.");
+        List<String> bad = new ArrayList<>();
+        for (var run : runs.altRuns()) {
+            var r = run.result();
+            String label = "다른 풀이 " + run.number() + (run.alt().note() == null || run.alt().note().isBlank() ? "" : " (" + shortText(run.alt().note()) + ")");
+            if (!r.compiled()) {
+                bad.add(label + " 이 컴파일되지 않습니다: " + DevRunService.problem(r));
+            } else if (r.failed() > 0) {
+                List<String> names = r.tests().stream().filter(t -> !t.passed()).limit(3).map(CodeRunner.TestCase::name).toList();
+                bad.add("테스트 " + names + " 가 올바른 풀이인 " + label + " 을 떨어뜨렸습니다(" + r.failed() + "개 실패)");
+            }
+        }
+        if (bad.isEmpty()) return ok("다른 방식의 올바른 풀이 " + runs.altRuns().size() + "개 모두 숨은·공개 테스트를 통과합니다.");
+        return fail(String.join(" / ", bad) + ". 숨은 테스트가 특정 구현 구조(어떤 메서드를 락 안/밖에서 부르는지 등)를 전제하면 안 됩니다. "
+                + "대기 장치(CyclicBarrier·latch)는 타임아웃이 나도 실패시키지 말고 그냥 진행하게 하고, 단언은 결과(재고 음수 여부, 승인 개수 등)만 하세요.");
+    }
+
+    private static String noSpace(String s) {
+        return s == null ? "" : s.replaceAll("\\s+", "");
+    }
+
+    /** 요구사항과 접수 메모(NOTES.md·INCIDENT.md)에 해법·계산식을 말로 푼 문장이 있으면 warn */
+    private static GenCheckResultDto solutionText(DevDraftDto d) {
+        List<String> found = new ArrayList<>();
+        for (String req : d.requirements() == null ? List.<String>of() : d.requirements()) {
+            for (String sentence : sentences(req)) if (REQ_HINT.matcher(sentence).find()) found.add("요구사항: " + clip(sentence, 80));
+        }
+        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
+            if (f == null || f.path() == null || f.content() == null) continue;
+            if (!f.path().equals("NOTES.md") && !f.path().equals("INCIDENT.md")) continue;
+            for (String sentence : sentences(f.content())) if (NOTES_HINT.matcher(sentence).find()) found.add(f.path() + ": " + clip(sentence, 80));
+        }
+        if (found.isEmpty()) return ok("요구사항·메모에 해법을 말하는 문장이 없습니다.");
+        return fail("해법이나 계산식을 말로 푼 문장이 있습니다(" + found.size() + "개): " + found.stream().limit(4).map(x -> "'" + x + "'").toList()
+                + ". 요구사항은 입력→기대 출력 예·불변식만, 메모는 현상과 재현 값만 적으세요.");
+    }
+
+    /** 글을 문장(또는 줄) 단위로 나눈다. 비어 있는 조각은 뺀다 */
+    static List<String> sentences(String text) {
+        List<String> out = new ArrayList<>();
+        if (text == null) return out;
+        for (String part : text.split("(?<=[.!?。])\\s+|\\R")) {
+            String t = part.strip().replaceFirst("^[-*#>\\s]+", "");
+            if (!t.isBlank()) out.add(t);
+        }
+        return out;
+    }
+
+    /**
+     * 풀이(AI 단독 풀이 등)가 단서로 썼을 만한 문장. 요구사항·메모·summary 에서 (1) 해법을 말하는 문장이거나
+     * (2) 풀이가 바꾼 줄(fixSummary)의 식별자(4글자 이상)가 들어 있는 문장을 고른다. AI 호출 없이 정규식과 단순 비교만 한다.
+     * 각 문장은 [출처] 를 붙여 짧게 줄이고 최대 5개
+     */
+    static List<String> clueSentences(DevDraftDto d, String fixSummary) {
+        List<String> tokens = new ArrayList<>();
+        var m = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{3,}").matcher(fixSummary == null ? "" : fixSummary);
+        while (m.find()) if (!COMMON_TOKENS.contains(m.group()) && !tokens.contains(m.group())) tokens.add(m.group());
+        List<String> out = new ArrayList<>();
+        for (String r : d.requirements() == null ? List.<String>of() : d.requirements()) {
+            for (String sentence : sentences(r)) addClue(out, "요구사항", sentence, REQ_HINT, tokens);
+        }
+        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
+            if (f == null || f.path() == null || f.content() == null) continue;
+            if (!f.path().equals("NOTES.md") && !f.path().equals("INCIDENT.md")) continue;
+            for (String sentence : sentences(f.content())) addClue(out, f.path(), sentence, NOTES_HINT, tokens);
+        }
+        for (String sentence : sentences(d.summary())) addClue(out, "summary", sentence, REQ_HINT, tokens);
+        return out.size() > MAX_CLUES ? out.subList(0, MAX_CLUES) : out;
+    }
+
+    private static void addClue(List<String> out, String source, String sentence, Pattern hint, List<String> tokens) {
+        String lower = sentence.toLowerCase();
+        boolean hit = hint.matcher(sentence).find() || tokens.stream().anyMatch(t -> lower.contains(t.toLowerCase()));
+        if (hit) out.add("[" + source + "] " + clip(sentence, CLUE_CHARS));
+    }
+
+    private static String clip(String s, int max) {
+        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 
     // ── 새 검사들 ─────────────────────────────
@@ -179,21 +303,52 @@ final class DevCheckService {
                 : fail("정답 변경 " + changed + "줄, " + minutes + "분 과제치고 적음. 난이도·시간을 낮추거나 자료를 보강하세요");
     }
 
-    /** 두 파일에서 바뀐 줄 수(추가+삭제). 빈 줄과 앞뒤 공백은 무시한다. 한 줄을 고치면 삭제 1 + 추가 1 = 2줄 */
+    /**
+     * 두 파일에서 바뀐 줄 수(추가+삭제). 공백·빈 줄은 무시하고, 줄을 옮기기만 한 것은 세지 않는다
+     * (정리한 줄 모음을 비교한다). 한 줄을 고치면 삭제 1 + 추가 1 = 2줄
+     */
     static int changedLines(String before, String after) {
-        List<String> a = lines(before), b = lines(after);
-        int[][] lcs = new int[a.size() + 1][b.size() + 1];
-        for (int i = a.size() - 1; i >= 0; i--) {
-            for (int j = b.size() - 1; j >= 0; j--) {
-                lcs[i][j] = a.get(i).equals(b.get(j)) ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-            }
+        Map<String, Integer> diff = lineDiff(before, after, new LinkedHashMap<>());
+        int n = 0;
+        for (int v : diff.values()) n += Math.abs(v);
+        return n;
+    }
+
+    /** 바뀐 줄을 "+추가 -삭제" 모양의 짧은 글로(미리 정리한 줄 기준). 바뀐 게 없으면 빈 글 */
+    static String changeSummary(String before, String after) {
+        List<String> add = new ArrayList<>(), del = new ArrayList<>();
+        Map<String, String> shown = new LinkedHashMap<>();
+        lineDiff(before, after, shown).forEach((key, v) -> {
+            for (int i = 0; i < Math.abs(v); i++) (v > 0 ? add : del).add(shown.get(key));
+        });
+        StringBuilder sb = new StringBuilder();
+        for (String l : del) sb.append("-").append(l.length() > 80 ? l.substring(0, 80) : l).append(' ');
+        for (String l : add) sb.append("+").append(l.length() > 80 ? l.substring(0, 80) : l).append(' ');
+        return sb.toString().strip();
+    }
+
+    /** 줄별 (후 - 전) 개수. 모든 공백을 지운 줄로 센다 */
+    private static Map<String, Integer> lineDiff(String before, String after, Map<String, String> shown) {
+        Map<String, Integer> m = new LinkedHashMap<>();
+        for (String l : lines(before)) {
+            String k = l.replaceAll("\\s+", "");
+            shown.putIfAbsent(k, l);
+            m.merge(k, -1, Integer::sum);
         }
-        return a.size() + b.size() - 2 * lcs[0][0];
+        for (String l : lines(after)) {
+            String k = l.replaceAll("\\s+", "");
+            shown.putIfAbsent(k, l);
+            m.merge(k, 1, Integer::sum);
+        }
+        m.values().removeIf(v -> v == 0);
+        return m;
     }
 
     private static List<String> lines(String s) {
         List<String> out = new ArrayList<>();
-        if (s != null) for (String l : s.split("\\R")) if (!l.isBlank()) out.add(l.strip());
+        if (s != null) {
+            for (String l : s.split("\\R")) if (!l.isBlank()) out.add(l.strip());
+        }
         return out;
     }
 
@@ -245,6 +400,22 @@ final class DevCheckService {
         return check(name, GenCheckResultDto.WARN, body);
     }
 
+    /** 결과마다 등급이 다른 검사(body 가 돌려준 결과의 level 을 그대로 쓴다). 예외로 실패하면 fail */
+    private static GenCheckService<DevDraftDto> checkOwnLevel(String name, Function<DevDraftDto, GenCheckResultDto> body) {
+        return new GenCheckService<>() {
+            @Override
+            public String name() {
+                return name;
+            }
+
+            @Override
+            public GenCheckResultDto run(DevDraftDto d) {
+                GenCheckResultDto r = body.apply(d);
+                return new GenCheckResultDto(name, r.ok(), r.detail(), r.level());
+            }
+        };
+    }
+
     private static GenCheckService<DevDraftDto> check(String name, String level, Function<DevDraftDto, GenCheckResultDto> body) {
         return new GenCheckService<>() {
             @Override
@@ -267,6 +438,11 @@ final class DevCheckService {
 
     private static GenCheckResultDto ok(String detail) {
         return new GenCheckResultDto("", true, detail);
+    }
+
+    /** 통과하지 못했지만 다시 생성하지는 않고 알리기만 하는 결과 */
+    private static GenCheckResultDto warnResult(String detail) {
+        return new GenCheckResultDto("", false, detail, GenCheckResultDto.WARN);
     }
 
     private static GenCheckResultDto fail(String detail) {

@@ -21,9 +21,14 @@ final class DevRunService {
     /** 응시자에게 보이는 자료 파일: 장애 접수 메모, 재현 로그. 실행(컴파일)에는 쓰이지 않는다 */
     static final Pattern EXTRA = Pattern.compile("NOTES\\.md|INCIDENT\\.md|logs/[\\w.\\-]+\\.(log|txt|md)");
     static final int MAX_WRONG_FIXES = 3;
+    /** 다른 방식의 올바른 풀이는 1~2개만 돌린다(실행 비용) */
+    static final int MAX_ALT_SOLUTIONS = 2;
 
     /** 그럴듯한 오답 1개를 돌린 결과 (number 는 1부터) */
     record WrongRun(int number, DevDraftDto.WrongFix fix, RunResult result) {}
+
+    /** 다른 방식의 올바른 풀이 1개를 돌린 결과 (number 는 1부터) */
+    record AltRun(int number, DevDraftDto.AltSolution alt, RunResult result) {}
 
     private final CodeRunner runner;
     private final DevDraftDto draft;
@@ -31,6 +36,7 @@ final class DevRunService {
     private RunResult startHidden;
     private RunResult solved;
     private List<WrongRun> wrongRuns;
+    private List<AltRun> altRuns;
 
     DevRunService(CodeRunner runner, DevDraftDto draft) {
         this.runner = runner;
@@ -131,6 +137,44 @@ final class DevRunService {
             wrongRuns = out;
         }
         return wrongRuns;
+    }
+
+    /** 다른 풀이(altSolutions)의 형식 문제. 없거나(옛 형식) 문제가 없으면 null. src/ 파일만 가능하다 */
+    static String altSolutionProblem(DevDraftDto d) {
+        int n = 0;
+        for (var a : nz(d.altSolutions())) {
+            n++;
+            if (a == null || nz(a.files()).isEmpty()) return "다른 풀이 " + n + "에 파일이 없습니다.";
+            for (var f : a.files()) {
+                if (f == null || f.path() == null || f.content() == null) return "다른 풀이 " + n + "에 경로나 내용이 빈 파일이 있습니다.";
+                if (!PATH.matcher(f.path()).matches() || f.path().contains("//") || !f.path().startsWith("src/")) {
+                    return "다른 풀이 " + n + "의 파일 경로가 맞지 않습니다: " + f.path() + " (src/…java)";
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 다른 풀이마다 (시작 코드에 풀이 파일을 덮어쓴 것 + 공개 테스트 + 숨은 테스트)를 돌린다. 처음 필요할 때 한 번만 돈다.
+     * 앞의 MAX_ALT_SOLUTIONS 개만 돌린다. 형식이 맞지 않거나 없으면 빈 목록.
+     */
+    List<AltRun> altRuns() {
+        if (altRuns == null) {
+            List<AltRun> out = new ArrayList<>();
+            if (formatOk() && altSolutionProblem(draft) == null) {
+                int n = 0;
+                for (var a : nz(draft.altSolutions())) {
+                    if (n >= MAX_ALT_SOLUTIONS) break;
+                    Map<String, String> m = toMap(draft.files());
+                    m.putAll(toMap(a.files()));
+                    m.putAll(toMap(draft.hiddenTests()));
+                    out.add(new AltRun(++n, a, runner.run(m)));
+                }
+            }
+            altRuns = out;
+        }
+        return altRuns;
     }
 
     /** 컴파일 실패 등 실패 원인을 한두 줄로 */

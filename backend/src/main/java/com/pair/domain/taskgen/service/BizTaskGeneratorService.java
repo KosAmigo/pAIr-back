@@ -21,6 +21,9 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
             - 실제 회사처럼 보이는 가상의 회사와 수치를 씁니다. 실존 회사 이름은 쓰지 않습니다.
             - 자료는 두 종류입니다(제한 시간별 개수는 아래 깊이 규칙을 따름). csvFiles: 자료/이름.csv 1~2개(쉼표 구분, 첫 줄 머리글, 칸 안에 쉼표 없음). documents: 자료/이름.pdf 2~3개이며 각 문서를 쪽별 글(pages 배열)로 씁니다. 서버가 쪽 글을 그대로 PDF 로 만듭니다. 쪽 하나는 900자 이내, 30줄 이내로 쓰고 마크다운 기호(#, **, 표)는 쓰지 않습니다. 이모지와 특수 기호도 쓰지 않습니다. 자료 전체는 합쳐서 3,000~10,000자.
             - 함정은 자료를 꼼꼼히 보면 피할 수 있어야 합니다. 함정을 알아챌 근거 문장을 자료(문서 쪽 글이나 CSV)에 넣고, trap.evidence 에 그 문장을 한 줄로 그대로 복사합니다. 과제 설명에는 함정을 알려 주지 않습니다.
+            - trap.evidence 는 사실 진술(측정 범위, 집계 정의, 같은 기간에 있었던 일)로 씁니다. "~만으로 판단하지 않는다", "더해서는 안 된다", "혼동하지 않는다" 같은 해석 지시는 쓰지 않습니다. 근거 문장은 맥락 없이 따로 떠 있는 한 줄 문단으로 두지 말고, 다른 내용과 같은 문단 안에 자연스럽게 섞습니다. 함정을 피하는 계산 절차(단계별 계산식, "각각 곱해 더한다" 같은 안내)는 자료에 쓰지 않고 지표의 정의만 줍니다.
+            - 함정에 빠진 계산으로 내린 결론(추천안, 통과 여부)이 정답 결론과 달라지도록 수치를 정합니다. 함정에 빠져도 같은 결론이 나오면 함정이 판단을 가르지 못합니다. trap.correctConclusion 에 정답 결론을, trap.wrongConclusion 에 함정에 빠졌을 때의 결론을 한 문장으로 씁니다. 둘은 서로 달라야 합니다.
+            - 자료에 제시하는 '검토 중인 안'(검토 집행액, 운영팀이 요청한 안 등)은 정답이 아닌 안으로 둡니다. 대안이 여러 개면 그중 1개 이상은 함정에 빠진 사람이 고를 안으로 둡니다. 정답 조합이 자료에 그대로 적혀 있으면 안 됩니다.
             - checklist 는 숨은 채점 기준입니다. '## 필수 항목' 아래 번호 목록(결론, 자료 수치를 인용한 근거 3개, 함정 관련 계산, 리스크와 대응), '## 참고 계산'(정답 계산 과정), '## 흔한 함정'을 마크다운으로 씁니다.
             - questions 의 개수는 아래 깊이 규칙을 따릅니다(60분: 객관식(SINGLE) 2~3개와 단답형(SHORT) 2~3개). 객관식은 보기 4개에 정답 1개. 단답형은 자료의 수치로 계산하는 숫자 하나가 답이고 calc 에 계산식을 씁니다. 함정과 관련된 문항을 1개 이상 넣습니다.
             - 문항마다 sources 에 근거 자료를 2개 이상 적습니다. 서로 다른 문서(또는 CSV)의 경로와 쪽 번호(예: path "자료/설문 요약.pdf", pages "1,2")입니다. 정답은 문서 여러 개를 함께 봐야 알 수 있게 만들고, 한 문서만으로 풀리지 않게 합니다. 경로와 쪽 번호는 실제로 있어야 합니다(CSV 는 pages 를 빈 문자열로).
@@ -93,6 +96,20 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
         m.put("solverModel", props.solverModel());
         if (draft.trap() != null) m.put("trap", draft.trap());
         m.put("trapKeywords", draft.trapKeywords());
+        // 문항 검수용: 계산식과 흔한 오답은 DB 에 저장되지 않으므로 보고서에 남긴다
+        if (draft.questions() != null) {
+            List<Map<String, Object>> qs = new java.util.ArrayList<>();
+            int seq = 1;
+            for (var q : draft.questions()) {
+                Map<String, Object> e = new LinkedHashMap<>();
+                e.put("seq", seq++);
+                e.put("type", q.type());
+                e.put("calc", q.calc());
+                e.put("commonWrongAnswers", q.commonWrongAnswers());
+                qs.add(e);
+            }
+            m.put("questionNotes", qs);
+        }
         return m;
     }
 

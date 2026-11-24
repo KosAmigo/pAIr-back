@@ -176,11 +176,11 @@ class TaskGenFlowTest {
         assertThat(report.get("passed").asBoolean()).isTrue();
         assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
         assertThat(report.get("outputTokens").asLong()).isEqualTo(2000);
-        // 11개 + AI 혼자 바로 풀림(준비된 풀이가 없어 호출 실패 → 이 검사만 warn, 생성은 계속)
-        assertThat(report.get("checks")).hasSize(12);
-        assertThat(report.get("checks").get(11).get("name").asText()).isEqualTo(SoloSolveService.NAME);
-        assertThat(report.get("checks").get(11).get("ok").asBoolean()).isTrue();
-        assertThat(report.get("checks").get(11).get("detail").asText()).contains("호출 실패");
+        // 13개 + AI 혼자 바로 풀림(준비된 풀이가 없어 호출 실패 → 이 검사만 warn, 생성은 계속)
+        assertThat(report.get("checks")).hasSize(14);
+        assertThat(report.get("checks").get(13).get("name").asText()).isEqualTo(SoloSolveService.NAME);
+        assertThat(report.get("checks").get(13).get("ok").asBoolean()).isTrue();
+        assertThat(report.get("checks").get(13).get("detail").asText()).contains("호출 실패");
         assertThat(report.get("checks")).allSatisfy(c -> assertThat(c.get("level").asText()).isIn("fail", "warn"));
         assertThat(report.get("form").get("topic").asText()).isEqualTo("쿠폰 할인 계산");
     }
@@ -294,7 +294,8 @@ class TaskGenFlowTest {
         assertThat(tasks.hiddenFiles("flow-roundtrip")).containsOnlyKeys("shop/HiddenCartTest.java", "answer.md",
                 "_gen/report.json", "_gen/solution/src/shop/Cart.java.txt",
                 "_gen/wrong-fixes/1/reason.md", "_gen/wrong-fixes/1/src/shop/Cart.java.txt",
-                "_gen/wrong-fixes/2/reason.md", "_gen/wrong-fixes/2/src/shop/Cart.java.txt")
+                "_gen/wrong-fixes/2/reason.md", "_gen/wrong-fixes/2/src/shop/Cart.java.txt",
+                "_gen/alt-solutions/1/note.md", "_gen/alt-solutions/1/src/shop/Cart.java.txt")
                 .containsEntry("shop/HiddenCartTest.java", d.hiddenTests().get(0).content())
                 .containsEntry("answer.md", d.answer())
                 .containsEntry("_gen/solution/src/shop/Cart.java.txt", d.solution().get(0).content());
@@ -329,6 +330,41 @@ class TaskGenFlowTest {
         var report = json.readTree(writer.report("flow-retry-2"));
         assertThat(report.get("attempts").asInt()).isEqualTo(2);
         assertThat(report.get("inputTokens").asLong()).isEqualTo(2000);
+
+        // 마지막 시도 검사만 checks 에 남아도, 1차 시도가 왜 실패했는지 attemptLog 에 남는다
+        var log = report.get("attemptLog");
+        assertThat(log).hasSize(2);
+        assertThat(log.get(0).get("number").asInt()).isEqualTo(1);
+        assertThat(log.get(0).get("passed").asBoolean()).isFalse();
+        assertThat(log.get(0).get("problems").get(0).get("name").asText()).isEqualTo(DevCheckService.SOLVED_PASSES);
+        assertThat(log.get(0).get("problems").get(0).get("level").asText()).isEqualTo("fail");
+        assertThat(log.get(0).get("problems").get(0).get("detail").asText()).contains("테스트");
+        assertThat(log.get(0).has("seconds")).isTrue();
+        assertThat(log.get(1).get("number").asInt()).isEqualTo(2);
+        assertThat(log.get(1).get("passed").asBoolean()).isTrue();
+    }
+
+    @Test
+    @DisplayName("LIVE 에서 AI 혼자 풀리면 다시 만들 때 AI 의 변경 요약과 단서 문장(메모의 해법 문장)과 지시가 프롬프트에 들어간다")
+    void soloFeedbackHasChangeSummaryAndClues() {
+        String clueNotes = TaskGenFixtures.NOTES + "- 쿠폰은 한 장만 적용하도록 고치면 됩니다.\n";
+        DevDraftDto clued = TaskGenFixtures.edit(good("flow-clue-1"), b -> b.files(List.of(
+                TaskGenFixtures.f("src/shop/Cart.java", TaskGenFixtures.CART_START),
+                TaskGenFixtures.f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
+                TaskGenFixtures.f("NOTES.md", clueNotes))));
+        ai.script.add(clued);
+        ai.script.add(good("flow-clue-2"));
+        for (int i = 0; i < 4; i++) ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        var o = generator.generate(new com.pair.domain.taskgen.dto.TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "LIVE", 60),
+                1L, steps::add);
+
+        assertThat(o.attempts()).isEqualTo(2);
+        String retry = ai.users.get(1);
+        assertThat(retry).contains("AI 가 바로 고친 곳").contains("sum += 11;");                       // 변경 요약
+        assertThat(retry).contains("[NOTES.md] 쿠폰은 한 장만 적용하도록 고치면 됩니다");             // 단서 문장
+        assertThat(retry).contains("다시 설계 지시").contains("한 줄에서 바로 보이지 않게").contains("숨은 테스트에서 걸리게");
+        assertThat(retry).contains("일부러 읽기 어렵게 꼬는 방식은 안 됩니다");
+        assertThat(retry).doesNotContain("[NOTES.md] 고객 A");                                      // 해법과 상관없는 문장은 안 넣는다
     }
 
     private static DevDraftDto leaky(String code) {
@@ -376,7 +412,8 @@ class TaskGenFlowTest {
         for (var c : report.get("checks")) {
             boolean amount = c.get("name").asText().equals(DevCheckService.AMOUNT);
             boolean solo = c.get("name").asText().equals(SoloSolveService.NAME); // 풀이가 준비되지 않아 호출 실패 → ok, warn
-            assertThat(c.get("level").asText()).isEqualTo(amount || solo ? "warn" : "fail");
+            boolean text = c.get("name").asText().equals(DevCheckService.NO_SOLUTION_TEXT);
+            assertThat(c.get("level").asText()).isEqualTo(amount || solo || text ? "warn" : "fail");
             assertThat(c.get("ok").asBoolean()).isEqualTo(!amount);
             assertThat(c.has("name") && c.has("detail")).isTrue();
         }
@@ -500,10 +537,10 @@ class TaskGenFlowTest {
         assertThat(done.get("status").asText()).isEqualTo("DONE");
         assertThat(done.get("taskCode").asText()).isEqualTo("flow-api");
         assertThat(done.get("passed").asBoolean()).isTrue();
-        assertThat(done.get("checks")).hasSize(12);
+        assertThat(done.get("checks")).hasSize(14);
 
         mvc.perform(as(get("/api/admin/tasks/flow-api/gen-report"), "ADMIN")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(12));
+                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(14));
         mvc.perform(as(get("/api/admin/tasks/order-deadlock/gen-report"), "ADMIN")).andExpect(status().isNotFound());
         mvc.perform(as(get("/api/admin/task-gen/no-such-job"), "ADMIN")).andExpect(status().isNotFound());
     }
@@ -565,6 +602,40 @@ class TaskGenFlowTest {
         assertThat(report.get("details").get("soloTokens").get("input").asLong()).isEqualTo(60);
         assertThat(report.get("details").get("soloTokens").get("output").asLong()).isEqualTo(40);
         assertThat(tasks.hiddenFiles("flow-solo")).containsKeys("_gen/solo/1/src/shop/Cart.java.txt", "_gen/solo/2/src/shop/Cart.java.txt");
+    }
+
+    @Test
+    @DisplayName("LIVE 용도는 AI 혼자 2번 다 풀면 fail 이라 1회 다시 만들고, 다시 만들 때 AI 가 고친 곳과 '함정을 더 깊게' 가 전달된다")
+    void soloSolvedRegeneratesForLive() {
+        ai.script.add(good("flow-live-1"));
+        ai.script.add(good("flow-live-2"));
+        for (int i = 0; i < 4; i++) ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        var o = generator.generate(new com.pair.domain.taskgen.dto.TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "LIVE", 60),
+                1L, steps::add);
+
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(ai.users).hasSize(2);
+        assertThat(ai.users.get(1)).contains(SoloSolveService.NAME).contains("AI 가 바로 고친 곳").contains("다시 설계 지시");
+        assertThat(ai.soloUsers).hasSize(4);
+        assertThat(o.passed()).isFalse(); // 다시 만들어도 풀리면 fail 이 남는다(저장은 한다)
+        assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement()
+                .satisfies(c -> assertThat(c.level()).isEqualTo("fail"));
+    }
+
+    @Test
+    @DisplayName("LIVE 용도라도 다시 만든 Draft 를 AI 가 못 풀면 통과한다")
+    void soloUnsolvedAfterRegenerateForLive() {
+        ai.script.add(good("flow-live-3"));
+        ai.script.add(good("flow-live-4"));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
+        var o = generator.generate(new com.pair.domain.taskgen.dto.TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "LIVE", 60),
+                1L, steps::add);
+
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(o.passed()).isTrue();
     }
 
     @Test
