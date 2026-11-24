@@ -1,5 +1,7 @@
 package com.pair.domain.scoring.service;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
@@ -43,6 +45,7 @@ import com.pair.domain.task.TestTasks;
 /** 비개발 채점의 제공 자료: 과제 원본(PDF 포함)에서 가져오고, auto 로 full(캐시 앞부분)/rag(뒷부분)를 고른다. AI·임베딩은 가짜. */
 @SpringBootTest
 @ActiveProfiles("examtest")
+@Tag("slow")
 class ScoringReferenceTest {
 
     @TempDir

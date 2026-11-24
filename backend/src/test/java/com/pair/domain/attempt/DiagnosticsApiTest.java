@@ -1,5 +1,7 @@
 package com.pair.domain.attempt;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -7,20 +9,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,18 +25,8 @@ import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
 /** 오류 밑줄 API: 저장 전 내용을 덮어 분석하고, 저장·기록은 건드리지 않으며, 남의 응시는 막는다 */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class DiagnosticsApiTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class DiagnosticsApiTest extends BearerIntegrationTest {
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
@@ -53,7 +36,6 @@ class DiagnosticsApiTest {
     @Autowired TaskQuestionRepository taskQuestions;
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
-    @MockitoBean JavaMailSender mail;
 
     String token;
     String devId;

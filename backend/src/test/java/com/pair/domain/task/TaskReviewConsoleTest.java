@@ -1,5 +1,7 @@
 package com.pair.domain.task;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.task.entity.QuestionChoice;
 import com.pair.domain.task.entity.QuestionSource;
 import com.pair.domain.task.entity.ShortAnswerKey;
@@ -19,20 +21,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.time.Instant;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -40,19 +33,7 @@ import com.pair.infra.storage.TaskFileStorage;
 import com.pair.global.security.HeaderCurrentUserResolver;
 
 /** 관리자 검수용 파일·문항 API: ADMIN 만, 숨긴(HIDDEN) 과제도 보이고 숨은 파일·정답까지 나간다 */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class TaskReviewConsoleTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-        r.add("pair.taskgen.file-storage", () -> "local");
-    }
+class TaskReviewConsoleTest extends ExamIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired TaskRepository tasks;
@@ -63,7 +44,6 @@ class TaskReviewConsoleTest {
     @Autowired QuestionChoiceRepository choices;
     @Autowired ShortAnswerKeyRepository keys;
     @Autowired QuestionSourceRepository sources;
-    @MockitoBean JavaMailSender mail;
 
     @BeforeEach
     void setUp() {

@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import com.pair.infra.ai.AiUnavailableException;
 
 /** 일부러 망가뜨린 Draft 에서 해당 검사만 실패하는지 (실제 PdfService, 가짜 풀이 모델) */
+@Tag("slow")
 class BizCheckServiceTest {
 
     private final PdfService pdf = new PdfService();

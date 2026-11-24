@@ -1,5 +1,7 @@
 package com.pair.domain.grader.repository;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.grader.dto.PromptVersionStateDto;
 import com.pair.domain.grader.service.LegacyPromptImportService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,6 +39,7 @@ import com.pair.domain.task.TestTasks;
 /** 프롬프트 버전 원본이 DB 인지: 저장·조회, 활성 하나, 옛 파일 가져오기, 채점의 version_id (H2, 모델 호출 없음) */
 @SpringBootTest
 @ActiveProfiles("examtest")
+@Tag("slow")
 class PromptVersionStateRepositoryTest {
 
     @TempDir

@@ -1,5 +1,7 @@
 package com.pair.domain.attempt;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.service.EditProposalService;
@@ -11,25 +13,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
-import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.SandboxRunner;
 import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.repository.TaskFileRepository;
@@ -40,18 +32,8 @@ import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
 /** 응시 쪽 방어: 읽기 전용 파일은 저장·AI 적용 모두 막고, 실행 대기열이 꽉 차면 503 */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class AttemptGuardsTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class AttemptGuardsTest extends BearerIntegrationTest {
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
@@ -60,9 +42,6 @@ class AttemptGuardsTest {
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
     @Autowired MockMvc mvc;
-    @MockitoBean JavaMailSender mail;
-    @MockitoBean AssistantClient assistant;
-    @MockitoBean CodeRunner runner;
 
     String token;
     String devId;

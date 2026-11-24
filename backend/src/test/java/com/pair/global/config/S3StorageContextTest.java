@@ -1,5 +1,7 @@
 package com.pair.global.config;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import com.pair.infra.storage.TaskFileStorage;
         "pair.exam.s3.secret-key="
 })
 @ActiveProfiles("examtest")
+@Tag("slow")
 class S3StorageContextTest {
 
     @MockitoBean JavaMailSender mail;

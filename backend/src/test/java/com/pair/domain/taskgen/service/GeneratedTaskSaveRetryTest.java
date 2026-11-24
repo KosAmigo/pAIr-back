@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -35,6 +37,7 @@ import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 /** 저장 중 code 유니크 충돌이 나면 다음 번호(-2, -3 …)로 다시 저장하는지 확인한다 (H2) */
 @SpringBootTest
 @ActiveProfiles("examtest")
+@Tag("slow")
 class GeneratedTaskSaveRetryTest {
 
     @TempDir

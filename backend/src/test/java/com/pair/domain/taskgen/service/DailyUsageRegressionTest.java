@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
@@ -20,6 +22,7 @@ import com.pair.infra.sandbox.LocalJvmRunner;
  * 실제 LocalJvmRunner 로 돌려서, 새 검사 1(핵심어 노출)·2(그럴듯한 오답)·4(장애 자료)가 실제로 걸리고
  * 3(분량)은 경고만 하는지, 고친 Draft 는 fail 검사를 모두 통과하는지 확인한다. AI 호출은 없다.
  */
+@Tag("slow")
 class DailyUsageRegressionTest {
 
     private static LocalJvmRunner runner;

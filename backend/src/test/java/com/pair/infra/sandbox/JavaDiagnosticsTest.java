@@ -1,5 +1,7 @@
 package com.pair.infra.sandbox;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import com.pair.infra.sandbox.CodeRunner.CompileDiagnostic;
 
+@Tag("slow")
 class JavaDiagnosticsTest {
 
     private final JavaDiagnostics diagnostics = new JavaDiagnostics();

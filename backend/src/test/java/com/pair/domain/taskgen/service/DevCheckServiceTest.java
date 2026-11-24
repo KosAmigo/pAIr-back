@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
@@ -19,6 +21,7 @@ import com.pair.global.config.PairProperties;
 import com.pair.infra.sandbox.LocalJvmRunner;
 
 /** 일부러 망가뜨린 Draft 에서 해당 검사만 실패하는지 */
+@Tag("slow")
 class DevCheckServiceTest {
 
     private final TaskGenFixtures.FakeRunner runner = new TaskGenFixtures.FakeRunner();

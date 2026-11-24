@@ -1,5 +1,7 @@
 package com.pair.domain.question;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.auth.dto.AuthResponse;
 import com.pair.domain.question.entity.QuestionResult;
 import com.pair.domain.question.repository.ChoiceAnswerRepository;
@@ -17,12 +19,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -49,10 +46,7 @@ import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
 /** 문항 API(보기·답 저장·리포트)와 채점 흐름. 실제 AI 호출은 없다 */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class QuestionApiTest {
+class QuestionApiTest extends BearerIntegrationTest {
 
     static final long BIZ_TASK = 2L;
     static final long DEV_TASK = 1L;
@@ -73,7 +67,6 @@ class QuestionApiTest {
     @Autowired ScoringResultRepository scoringRecords;
     @Autowired PromptVersionRepository promptVersions;
     @Autowired ScoringRepository scorings;
-    @MockitoBean JavaMailSender mail;
 
     AuthResponse owner;
     AuthResponse other;

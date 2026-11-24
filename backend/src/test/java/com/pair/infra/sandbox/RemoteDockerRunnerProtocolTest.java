@@ -1,5 +1,7 @@
 package com.pair.infra.sandbox;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,6 +25,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 import com.sun.net.httpserver.HttpServer;
 
 /** 실행 전용 API 의 인증과 오류 처리. 실행기는 가볍게 local 이라 Docker 가 없어도 돈다 */
+@Tag("slow")
 class RemoteDockerRunnerProtocolTest {
 
     private static ConfigurableApplicationContext server;

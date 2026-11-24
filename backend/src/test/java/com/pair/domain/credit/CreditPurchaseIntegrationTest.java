@@ -1,5 +1,7 @@
 package com.pair.domain.credit;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.credit.entity.CreditPurchase;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
 import com.pair.domain.credit.service.CreditPurchaseService;
@@ -19,26 +21,19 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 import com.pair.global.error.ConflictException;
 
-@SpringBootTest
-@ActiveProfiles("examtest")
-class CreditPurchaseIntegrationTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(ExamIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
     @Autowired AuthService auth;
     @Autowired CreditPurchaseService purchases;
     @Autowired CreditService credits;
     @Autowired CreditLedgerRepository ledger;
     @Autowired TransactionTemplate transactions;
-    @MockitoBean TossPaymentClient toss;
-    @MockitoBean JavaMailSender mail;
 
     @BeforeEach
     void setUp() {

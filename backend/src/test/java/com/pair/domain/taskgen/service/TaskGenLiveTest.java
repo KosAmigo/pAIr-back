@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,6 +31,7 @@ import com.pair.domain.task.repository.TaskRepository;
 @SpringBootTest
 @ActiveProfiles("examtest")
 @EnabledIfEnvironmentVariable(named = "PAIR_TASKGEN_LIVE", matches = "1")
+@Tag("slow")
 class TaskGenLiveTest {
 
     @TempDir

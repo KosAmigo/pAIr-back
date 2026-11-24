@@ -1,5 +1,7 @@
 package com.pair.domain.exam;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.exam.service.RelayAuthService;
 import com.pair.domain.exam.service.RelayLimitService;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,6 +37,7 @@ import com.pair.domain.exam.service.AttemptSubmitService;
 // 다른 통합 테스트 컨텍스트와 H2 메모리 DB(exam)를 나눠 쓰면 create-drop 이 서로의 테이블을 지우므로 전용 DB 를 쓴다
 @org.springframework.test.context.TestPropertySource(properties =
         "spring.datasource.url=jdbc:h2:mem:relay;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1")
+@Tag("slow")
 class ProctorRelayIntegrationTest {
 
     /** 짝은 입장 토큰마다 서버 메모리에 남으므로 테스트마다 다른 토큰을 쓴다 */
