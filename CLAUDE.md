@@ -43,6 +43,7 @@ com.pair
 - Put transactions on service methods. Watch for N+1 queries.
 
 ## Tests (keep the build fast)
+Summary for people: pAIr-docs `설계/백엔드_테스트와_빌드.md`.
 - Spring integration tests extend a shared base in `global/config`: `ExamIntegrationTest` (dev header auth) or `BearerIntegrationTest` (Bearer token auth). They share one Spring context, so don't add `@MockitoBean`, `@DynamicPropertySource`, `@TestPropertySource`, `properties=` or `@ActiveProfiles` to a subclass: any difference starts a new context and slows every build. Set per-test mock behaviour with `when(...)` in `@BeforeEach`.
 - Need a mock bean or property the bases don't have? Add it to the base only if most tests can share it; otherwise ask the user first.
 - Shared contexts share the H2 data. Don't depend on rows other tests left (e.g. counting all tasks); clean or filter your own data.
