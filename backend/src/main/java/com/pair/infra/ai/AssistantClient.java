@@ -82,11 +82,15 @@ public class AssistantClient {
                 }
             }).blockLast(Duration.ofMinutes(5));
         } catch (AiUnavailableException e) {
+            AiMetrics.call("OpenAI 스트리밍", meta[0], false, System.nanoTime() - started);
             throw e;
         } catch (RuntimeException e) {
+            AiMetrics.call("OpenAI 스트리밍", meta[0], false, System.nanoTime() - started);
             throw SpringAi.unavailable("OpenAI", e);
         }
         long ms = (System.nanoTime() - started) / 1_000_000;
+        AiMetrics.call("OpenAI 스트리밍", meta[0], true, System.nanoTime() - started);
+        AiMetrics.tokens("OpenAI 스트리밍", meta[0], usage[0], usage[1]);
         return new Reply(text.toString(), meta[0], usage[0], usage[1], usage[2], meta[1], ms);
     }
 
