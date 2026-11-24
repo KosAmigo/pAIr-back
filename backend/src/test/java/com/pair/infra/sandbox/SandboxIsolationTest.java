@@ -18,7 +18,11 @@ import com.pair.global.config.PairProperties;
 @EnabledIf("com.pair.infra.sandbox.SandboxRunnerTest#dockerReady")
 class SandboxIsolationTest {
 
-    private final SandboxRunner runner = new SandboxRunner(new PairProperties(null, null, null, null, new PairProperties.Run(5), null, null));
+    /** 병렬로 도는 다른 Docker 테스트의 pair-run-* 컨테이너를 "남은 것"으로 세지 않게 이 테스트만의 이름을 쓴다 */
+    private static final String PREFIX = "pair-isolation-test-";
+
+    private final SandboxRunner runner = new SandboxRunner(
+            new PairProperties(null, null, null, null, new PairProperties.Run(5), null, null), PREFIX);
 
     private static Map<String, String> candidate(String body) {
         return Map.of("src/bad/BadTest.java", """
@@ -35,7 +39,7 @@ class SandboxIsolationTest {
 
     @AfterEach
     void noContainerLeft() throws Exception {
-        Process p = new ProcessBuilder("docker", "ps", "-a", "-q", "--filter", "name=pair-run-").start();
+        Process p = new ProcessBuilder("docker", "ps", "-a", "-q", "--filter", "name=" + PREFIX).start();
         String left = new String(p.getInputStream().readAllBytes()).trim();
         p.waitFor();
         assertEquals("", left, "실행이 끝난 뒤에도 컨테이너가 남아 있다");

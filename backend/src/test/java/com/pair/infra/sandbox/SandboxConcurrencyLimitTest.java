@@ -22,13 +22,16 @@ import com.pair.global.config.PairProperties;
 @EnabledIf("com.pair.infra.sandbox.SandboxRunnerTest#dockerReady")
 class SandboxConcurrencyLimitTest {
 
+    /** 병렬로 도는 다른 Docker 테스트(SandboxRunnerTest 등)의 pair-run-* 컨테이너를 세지 않게 이 테스트만의 이름을 쓴다 */
+    private static final String PREFIX = "pair-limit-test-";
+
     private static SandboxRunner runner(int timeout, int max, int queueWait) {
         return new SandboxRunner(new PairProperties(null, null, null, null,
-                new PairProperties.Run(timeout, null, null, max, queueWait), null, null));
+                new PairProperties.Run(timeout, null, null, max, queueWait), null, null), PREFIX);
     }
 
     private static int runningContainers() throws Exception {
-        Process p = new ProcessBuilder("docker", "ps", "-q", "--filter", "name=pair-run-").start();
+        Process p = new ProcessBuilder("docker", "ps", "-q", "--filter", "name=" + PREFIX).start();
         String out = new String(p.getInputStream().readAllBytes()).trim();
         p.waitFor();
         return out.isEmpty() ? 0 : out.split("\\s+").length;

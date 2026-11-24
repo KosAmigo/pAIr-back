@@ -54,8 +54,9 @@ public class JwtTokens {
         this.decoder = jwtDecoder;
     }
 
-    public String access(long userId, long tokenVersion, Instant now) {
-        return encode(userId, "access", null, tokenVersion, now, ACCESS_LIFETIME);
+    /** 액세스 토큰은 로그인 세션(sessionId)에 묶인다. 세션이 폐기되면 만료 전이라도 쓸 수 없다. */
+    public String access(long userId, long tokenVersion, String sessionId, Instant now) {
+        return encode(userId, "access", sessionId, tokenVersion, now, ACCESS_LIFETIME);
     }
 
     public String refresh(long userId, String sessionId, Instant now) {
@@ -87,7 +88,8 @@ public class JwtTokens {
             }
             // 버전 도입 전 토큰은 초기 버전의 계정에서만 계속 사용할 수 있다.
             long tokenVersion = versionClaim == null ? 0 : ((Number) versionClaim).longValue();
-            if (userId <= 0 || ("refresh".equals(expectedType) && !InviteTokenService.looksValid(sessionId))) {
+            // 두 토큰 모두 로그인 세션 ID가 있어야 한다. 세션 없이 발급된 옛 액세스 토큰은 거부되어 한 번 재발급된다
+            if (userId <= 0 || !InviteTokenService.looksValid(sessionId)) {
                 return Optional.empty();
             }
             return Optional.of(new VerifiedToken(userId, sessionId, jwt.getExpiresAt(), tokenVersion));
