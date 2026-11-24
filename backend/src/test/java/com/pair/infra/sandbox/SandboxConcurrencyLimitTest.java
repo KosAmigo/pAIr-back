@@ -13,12 +13,14 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
 import com.pair.global.config.PairProperties;
 
 /** 동시 실행 상한과 대기열: 상한을 넘기지 않고, 줄이 너무 길면 거절한다. */
+@Tag("slow") // 실제 Docker 컨테이너를 여러 개 띄워 수십 초 걸린다
 @EnabledIf("com.pair.infra.sandbox.SandboxRunnerTest#dockerReady")
 class SandboxConcurrencyLimitTest {
 
