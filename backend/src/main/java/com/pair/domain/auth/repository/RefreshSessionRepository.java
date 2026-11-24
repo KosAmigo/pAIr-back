@@ -9,6 +9,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface RefreshSessionRepository extends JpaRepository<RefreshSession, String> {
+    /** 액세스 토큰이 가리키는 로그인 세션이 아직 살아 있는지(폐기되지 않고 만료 전인지) */
+    boolean existsBySessionIdAndUserIdAndExpiresAtAfter(String sessionId, Long userId, Instant now);
+
     @Modifying
     @Query("""
             update RefreshSession s set s.tokenHash = :newHash, s.expiresAt = :newExpiry

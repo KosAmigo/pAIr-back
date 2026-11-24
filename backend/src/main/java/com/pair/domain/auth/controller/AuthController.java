@@ -86,7 +86,7 @@ public class AuthController {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(auth.refresh(request.refreshToken()));
     }
 
-    /** Refresh Token을 폐기한다. Access Token은 만료될 때까지 유효하다. */
+    /** Refresh Token과 로그인 세션을 폐기한다. 그 세션의 Access Token도 바로 무효가 되고 다른 기기는 그대로다. */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@Valid @RequestBody RefreshRequest request) {
         auth.logout(request.refreshToken());
