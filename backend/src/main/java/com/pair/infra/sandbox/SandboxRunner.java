@@ -178,23 +178,31 @@ public class SandboxRunner implements CodeRunner {
         }
     }
 
-    /** 컨테이너가 읽을 수 있게 폴더 755, 파일 644 로 쓴다 (리눅스에서는 임시 폴더 기본 권한 700 이라 uid 10001 이 못 읽는다). */
+    /** POSIX 권한을 지원하는 파일 시스템(리눅스·맥)인지. Windows(NTFS)는 지원하지 않아 권한 설정을 건너뛴다 */
+    private static final boolean POSIX = java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+
+    private static void chmod(Path p, String perm) throws IOException {
+        if (POSIX) Files.setPosixFilePermissions(p, PosixFilePermissions.fromString(perm));
+    }
+
+    /**
+     * 컨테이너가 읽을 수 있게 폴더 755, 파일 644 로 쓴다 (리눅스에서는 임시 폴더 기본 권한 700 이라 uid 10001 이 못 읽는다).
+     * Windows 는 POSIX 권한이 없어 설정하지 않는다(Docker Desktop 이 마운트를 알아서 처리한다).
+     */
     private static void writeSources(Path src, Map<String, String> sources) throws IOException {
-        var dirPerm = PosixFilePermissions.fromString("rwxr-xr-x");
-        var filePerm = PosixFilePermissions.fromString("rw-r--r--");
         Files.createDirectories(src);
-        Files.setPosixFilePermissions(src, dirPerm);
-        Files.setPosixFilePermissions(src.getParent(), dirPerm);
+        chmod(src, "rwxr-xr-x");
+        chmod(src.getParent(), "rwxr-xr-x");
         for (Map.Entry<String, String> e : sources.entrySet()) {
             if (!e.getKey().endsWith(".java")) continue;
             Path p = src.resolve(e.getKey()).normalize();
             if (!p.startsWith(src)) continue; // ../ 로 작업 폴더 밖에 쓰지 못하게
             for (Path d = p.getParent(); !d.equals(src); d = d.getParent()) {
                 Files.createDirectories(d);
-                Files.setPosixFilePermissions(d, dirPerm);
+                chmod(d, "rwxr-xr-x");
             }
             Files.writeString(p, e.getValue(), StandardCharsets.UTF_8);
-            Files.setPosixFilePermissions(p, filePerm);
+            chmod(p, "rw-r--r--");
         }
     }
 
