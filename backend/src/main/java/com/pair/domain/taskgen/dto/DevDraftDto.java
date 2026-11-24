@@ -22,7 +22,18 @@ public record DevDraftDto(
         List<String> trapKeywords,
         List<WrongFix> wrongFixes,
         String taskFollowUp,
-        List<AltSolution> altSolutions) {
+        List<AltSolution> altSolutions,
+        List<JudgmentPoint> judgmentPoints,
+        List<HiddenFlaw> hiddenFlaws) {
+
+    /** 판단 지점·숨은 결함(E2, E3) 없이 만든다(옛 형식 호환: 없으면 검사가 경고만 한다) */
+    public DevDraftDto(String title, String summary, String code, String category, List<String> description,
+            List<String> requirements, String answer, List<FileDraft> files, List<FileDraft> hiddenTests,
+            List<FileDraft> solution, String difficulty, List<String> competencies, List<String> trapKeywords,
+            List<WrongFix> wrongFixes, String taskFollowUp, List<AltSolution> altSolutions) {
+        this(title, summary, code, category, description, requirements, answer, files, hiddenTests, solution, difficulty,
+                competencies, trapKeywords, wrongFixes, taskFollowUp, altSolutions, null, null);
+    }
 
     /** 다른 방식의 올바른 풀이(altSolutions) 없이 만든다(테스트·옛 형식 호환용) */
     public DevDraftDto(String title, String summary, String code, String category, List<String> description,
@@ -65,4 +76,23 @@ public record DevDraftDto(
      * files 는 바뀐 src 파일의 전체 내용, note 는 정답과 어떻게 다른지 한 줄. 숨은+공개 테스트를 모두 통과해야 한다
      */
     public record AltSolution(String note, List<FileDraft> files) {}
+
+    /**
+     * E2 판단 지점: 사람이 정해야 하는 모호한 요구·트레이드오프. question 은 무엇을 정해야 하나, options 는 고를 수 있는 선택지,
+     * basis 는 판단 근거가 되는 문장(응시자에게 보이는 자료에 있는 그대로),
+     * evidence 는 선택지마다 그 선택을 뒷받침하는 사실 한 줄(보이는 자료에 있는 그대로, E2 M4). DEV·BIZ 가 함께 쓴다
+     */
+    public record JudgmentPoint(String question, List<String> options, String basis, List<String> evidence) {
+
+        /** 선택지별 근거 없이 만든다(테스트·옛 형식 호환) */
+        public JudgmentPoint(String question, List<String> options, String basis) {
+            this(question, options, basis, null);
+        }
+    }
+
+    /**
+     * E3 숨은 결함: AI 기본 답이 놓치기 쉬운 곳. description 은 결함 설명, verifyWith 는 자료·테스트 어디와 대조하면 보이는지,
+     * caughtBy 는 DEV 에서 이 결함을 잡는 숨은 테스트 메서드 이름, BIZ 에서는 답·결론이 달라지는 문항("Q2") 또는 "결론"
+     */
+    public record HiddenFlaw(String description, String verifyWith, String caughtBy) {}
 }

@@ -48,8 +48,16 @@ final class BizFixtures {
                         wrong(shortQ("9월 대비 10월 베이직 가입자는 몇 명 늘었나요? (명)", "2000",
                                 "v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") - v(\"자료/매출.csv\", \"월=2026-09;요금제=베이직\", \"가입자 수\")",
                                 CSV + "|", DOC2 + "|1"), "62000", "증가분이 아니라 10월 가입자 수를 적음")),
-                null, null, List.of("전환율", "의향 보정"));
+                null, null, List.of("전환율", "의향 보정"), List.of(JUDGMENT), List.of(FLAW));
     }
+
+    /** E2 판단 지점 예시: 근거 문장은 문서 1쪽 글에 그대로 있다 */
+    static final DevDraftDto.JudgmentPoint JUDGMENT = new DevDraftDto.JudgmentPoint("라이트 요금제를 시범으로 낼지 전면으로 낼지",
+            List.of("시범 출시", "전면 출시"), "응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.");
+
+    /** E3 숨은 결함 예시: 3번 단답형(전환 예상 인원)과 결론이 달라진다 */
+    static final DevDraftDto.HiddenFlaw FLAW = new DevDraftDto.HiddenFlaw("이탈 고객 설문의 의향을 현재 이용자 전체의 전환율로 착각한다",
+            "자료/설문 요약.pdf 1쪽과 2쪽의 설문 대상을 대조", "Q3, 결론");
 
     static QuestionDraft single(String content, List<String> choices, int correct, String... sources) {
         List<Choice> cs = new ArrayList<>();
@@ -98,6 +106,8 @@ final class BizFixtures {
         Trap trap;
         List<QuestionDraft> questions;
         List<String> trapKeywords;
+        List<DevDraftDto.JudgmentPoint> judgmentPoints;
+        List<DevDraftDto.HiddenFlaw> hiddenFlaws;
 
         Builder(BizDraftDto d) {
             title = d.title();
@@ -113,6 +123,8 @@ final class BizFixtures {
             trap = d.trap();
             questions = d.questions();
             trapKeywords = d.trapKeywords();
+            judgmentPoints = d.judgmentPoints();
+            hiddenFlaws = d.hiddenFlaws();
         }
 
         Builder questions(List<QuestionDraft> q) { questions = q; return this; }
@@ -124,9 +136,11 @@ final class BizFixtures {
         Builder requirements(List<String> v) { requirements = v; return this; }
         Builder followUps(List<String> v) { followUps = v; return this; }
         Builder trapKeywords(List<String> v) { trapKeywords = v; return this; }
+        Builder judgmentPoints(List<DevDraftDto.JudgmentPoint> v) { judgmentPoints = v; return this; }
+        Builder hiddenFlaws(List<DevDraftDto.HiddenFlaw> v) { hiddenFlaws = v; return this; }
 
         BizDraftDto build() {
-            return new BizDraftDto(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, null, null, trapKeywords);
+            return new BizDraftDto(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, null, null, trapKeywords, judgmentPoints, hiddenFlaws);
         }
     }
 

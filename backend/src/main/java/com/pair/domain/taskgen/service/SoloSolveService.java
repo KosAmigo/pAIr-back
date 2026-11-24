@@ -15,18 +15,19 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /**
- * M5(DEV) "AI 혼자 바로 풀리지 않음" 검사 (기준 문서 pAIr-docs 설계/좋은_과제_기준.md 2장 M5: AI 답을 그대로 내면 함정에 걸린다).
- * 풀리면 용도(LIVE·SELF)와 상관없이 fail. 응시자처럼 설명과 보이는 파일만 AI 에 붙여 넣고 고쳐 달라고 해서,
- * 그 답을 시작 코드에 덮어쓰고 공개+숨은 테스트를 돌린다. 숨은 테스트·정답·함정 정보는 AI 에 주지 않는다.
- * 2번(설정) 모두 통과하면 fail(다시 생성). 호출 실패와 일부 실패는 warn 이라 생성을 멈추지 않는다.
+ * 참고 지표(DEV) "AI 단독 풀이" (기준 문서 pAIr-docs 설계/좋은_과제_기준.md 3장 참고 지표). 합격·불합격이 아니라 기록이라 절대 fail 이 아니다.
+ * 응시자처럼 설명과 보이는 파일만 AI 에 붙여 넣고 고쳐 달라고 해서, 그 답을 시작 코드에 덮어쓰고 공개+숨은 테스트를 돌린다.
+ * 숨은 테스트까지 통과하면 "숨은 결함을 잡음", 실패하면 "숨은 결함을 지나침". 검수자가 난이도를 가늠하는 데 쓴다.
+ * 숨은 테스트·정답·결함 정보는 AI 에 주지 않는다. 호출 실패도 warn(ok)이라 생성을 멈추지 않는다.
+ * 비용을 아끼려고 다른 fail 검사가 모두 통과한 뒤에만 돌고(DevTaskGeneratorService.afterChecks), 기본 1회다.
  * 실행은 각 시도마다 CodeRunner 한 번이며, 시간 제한은 러너의 제한을 그대로 쓴다
  * (기존 "각 실행 30초 안" 검사에는 넣지 않고, 30초를 넘긴 시도는 통과로 치지 않는다).
  */
 @Component
 public class SoloSolveService {
 
-    /** M5(DEV). 이름을 바꾸면 프런트 표시와 저장된 report.json 에 영향이 있어 그대로 둔다 */
-    static final String NAME = "AI 혼자 바로 풀리지 않음";
+    /** 참고 지표(DEV). 옛 이름은 "AI 혼자 바로 풀리지 않음"(M5 필수 조건이던 때). 프런트는 이 이름을 따로 쓰지 않는다 */
+    static final String NAME = "참고: AI 단독 풀이";
     static final String REQUEST = "이 문제를 고쳐 주세요. 고친 src 파일의 전체 내용을 주세요.";
 
     /** 검사 결과, 풀이 파일(경로는 "1/src/x/Y.java" 처럼 시도 번호가 앞에 붙음), 쓴 토큰 */
@@ -64,8 +65,8 @@ public class SoloSolveService {
     }
 
     /**
-     * 2번 모두 풀리면 fail(다시 생성 대상). 용도(LIVE·SELF)와 상관없이 필수다(M5).
-     * 풀린 경우 설명에 "무슨 자료를 보고, 어디를 고쳐 풀렸는지"를 넣는다(추가 AI 호출 없이 이미 있는 답으로 만든다).
+     * 풀이를 돌려 결과를 기록한다. 결과는 항상 ok(warn 등급)이고 다시 생성을 일으키지 않는다.
+     * 숨은 테스트까지 모두 통과하면 "잡음", 한 번이라도 실패하면 "지나침"(풀린 경우엔 어디를 고쳐 풀렸는지 검수용으로 적는다)
      */
     public Result run(DevDraftDto d) {
         String model = props.soloModel() == null || props.soloModel().isBlank() ? pair.assistant().model() : props.soloModel();
@@ -107,23 +108,19 @@ public class SoloSolveService {
 
         GenCheckResultDto check;
         if (failedHidden > 0) {
-            check = new GenCheckResultDto(NAME, true, attempts + "번 중 " + failedHidden + "번 숨은 테스트에서 실패(검증이 필요한 과제)", GenCheckResultDto.WARN);
+            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요(" + attempts + "번 중 " + failedHidden
+                    + "번 숨은 테스트에서 실패). 검증이 필요한 과제입니다.", GenCheckResultDto.WARN);
         } else if (callFailed > 0) {
             check = new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패)", GenCheckResultDto.WARN);
         } else {
-            String detail = "응시자 AI(" + model + ")가 설명만 보고 " + attempts + "번 모두 바로 풀었어요. " + sourcesNote(d)
+            String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요(" + attempts + "번 모두 숨은 테스트 통과). 난이도가 낮거나 단서가 자료에 많이 드러났는지 검수하세요. "
+                    + sourcesNote(d)
                     + (firstFix == null || firstFix.isBlank() ? "" : " AI 가 바로 고친 곳: " + firstFix + ".")
-                    + clueNote(d, firstFix)
-                    + RETRY_INSTRUCTION;
-            check = new GenCheckResultDto(NAME, false, detail, GenCheckResultDto.FAIL);
+                    + clueNote(d, firstFix);
+            check = new GenCheckResultDto(NAME, true, detail, GenCheckResultDto.WARN);
         }
         return new Result(check, files, in, out);
     }
-
-    /** 다시 생성할 때 AI 출제자에게 주는 지시 (검사 설명에 붙어 다음 시도 프롬프트로 간다) */
-    static final String RETRY_INSTRUCTION = " [다시 설계 지시] 위 단서 문장을 지우고(또는 현상만 남기고), 원인이 시작 코드의 한 줄에서 바로 보이지 않게 하세요"
-            + "(예: return pages + 1; 처럼 눈에 띄는 한 줄 수정은 안 됩니다). 흔한 첫 수정은 공개 자료 사례는 통과하지만 숨은 테스트에서 걸리게 다시 설계하세요. "
-            + "코드를 일부러 읽기 어렵게 꼬는 방식은 안 됩니다.";
 
     /** AI 가 단서로 썼을 만한 요구사항·메모·summary 문장 목록 (없으면 직접 점검하라는 말) */
     static String clueNote(DevDraftDto d, String fixSummary) {

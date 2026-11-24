@@ -35,7 +35,7 @@ final class TaskGenFixtures {
             + "- 접수 로그: order=1043 coupons=1 total=6200 expected=6200\n- 고객센터 확인: 쿠폰이 한 장일 때는 문제 없음\n"
             + "- 재현 방법: 같은 장바구니에 쿠폰 두 장을 넣고 결제 금액을 조회하면 매번 같은 결과가 나옴\n";
 
-    /** 가짜 러너가 통과시키는 정상 Draft (11개 검사 모두 통과) */
+    /** 가짜 러너가 통과시키는 정상 Draft (15개 검사 모두 통과) */
     static DevDraftDto good() {
         return new DevDraftDto("쿠폰 할인 오류", "쿠폰을 겹치면 할인이 두 번 들어갑니다.", "coupon-discount", "장애 분석",
                 List.of("쿠폰 두 장을 쓰면 결제 금액이 이상합니다.", "원인을 찾아 고치세요."), List.of("금액을 올바르게 계산한다.", "테스트를 추가한다."),
@@ -53,8 +53,18 @@ final class TaskGenFixtures {
                                 List.of(f("src/shop/Cart.java", CART_START.replace("sum += 2;", "sum += 8;"))))),
                 "AI 가 고친 코드가 다른 쿠폰 조합에서도 맞는지 어떻게 확인했나요?",
                 List.of(new DevDraftDto.AltSolution("합계를 식으로 한 번에 더한다(정답과 구조가 다름)",
-                        List.of(f("src/shop/Cart.java", CART_SOLVED.replace("sum += 11;", "sum += 10 + 1;"))))));
+                        List.of(f("src/shop/Cart.java", CART_SOLVED.replace("sum += 11;", "sum += 10 + 1;"))))),
+                List.of(JUDGMENT), List.of(FLAW));
     }
+
+    /** E2 판단 지점 예시: 근거 문장은 설명(description)에 그대로 있다 */
+    static final DevDraftDto.JudgmentPoint JUDGMENT = new DevDraftDto.JudgmentPoint("쿠폰을 겹쳐 쓸 때 어떻게 처리할지",
+            List.of("한 장만 적용", "모두 적용하되 상한을 둠"), "쿠폰 두 장을 쓰면 결제 금액이 이상합니다.",
+            List.of("쿠폰 두 장을 쓰면 결제 금액이 이상합니다.", "금액을 올바르게 계산한다."));
+
+    /** E3 숨은 결함 예시: 숨은 테스트 couponOnce 가 시작 코드에서 실패한다 */
+    static final DevDraftDto.HiddenFlaw FLAW = new DevDraftDto.HiddenFlaw("쿠폰이 두 장일 때 할인이 두 번 들어가는데 공개 사례는 한 장뿐이다",
+            "NOTES.md 의 접수 로그(order=1042)와 숨은 테스트 결과를 대조", "couponOnce");
 
     /** Draft 의 일부만 바꾼 복사본 */
     static DevDraftDto edit(DevDraftDto d, UnaryOperator<Dev> change) {
@@ -67,6 +77,8 @@ final class TaskGenFixtures {
         List<DevDraftDto.FileDraft> files, hiddenTests, solution;
         List<DevDraftDto.WrongFix> wrongFixes;
         List<DevDraftDto.AltSolution> altSolutions;
+        List<DevDraftDto.JudgmentPoint> judgmentPoints;
+        List<DevDraftDto.HiddenFlaw> hiddenFlaws;
         String difficulty;
         List<String> competencies;
 
@@ -87,6 +99,8 @@ final class TaskGenFixtures {
             wrongFixes = d.wrongFixes();
             taskFollowUp = d.taskFollowUp();
             altSolutions = d.altSolutions();
+            judgmentPoints = d.judgmentPoints();
+            hiddenFlaws = d.hiddenFlaws();
         }
 
         Dev code(String v) { code = v; return this; }
@@ -99,6 +113,8 @@ final class TaskGenFixtures {
         Dev trapKeywords(List<String> v) { trapKeywords = v; return this; }
         Dev wrongFixes(List<DevDraftDto.WrongFix> v) { wrongFixes = v; return this; }
         Dev altSolutions(List<DevDraftDto.AltSolution> v) { altSolutions = v; return this; }
+        Dev judgmentPoints(List<DevDraftDto.JudgmentPoint> v) { judgmentPoints = v; return this; }
+        Dev hiddenFlaws(List<DevDraftDto.HiddenFlaw> v) { hiddenFlaws = v; return this; }
         Dev taskFollowUp(String v) { taskFollowUp = v; return this; }
         Dev difficulty(String v) { difficulty = v; return this; }
         Dev competencies(List<String> v) { competencies = v; return this; }
@@ -113,7 +129,7 @@ final class TaskGenFixtures {
 
         DevDraftDto build() {
             return new DevDraftDto(title, summary, code, category, description, requirements, answer, files, hiddenTests, solution,
-                    difficulty, competencies, trapKeywords, wrongFixes, taskFollowUp, altSolutions);
+                    difficulty, competencies, trapKeywords, wrongFixes, taskFollowUp, altSolutions, judgmentPoints, hiddenFlaws);
         }
     }
 

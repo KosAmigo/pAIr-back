@@ -167,7 +167,7 @@ class DailyUsageRegressionTest {
         var results = run(fixed());
         assertThat(results.stream().filter(GenCheckResultDto::needsRegeneration).map(r -> r.name() + ": " + r.detail())).isEmpty();
         assertThat(results.stream().filter(r -> !r.ok()).map(GenCheckResultDto::name))
-                .containsExactly(DevCheckService.AMOUNT, DevCheckService.ALT_SOLUTIONS); // 이 옛 Draft 에는 다른 풀이가 없어 warn
+                .containsExactly(DevCheckService.AMOUNT, DevCheckService.ALT_SOLUTIONS, DevCheckService.JUDGMENT, DevCheckService.HIDDEN_FLAW); // 이 옛 Draft 에는 다른 풀이·판단 지점·숨은 결함이 없어 모두 warn
         assertThat(named(results, DevCheckService.WRONG_FIXES).detail()).contains("오답 2개 모두");
     }
 }

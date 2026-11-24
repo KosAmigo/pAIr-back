@@ -18,7 +18,7 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** M5(BIZ) "AI 답을 그대로 내면 함정에 걸림" 검사의 판정 규칙 (가짜 AI, 실제 호출 없음) */
+/** 참고 지표(BIZ) "AI 단독 풀이"의 기록 규칙: 항상 ok(warn), 다시 생성을 일으키지 않는다 (가짜 AI, 실제 호출 없음) */
 class BizSoloSolveServiceTest {
 
     /** 준비한 답이나 오류를 차례로 돌려주는 가짜 AI. 요청 전체를 기록한다 */
@@ -37,6 +37,8 @@ class BizSoloSolveServiceTest {
         @Override
         @SuppressWarnings("unchecked")
         public <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
+            if (type == com.pair.domain.taskgen.dto.LeakVerdictDto.class) // M5 답 노출 AI 판정: 위반 없음
+                return new Output<>((T) new com.pair.domain.taskgen.dto.LeakVerdictDto(List.of()), 10, 5);
             models.add(model);
             systems.add(system);
             users.add(user);
@@ -75,17 +77,17 @@ class BizSoloSolveServiceTest {
     }
 
     @Test
-    @DisplayName("(a) LIVE·SELF 모두: AI 가 함정 문항(단답형)을 모두 맞히면 fail 이라 다시 생성 대상이고, AI 답과 단서 문장과 다시 설계 지시가 들어간다")
+    @DisplayName("(a) AI 가 함정 문항(단답형)을 모두 맞히면 '숨은 결함을 잡음'으로 기록한다: ok, warn, 다시 생성 대상 아님, 단서 문장 포함")
     void solvedLive() {
         ai.script.add(answers("1", "2", "21080", "2000"));
         var r = service().run(BizFixtures.good("biz-solo"));
 
-        assertThat(r.check().name()).isEqualTo("AI 답을 그대로 내면 함정에 걸림");
-        assertThat(r.check().ok()).isFalse();
-        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.FAIL);
-        assertThat(r.check().needsRegeneration()).isTrue();
-        assertThat(r.check().detail()).contains("응시자 AI(gpt-6-luna)", "그대로 내도 통과", "Q3(AI 답 21080, 정답 21080)", "Q4(AI 답 2000, 정답 2000)")
-                .contains("AI 가 단서로 썼을 만한 자료 문장: " + BizFixtures.EVIDENCE).contains("다시 설계 지시");
+        assertThat(r.check().name()).isEqualTo("참고: AI 단독 풀이");
+        assertThat(r.check().ok()).isTrue();
+        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
+        assertThat(r.check().needsRegeneration()).isFalse();
+        assertThat(r.check().detail()).contains("AI 단독 풀이(gpt-6-luna)가 숨은 결함을 잡았어요", "Q3(AI 답 21080, 정답 21080)", "Q4(AI 답 2000, 정답 2000)")
+                .contains("AI 가 단서로 썼을 만한 자료 문장: " + BizFixtures.EVIDENCE).doesNotContain("다시 설계 지시");
         assertThat(r.answers()).containsExactly("1", "2", "21080", "2000");
         assertThat(r.inputTokens()).isEqualTo(3000);
         assertThat(r.outputTokens()).isEqualTo(200);
@@ -99,7 +101,7 @@ class BizSoloSolveServiceTest {
 
         assertThat(r.check().ok()).isTrue();
         assertThat(r.check().needsRegeneration()).isFalse();
-        assertThat(r.check().detail()).contains("함정 문항에서 틀렸어요").contains("Q3(AI 답 23560, 정답 21080)").doesNotContain("Q4");
+        assertThat(r.check().detail()).contains("숨은 결함을 지나쳤어요", "함정 문항에서 틀렸어요").contains("Q3(AI 답 23560, 정답 21080)").doesNotContain("Q4");
     }
 
     @Test
@@ -113,22 +115,22 @@ class BizSoloSolveServiceTest {
     }
 
     @Test
-    @DisplayName("결론 객관식까지 모두 맞히면 fail")
+    @DisplayName("결론 객관식까지 모두 맞히면 '잡음'으로 기록한다(fail 아님)")
     void conclusionQuestionSolved() {
         ai.script.add(answers("2", "2", "21080", "2000"));
         var r = service().run(withConclusionQuestion());
 
-        assertThat(r.check().needsRegeneration()).isTrue();
-        assertThat(r.check().detail()).contains("함정 문항 3개를 모두 맞혔어요").contains("Q1(AI 답 2, 정답 2)");
+        assertThat(r.check().needsRegeneration()).isFalse();
+        assertThat(r.check().detail()).contains("함정 문항 3개를 모두 맞힘").contains("Q1(AI 답 2, 정답 2)");
     }
 
     @Test
-    @DisplayName("함정과 무관한 객관식은 틀려도 함정 문항으로 세지 않는다 (단답형을 모두 맞히면 fail)")
+    @DisplayName("함정과 무관한 객관식은 틀려도 함정 문항으로 세지 않는다 (단답형을 모두 맞히면 '잡음')")
     void plainSingleIgnored() {
         ai.script.add(answers("4", "4", "21080", "2000"));
         var r = service().run(BizFixtures.good("biz-solo"));
 
-        assertThat(r.check().needsRegeneration()).isTrue();
+        assertThat(r.check().needsRegeneration()).isFalse();
         assertThat(BizSoloSolveService.trapQuestions(BizFixtures.good("biz-solo"))).containsExactly(2, 3);
         assertThat(BizSoloSolveService.trapQuestions(withConclusionQuestion())).containsExactly(0, 2, 3);
     }
@@ -152,13 +154,13 @@ class BizSoloSolveServiceTest {
     }
 
     @Test
-    @DisplayName("기획안을 앞에 섞어 보내도(06·08·10 모양) 번호로 맞게 판정한다: 다 맞혔으면 fail")
+    @DisplayName("기획안을 앞에 섞어 보내도(06·08·10 모양) 번호로 맞게 판정한다: 다 맞혔으면 '잡음'")
     void planMixedInFrontStillMatchedByNumber() {
         // 06 의 실제 모양: 기획안 전문 + 문항 답. 예전 위치 방식은 답이 한 칸씩 밀렸다
         ai.script.add(numbered(0, "8월 기획안: 근거는 자료에 있다...", 1, "1", 2, "2", 3, "21080", 4, "2000"));
         var r = service().run(BizFixtures.good("biz-solo"));
 
-        assertThat(r.check().needsRegeneration()).isTrue();
+        assertThat(r.check().needsRegeneration()).isFalse();
         assertThat(r.check().detail()).contains("Q3(AI 답 21080, 정답 21080)", "Q4(AI 답 2000, 정답 2000)");
         assertThat(r.answers()).containsExactly("1", "2", "21080", "2000");
     }
@@ -280,19 +282,20 @@ class BizSoloSolveServiceTest {
         var extra = gen.afterChecks(form("LIVE"), BizFixtures.good("biz-solo"), List.of(warn));
 
         assertThat(ai.users).hasSize(1);
-        assertThat(extra.checks()).singleElement().satisfies(c -> assertThat(c.needsRegeneration()).isTrue());
+        assertThat(extra.checks().subList(2, extra.checks().size())).singleElement().satisfies(c -> assertThat(c.needsRegeneration()).isFalse());
         assertThat(extra.details()).containsKeys("soloTokens", "soloAnswers");
     }
 
     @Test
-    @DisplayName("(a) 용도 SELF 여도 같은 경우 fail (M5 는 필수)")
+    @DisplayName("(a) 용도와 상관없이 다 맞혀도 fail 이 아니다(참고 지표)")
     void selfUsageFails() {
         ai.script.add(answers("1", "2", "21080", "2000"));
         var extra = generator(new TaskGenProperties(null, null, null, null, null)).afterChecks(form("SELF"), BizFixtures.good("biz-solo"), List.of());
 
-        assertThat(extra.checks()).singleElement().satisfies(c -> {
-            assertThat(c.ok()).isFalse();
-            assertThat(c.needsRegeneration()).isTrue();
+        assertThat(extra.checks().subList(2, extra.checks().size())).singleElement().satisfies(c -> {
+            assertThat(c.ok()).isTrue();
+            assertThat(c.level()).isEqualTo(GenCheckResultDto.WARN);
+            assertThat(c.needsRegeneration()).isFalse();
         });
     }
 
@@ -303,6 +306,6 @@ class BizSoloSolveServiceTest {
         var extra = generator(props).afterChecks(form("LIVE"), BizFixtures.good("biz-solo"), List.of());
 
         assertThat(ai.users).isEmpty();
-        assertThat(extra.checks().get(0).detail()).startsWith("건너뜀");
+        assertThat(extra.checks().get(2).detail()).startsWith("건너뜀");
     }
 }

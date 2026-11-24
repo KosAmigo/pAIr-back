@@ -37,7 +37,7 @@ import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.infra.storage.TaskFileStorage;
 
 /**
- * 실제 AI 로 과제 10개를 3개씩 동시에 만들고 내용을 build/taskgen-batch/ 에 내보낸다 (H2, 비용 발생).
+ * 실제 AI 로 과제 6개(DEV/BIZ × 20·40·60분, 주제는 매번 추천에서)를 3개씩 동시에 만들고 내용을 build/taskgen-batch/ 에 내보낸다 (H2, 비용 발생).
  * PAIR_TASKGEN_LIVE=1 일 때만 돈다. 데이터 폴더도 build/taskgen-batch/data 에 고정해 PDF 가 남는다.
  */
 @SpringBootTest
@@ -61,6 +61,7 @@ class TaskGenBatchLiveTest {
 
     @MockitoBean JavaMailSender mail;
     @Autowired TaskGenJobService jobs;
+    @Autowired TaskSuggestionService suggestions;
     @Autowired GeneratedTaskRepository writer;
     @Autowired TaskRepository records;
     @Autowired TaskFileRepository files;
@@ -68,24 +69,35 @@ class TaskGenBatchLiveTest {
     @Autowired ObjectMapper json;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
-    private static TaskGenRequest f(String track, String topic, String trap, String usage, int min) {
-        return new TaskGenRequest(track, topic, trap, usage, min).validated();
+    /** 한 번에 만들 과제 수. 6 = DEV/BIZ × 20·40·60분 1개씩. 12로 올리면 같은 조합을 한 번 더(6의 배수만). 환경변수 PAIR_TASKGEN_COUNT=12 (Gradle 은 -D 를 테스트 JVM 에 넘기지 않는다) */
+    static final int COUNT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_COUNT", "6"));
+    static final int[] MINUTES = {20, 40, 60};
+
+    /** 매번 새 주제: 과제 추천(TaskSuggestionService, 주제 없음 모드)에서 직군마다 받는다. 이미 있는 과제·앞서 받은 후보와는 겹치지 않는다 */
+    private List<TaskGenRequest> pickForms() {
+        if (COUNT < 6 || COUNT % 6 != 0) throw new IllegalArgumentException("count 는 6의 배수여야 합니다: " + COUNT);
+        List<TaskGenRequest> forms = new ArrayList<>();
+        for (String track : List.of("DEV", "BIZ")) {
+            List<TaskSuggestionService.Suggestion> picked = new ArrayList<>();
+            for (int tries = 0; picked.size() < COUNT / 2 && tries < 5; tries++) {
+                List<String> exclude = picked.stream().map(TaskSuggestionService.Suggestion::situation).toList();
+                var res = suggestions.suggest(new TaskSuggestionService.Request(track, "", exclude), ADMIN_ID);
+                for (var sg : res.suggestions()) if (picked.size() < COUNT / 2) picked.add(sg);
+            }
+            if (picked.size() < COUNT / 2) throw new IllegalStateException(track + " 추천을 " + COUNT / 2 + "개 받지 못했습니다");
+            for (int i = 0; i < picked.size(); i++) {
+                var sg = picked.get(i);
+                forms.add(new TaskGenRequest(track, sg.situation(), sg.trap(), "SELF", MINUTES[i % MINUTES.length], sg.competencies()).validated());
+            }
+        }
+        return forms;
     }
 
     @Test
-    void generateTen() throws Exception {
-        List<TaskGenRequest> forms = List.of(
-                f("DEV", "동시 주문 재고 차감", "두 주문이 동시에 마지막 재고를 차감해 재고가 음수가 됨", "LIVE", 60),
-                f("DEV", "포인트 적립 계산", "할인 전 금액에 적립률을 곱한 뒤 절사해 적립액이 1원씩 어긋남", "SELF", 20),
-                f("DEV", "게시글 목록 페이지 나누기", "전체 개수가 페이지 크기의 배수일 때 마지막 페이지 수가 하나 많음", "SELF", 20),
-                f("DEV", "회의실 예약 겹침 확인", "앞 예약이 끝나는 시각에 시작하는 예약을 겹친다고 거절함", "LIVE", 40),
-                f("DEV", "무료 배송 기준 판정", "쿠폰 할인 후 금액이 아니라 할인 전 금액으로 무료 배송을 판단함", "SELF", 40),
-                f("BIZ", "구독 해지율 분석", "신규 가입 급증으로 분모가 커져 해지율이 좋아진 것처럼 보임", "SELF", 60),
-                f("BIZ", "신규 매장 입지 선정", "유동 인구 자료가 평일에만 측정되어 주말 상권을 놓침", "LIVE", 40),
-                f("BIZ", "마케팅 채널 예산 재배분", "마지막 클릭 기여만 보고 검색 광고 성과를 과대평가함", "LIVE", 60),
-                f("BIZ", "고객센터 상담 인력 배치", "하루 평균 문의량만 보고 점심 직후 몰리는 시간을 무시함", "SELF", 20),
-                f("BIZ", "가격 인상 효과 판단", "같은 기간 성수기 효과를 가격 인상 효과로 착각함", "SELF", 40));
+    void generateBatch() throws Exception {
+        List<TaskGenRequest> forms = pickForms();
 
+        clean(OUT); // 이전 실행·시도의 파일(옛 숨은 테스트, 안 쓰는 PDF·CSV)이 폴더에 섞이지 않게 비운다
         Files.createDirectories(OUT);
         long total = System.nanoTime();
         // 실제 서비스 경로(TaskGenJobService.start → status 폴링). 자리(max-concurrent=3)가 나야 다음 작업을 넣는다
@@ -170,7 +182,16 @@ class TaskGenBatchLiveTest {
                 .map(GenCheckResultDto::name).collect(Collectors.joining(","));
     }
 
+    /** 폴더와 안의 모든 파일을 지운다(없으면 아무것도 안 함) */
+    static void clean(Path dir) throws java.io.IOException {
+        if (!Files.exists(dir)) return;
+        try (var walk = Files.walk(dir)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(p);
+        }
+    }
+
     private void export(Path dir, TaskGenRequest form, String code) throws Exception {
+        clean(dir); // 같은 코드로 다시 내보낼 때 옛 파일이 남지 않게
         Files.createDirectories(dir);
         var pretty = json.writerWithDefaultPrettyPrinter();
         Files.writeString(dir.resolve("request.json"), pretty.writeValueAsString(form));

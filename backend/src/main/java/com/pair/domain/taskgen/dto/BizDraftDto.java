@@ -22,7 +22,17 @@ public record BizDraftDto(
         List<QuestionDraft> questions,
         String difficulty,
         List<String> competencies,
-        List<String> trapKeywords) {
+        List<String> trapKeywords,
+        List<DevDraftDto.JudgmentPoint> judgmentPoints,
+        List<DevDraftDto.HiddenFlaw> hiddenFlaws) {
+
+    /** 판단 지점·숨은 결함(E2, E3) 없이 만든다(옛 형식 호환: 없으면 검사가 경고만 한다) */
+    public BizDraftDto(String title, String summary, String code, String category, List<String> description,
+            List<String> requirements, List<String> followUps, List<DocDraft> documents,
+            List<DevDraftDto.FileDraft> csvFiles, String checklist, Trap trap, List<QuestionDraft> questions,
+            String difficulty, List<String> competencies, List<String> trapKeywords) {
+        this(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, difficulty, competencies, trapKeywords, null, null);
+    }
 
     /** 함정 핵심어 없이 만든다(테스트·옛 코드용) */
     public BizDraftDto(String title, String summary, String code, String category, List<String> description,
