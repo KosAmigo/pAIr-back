@@ -48,7 +48,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class ScoringService {
 
     private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
-    static final int D5_LATE_MINUTES = 30;
+    /** 과제 제한시간을 읽지 못할 때(0 이하) 쓰는 기본값 */
+    static final int D5_DEFAULT_LIMIT_MINUTES = 60;
+
+    static int effectiveTimeLimit(int minutes) {
+        return minutes > 0 ? minutes : D5_DEFAULT_LIMIT_MINUTES;
+    }
+
+    /** 제한시간 이내(같으면 이내)면 0, 넘기거나 도달 못 하면 배점 전체 */
+    static int d5Penalty(Double firstValidMin, int timeLimitMin, int points) {
+        return firstValidMin == null || firstValidMin > timeLimitMin ? points : 0;
+    }
 
     private final AttemptStateRepository store;
     private final TaskDefRepository tasks;
@@ -281,10 +291,15 @@ public class ScoringService {
         Double firstValidMin = firstValidAt == null ? null
                 : Duration.between(a.startedAt(), firstValidAt).toSeconds() / 60.0;
         int d5Points = check(checks, "D5").points();
-        int d5 = firstValidMin == null ? d5Points : firstValidMin > D5_LATE_MINUTES ? d5Points / 2 : 0;
+        int timeLimitMin = effectiveTimeLimit(task.minutes());
+        if (timeLimitMin != task.minutes()) {
+            log.warn("과제 {} 제한시간을 읽지 못해 {}분으로 D5를 채점합니다 (minutes={})", task.id(), timeLimitMin, task.minutes());
+        }
+        int d5 = d5Penalty(firstValidMin, timeLimitMin, d5Points);
         results.put("D5", auto(checks, "D5", d5, firstValidMin == null
                 ? "첫 유효 결과에 도달하지 못함"
-                : String.format("첫 유효 결과까지 %.1f분 (%s)", firstValidMin,
+                : String.format("첫 유효 결과까지 %.1f분 (제한 %d분 %s) - %s", firstValidMin, timeLimitMin,
+                        d5 > 0 ? "초과" : "이내",
                         dev ? "src 코드를 고친 뒤 테스트가 전부 통과한 첫 실행" : "필수 제목을 모두 채운 첫 저장")));
 
         // ── 판정: 채점 모델 ─────────
@@ -402,6 +417,7 @@ public class ScoringService {
         report.put("durationSec", a.submittedAt() == null ? null : Duration.between(a.startedAt(), a.submittedAt()).toSeconds());
         report.put("chatTurns", turns.size());
         report.put("firstValidMinutes", firstValidMin == null ? null : round1(firstValidMin));
+        report.put("timeLimitMinutes", timeLimitMin);
         report.put("total", total);
         report.put("max", RubricService.total());
         report.put("items", items);

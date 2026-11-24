@@ -15,6 +15,21 @@ import org.junit.jupiter.api.Test;
 class ScoringHelpersTest {
 
     @Test
+    void d5_twentyMinuteTask() {
+        assertEquals(0, ScoringService.d5Penalty(15.0, 20, 4));
+        assertEquals(0, ScoringService.d5Penalty(20.0, 20, 4));
+        assertEquals(4, ScoringService.d5Penalty(25.0, 20, 4));
+        assertEquals(4, ScoringService.d5Penalty(null, 20, 4));
+    }
+
+    @Test
+    void d5_unreadableLimitFallsBackTo60() {
+        assertEquals(60, ScoringService.effectiveTimeLimit(0));
+        assertEquals(60, ScoringService.effectiveTimeLimit(-1));
+        assertEquals(40, ScoringService.effectiveTimeLimit(40));
+    }
+
+    @Test
     void rubric_sixItemsTotal100() {
         assertEquals(6, RubricService.ITEMS.size());
         assertEquals(100, RubricService.total());

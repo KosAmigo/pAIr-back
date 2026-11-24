@@ -90,7 +90,7 @@ public final class RubricService {
                     "숨은 정답 설명(answer.md)의 핵심 원인 1(잠금 순서 불일치로 인한 교착)을 NOTES.md나 후속 답변에서 설명하지 못했으면 걸림. 원인 2(재고 미복구)만 쓰거나 \"타임아웃이 짧아서\", \"예외 처리가 없어서\" 같은 증상만 쓴 경우도 걸림. 코드가 맞게 고쳐졌는지와는 별개로 설명만 본다."),
             new Check("D4", "delivery", Track.BIZ, Method.JUDGE, 2, "결론과 근거가 서로 맞지 않음",
                     "근거가 가리키는 방향과 결론(찬성, 반대, 조건부)이 서로 맞지 않으면 걸림."),
-            new Check("D5", "delivery", Track.ALL, Method.AUTO, 4, "첫 유효 결과가 30분을 넘김(-2) 또는 도달하지 못함(-4)", null),
+            new Check("D5", "delivery", Track.ALL, Method.AUTO, 4, "첫 유효 결과가 과제 제한 시간을 넘김 또는 도달하지 못함(-4)", null),
             // ── 성과 잠재력 (15) ──
             new Check("P1", "potential", Track.ALL, Method.JUDGE, 5, "후속 질문 답변이 근거 없이 한두 마디에 그침",
                     "후속 질문 답변 대부분이 근거 없는 한두 마디이거나 무응답이면 걸림."),
