@@ -76,7 +76,7 @@ public class AuthController {
     /** bearer 토큰에 연결된 현재 회원 정보를 반환한다. */
     @GetMapping("/me")
     public UserResponse me(@RequestHeader(name = "Authorization", required = false) String authorization) {
-        return auth.findAccount(bearerToken(authorization)).map(UserResponse::from)
+        return auth.findUser(bearerToken(authorization))
                 .orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
     }
 
