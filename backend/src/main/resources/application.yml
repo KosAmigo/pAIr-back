@@ -14,6 +14,9 @@ management:
     # /health 를 부를 때마다 SMTP 서버에 접속하지 않는다. 테스트에서는 메일 발송기가 가짜라 이 점검 빈이 만들어지지도 않는다
     mail:
       enabled: false
+    # Redis 는 채점 큐를 켰을 때만 쓴다. 꺼져 있을 때(기본)는 Redis 가 없어도 /health 가 DOWN 이 되지 않게 점검하지 않는다
+    redis:
+      enabled: ${PAIR_SCORING_QUEUE_ENABLED:false}
   metrics:
     tags:
       application: pair-backend
