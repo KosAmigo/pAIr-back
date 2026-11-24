@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
+import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.SandboxRunner;
 import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.repository.TaskFileRepository;
