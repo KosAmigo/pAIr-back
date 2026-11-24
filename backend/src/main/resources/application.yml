@@ -108,6 +108,8 @@ pair:
     entry-base-url: ${PAIR_ENTRY_BASE_URL:}
     # 실제 SMTP 는 보내는 주소가 계정과 같아야 하는 곳이 많다 (Gmail 등)
     mail-from: ${PAIR_MAIL_FROM:no-reply@pair.test}
+    # 감독관 실시간 영상 보기 (WebRTC 시그널링). 꺼져 있으면 watch 를 error 로 거절한다. 켜려면 PAIR_LIVE_VIEW_ENABLED=true
+    live-view-enabled: ${PAIR_LIVE_VIEW_ENABLED:false}
     # 종료 시각이 지난 회차를 찾아 자동 제출하는 주기
     auto-submit-interval-ms: 2000
     # 감독 사진·대상자 CSV 저장소: local = pilot-data/ 아래 (개발용), s3 = 운영

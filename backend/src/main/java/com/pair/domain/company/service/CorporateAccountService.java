@@ -16,6 +16,8 @@ import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.global.error.ConflictException;
 import com.pair.global.security.CurrentUser;
 import com.pair.domain.auth.service.EmailVerificationService;
+import com.pair.domain.auth.service.WithdrawnEmailHashService;
+import com.pair.infra.mail.MailDeliveryException;
 import com.pair.domain.auth.repository.RefreshSessionRepository;
 
 @Service
@@ -28,13 +30,16 @@ public class CorporateAccountService {
     private final RefreshSessionRepository sessions;
     private final EmailVerificationService emailVerification;
     private final CompanyAccountMailService mailer;
+    private final WithdrawnEmailHashService withdrawnEmailHasher;
 
     public CorporateAccountService(AuthAccountRepository accounts, RefreshSessionRepository sessions,
-            EmailVerificationService emailVerification, CompanyAccountMailService mailer) {
+            EmailVerificationService emailVerification, CompanyAccountMailService mailer,
+            WithdrawnEmailHashService withdrawnEmailHasher) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.emailVerification = emailVerification;
         this.mailer = mailer;
+        this.withdrawnEmailHasher = withdrawnEmailHasher;
     }
 
     @Transactional
@@ -45,10 +50,10 @@ public class CorporateAccountService {
         }
         emailVerification.removeForEmail(normalized);
         String password = temporaryPassword();
-        AuthAccount account;
+        AuthAccount account = newOrReactivated(normalized, name.trim(), PASSWORD_ENCODER.encode(password));
+        account.startCompanyOnboarding(role, companyId);
         try {
-            account = accounts.saveAndFlush(new AuthAccount(normalized, name.trim(),
-                    PASSWORD_ENCODER.encode(password), role, companyId));
+            account = accounts.saveAndFlush(account);
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException("이미 가입된 이메일입니다: " + normalized);
         }
@@ -62,8 +67,7 @@ public class CorporateAccountService {
         if (accounts.existsByEmailIgnoreCase(normalized)) {
             throw new ConflictException("이미 가입된 이메일입니다: " + normalized);
         }
-        AuthAccount account = new AuthAccount(normalized, name.trim(),
-                hashSignupPassword(password));
+        AuthAccount account = newOrReactivated(normalized, name.trim(), hashSignupPassword(password));
         account.activateAsCompanyMember(CurrentUser.Role.PROCTOR, companyId);
         try {
             return accounts.saveAndFlush(account);
@@ -89,11 +93,19 @@ public class CorporateAccountService {
         return account;
     }
 
+    /** 탈퇴한 회원이면 기존 계정을 되살린다. 새로 만들면 다음 탈퇴 때 탈퇴 이메일 해시가 겹친다. */
+    private AuthAccount newOrReactivated(String email, String name, String passwordHash) {
+        AuthAccount account = accounts.findByEmailIgnoreCase(withdrawnEmailHasher.hash(email)).orElse(null);
+        if (account == null) return new AuthAccount(email, name, passwordHash);
+        account.reactivate(email, name, passwordHash);
+        return account;
+    }
+
     private void sendCredentials(AuthAccount account, String password) {
         try {
             mailer.sendCredentials(account, password);
             account.markOnboardingMail("SENT");
-        } catch (org.springframework.mail.MailException e) {
+        } catch (MailDeliveryException | org.springframework.mail.MailException e) {
             account.markOnboardingMail("FAILED");
         }
     }

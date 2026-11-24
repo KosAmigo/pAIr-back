@@ -3,7 +3,7 @@ package com.pair.global.config;
 import com.pair.domain.exam.service.LanAddressService;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-/** 실전 시험 회차 설정 (application.yml 의 pair.exam). */
+/** 실전 시험 회차 설정 (application.yml 의 pair.exam). liveViewEnabled: 감독관 실시간 영상 보기 (기본 꺼짐, 켜면 watch 시그널링을 받는다). */
 @ConfigurationProperties(prefix = "pair.exam")
 public record ExamProperties(
         String entryBaseUrl,
@@ -11,7 +11,8 @@ public record ExamProperties(
         long autoSubmitIntervalMs,
         long snapshotRetentionDays,
         int snapshotMaxBytes,
-        int maxParticipantsPerUpload) {
+        int maxParticipantsPerUpload,
+        boolean liveViewEnabled) {
 
     public ExamProperties {
         if (entryBaseUrl == null || entryBaseUrl.isBlank()) entryBaseUrl = "https://" + LanAddressService.find().orElse("localhost") + ":5173"; // 개발 서버(npm run dev)는 HTTPS, 같은 네트워크 팀원도 열 수 있게 사내 IP
@@ -23,6 +24,6 @@ public record ExamProperties(
     }
 
     public static ExamProperties defaults() {
-        return new ExamProperties(null, null, 0, 0, 0, 0);
+        return new ExamProperties(null, null, 0, 0, 0, 0, false);
     }
 }

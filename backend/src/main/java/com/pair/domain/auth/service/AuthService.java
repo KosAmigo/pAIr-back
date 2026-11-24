@@ -192,6 +192,10 @@ public class AuthService {
             throw new ForbiddenException("매니저는 먼저 위임하거나 관리자에게 교체를 요청해야 합니다.");
         }
         String anonymousEmail = withdrawnEmailHasher.hash(normalizeEmail(account.getEmail()));
+        // 탈퇴 해시 행이 이미 따로 있는 계정(중복 생성된 기존 데이터)은 무작위 주소로 익명화한다
+        if (accounts.existsByEmailIgnoreCase(anonymousEmail)) {
+            anonymousEmail = "withdrawn+" + InviteTokenService.next() + "@invalid.local";
+        }
         emailVerification.removeForEmail(account.getEmail());
         account.withdraw(anonymousEmail, PASSWORD_ENCODER.encode(InviteTokenService.next()), now);
         sessions.revokeAll(account.getId());

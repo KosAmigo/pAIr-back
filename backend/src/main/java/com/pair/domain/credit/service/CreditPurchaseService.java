@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -30,6 +31,8 @@ public class CreditPurchaseService {
         }
     }
     private record Confirmation(String orderId, String paymentKey, int amount, String key, Instant startedAt, boolean paid) {}
+    /** 토스에서 끝났고 더 승인될 수 없는 결제 상태 */
+    private static final Set<String> ENDED_STATUSES = Set.of("ABORTED", "EXPIRED", "CANCELED");
     private static final List<Product> PRODUCTS = List.of(
             new Product(1000, 4990), new Product(2200, 9990),
             new Product(4600, 19990), new Product(15000, 49990));
@@ -92,15 +95,11 @@ public class CreditPurchaseService {
             try {
                 result = toss.confirm(info.paymentKey(), info.orderId(), info.amount(), info.key());
             } catch (PaymentRejectedException e) {
-                transactions.executeWithoutResult(status -> {
-                    CreditPurchase p = owned(userId, orderId);
-                    if (p.getStatus() == CreditPurchase.Status.CONFIRMING
-                            && info.key().equals(p.getConfirmationKey())) p.failed();
-                });
+                markFailed(userId, info);
                 throw e;
             } catch (PaymentUnavailableException e) {
                 result = toss.find(info.paymentKey());
-                if (result == null || !"DONE".equals(result.status())) throw e;
+                if (result == null || (!"DONE".equals(result.status()) && !endedWithoutPayment(result))) throw e;
             }
         }
         if (result != null && "WAITING_FOR_DEPOSIT".equals(result.status())) {
@@ -108,6 +107,11 @@ public class CreditPurchaseService {
             if (result != null && "WAITING_FOR_DEPOSIT".equals(result.status())) {
                 throw new PaymentUnavailableException("입금 확인을 기다리고 있습니다. 같은 주문으로 다시 확인해 주세요.");
             }
+        }
+        if (result != null && endedWithoutPayment(result)) {
+            verify(result, info.orderId(), info.paymentKey(), info.amount(), result.status());
+            markFailed(userId, info);
+            throw new PaymentRejectedException("결제가 취소되었거나 만료되었습니다. 새 주문으로 다시 시도해 주세요.");
         }
         verify(result, info.orderId(), info.paymentKey(), info.amount(), "DONE");
         return transactions.execute(status -> {
@@ -143,6 +147,17 @@ public class CreditPurchaseService {
         credits.refundPurchase(userId, p.getCredits(), p.getId());
         p.refunded();
         return PurchaseView.from(p);
+    }
+
+    private void markFailed(Long userId, Confirmation info) {
+        transactions.executeWithoutResult(status -> {
+            CreditPurchase p = owned(userId, info.orderId());
+            if (p.getStatus() == CreditPurchase.Status.CONFIRMING && info.key().equals(p.getConfirmationKey())) p.failed();
+        });
+    }
+
+    private static boolean endedWithoutPayment(TossPaymentClient.Payment payment) {
+        return payment.status() != null && ENDED_STATUSES.contains(payment.status());
     }
 
     private PurchaseView view(Long userId, String orderId) {
