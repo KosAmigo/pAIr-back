@@ -31,6 +31,13 @@ spring:
     # 파일 번호는 공유 RDS 의 flyway_schema_history 와 맞춘다(V6 email verifications, V9 task content, V10 prompt versions, V11 connection grace).
     # 번호가 이미 RDS 에 들어간 파일은 이름을 바꾸지 않는다. 팀원 로컬 DB 에만 있는 옛 번호는 검증에서 무시한다
     ignore-migration-patterns: "*:missing"
+  data:
+    redis:
+      host: ${PAIR_REDIS_HOST:localhost}
+      port: ${PAIR_REDIS_PORT:6379}
+      # JPA 만 쓴다. Redis 저장소 자동 설정은 켜지 않는다
+      repositories:
+        enabled: false
   mail:
     host: ${PAIR_MAIL_HOST:localhost}
     port: ${PAIR_MAIL_PORT:1025}
@@ -217,6 +224,10 @@ pair:
     dir: grader
     # 동시에 채점할 개수 (실제 응시 채점과 실험 채점이 함께 씀)
     parallel: 4
+  # 채점 큐(Redis 스트림). 꺼져 있으면 서버 안의 스레드 풀이 바로 채점한다. 켜려면 PAIR_SCORING_QUEUE_ENABLED=true 와 Redis 가 필요하다
+  # (docker compose --profile redis up -d). workers, max-attempts, retry-delay, stale-after 는 ScoringQueueProperties 참고
+  scoring-queue:
+    enabled: ${PAIR_SCORING_QUEUE_ENABLED:false}
 
   # 모델 가격 ($/1M 토큰, 입력/출력). 채점 툴의 예상 비용 계산용
   pricing:
