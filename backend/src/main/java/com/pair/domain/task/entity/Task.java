@@ -66,7 +66,7 @@ public class Task {
     @Column(nullable = false, length = 30)
     private String category = "";
 
-    /** 초급 | 중급 | 고급 */
+    /** 쉬움 | 보통 | 어려움 */
     @Column(nullable = false, length = 10)
     private String difficulty = "";
 

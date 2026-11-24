@@ -55,10 +55,10 @@ class TaskGenTimeTest {
     }
 
     @Test
-    @DisplayName("난이도는 제한 시간으로 정한다: 20분=초급, 40분=중급, 60분=고급")
+    @DisplayName("난이도는 제한 시간으로 정한다: 20분=쉬움, 40분=보통, 60분=어려움")
     void difficultyByMinutes() {
-        assertThat(TaskGenRequest.difficultyOf(20)).isEqualTo("초급");
-        assertThat(TaskGenRequest.difficultyOf(40)).isEqualTo("중급");
-        assertThat(TaskGenRequest.difficultyOf(60)).isEqualTo("고급");
+        assertThat(TaskGenRequest.difficultyOf(20)).isEqualTo("쉬움");
+        assertThat(TaskGenRequest.difficultyOf(40)).isEqualTo("보통");
+        assertThat(TaskGenRequest.difficultyOf(60)).isEqualTo("어려움");
     }
 }
