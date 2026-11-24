@@ -128,6 +128,24 @@ class AttemptGuardsTest {
     }
 
     @Test
+    void 빌드와_실행을_너무_자주_누르면_429이고_다른_응시자는_영향이_없다() throws Exception {
+        when(runner.build(any())).thenReturn(new CodeRunner.BuildResult(true, List.of(), List.of(), 1));
+        // 빌드와 실행을 합쳐 1분에 10번(기본값)까지
+        for (int i = 0; i < 10; i++) {
+            mvc.perform(post("/api/attempts/{id}/build", devId).header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+        }
+        mvc.perform(post("/api/attempts/{id}/build", devId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isTooManyRequests());
+        mvc.perform(post("/api/attempts/{id}/run", devId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isTooManyRequests());
+        // 다른 회원은 자기 횟수가 따로다
+        var other = AuthTestSupport.signup(auth, mail, "다른 응시자", UUID.randomUUID() + "@pair.test");
+        String otherAttempt = attempts.startSelf(TestTasks.SELF_DEV, other.user().id()).id();
+        mvc.perform(post("/api/attempts/{id}/build", otherAttempt).header("Authorization", "Bearer " + other.token()))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void 실행_대기열이_꽉_차면_503() throws Exception {
         when(runner.build(any())).thenThrow(SandboxRunner.BusyException.class);
         when(runner.run(any())).thenThrow(SandboxRunner.BusyException.class);
