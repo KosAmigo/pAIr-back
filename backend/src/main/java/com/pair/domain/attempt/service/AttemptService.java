@@ -55,13 +55,14 @@ public class AttemptService {
     private final ChatAttachmentService attachments;
     private final JavaDiagnostics diagnostics;
     private final TaskMaterialService materials;
+    private final RunRateLimitService runRateLimit;
 
     public AttemptService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
                           TaskCatalogService catalog, AttemptRegistryService registry, CheckpointService checkpoints, CreditService credits,
                           ChatTurnRepository chatRecords, TransactionTemplate transactions,
                           ChatAttachmentService attachments, JavaDiagnostics diagnostics,
-                          TaskMaterialService materials) {
+                          TaskMaterialService materials, RunRateLimitService runRateLimit) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -77,6 +78,7 @@ public class AttemptService {
         this.attachments = attachments;
         this.diagnostics = diagnostics;
         this.materials = materials;
+        this.runRateLimit = runRateLimit;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -124,6 +126,7 @@ public class AttemptService {
 
     public CodeRunner.RunResult run(String id) {
         AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.SOLVING);
+        checkRunRate(id);
         Map<String, String> sources = new HashMap<>();
         store.readFiles(id).forEach((k, v) -> {
             if ((k.startsWith("src/") || k.startsWith("test/")) && k.endsWith(".java")) sources.put(k, v);
@@ -140,9 +143,16 @@ public class AttemptService {
         return r;
     }
 
+    /** 빌드·실행 횟수 제한. 자가진단은 회원 1명, 실전(회원 없음)은 응시 1건 단위로 센다 */
+    private void checkRunRate(String id) {
+        Long userId = registry.find(id).map(Attempt::getUserId).orElse(null);
+        runRateLimit.check(userId != null ? "user:" + userId : "attempt:" + id);
+    }
+
     /** 빌드 버튼: 응시자 코드를 컴파일만 한다. */
     public CodeRunner.BuildResult build(String id) {
         requireStatus(id, AttemptStateDto.Status.SOLVING);
+        checkRunRate(id);
         Map<String, String> sources = new HashMap<>();
         store.readFiles(id).forEach((k, v) -> {
             if (isJavaSource(k)) sources.put(k, v);

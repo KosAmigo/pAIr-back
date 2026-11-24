@@ -10,6 +10,8 @@ import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.entity.RefreshSession;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.repository.RefreshSessionRepository;
+import com.pair.domain.company.entity.Company;
+import com.pair.domain.company.repository.CompanyRepository;
 import com.pair.global.error.ConflictException;
 import com.pair.global.error.ForbiddenException;
 import com.pair.global.error.UnauthorizedException;
@@ -43,10 +45,11 @@ public class AuthService {
     private final EmailVerificationService emailVerification;
     private final ExamSessionRepository examSessions;
     private final WithdrawnEmailHashService withdrawnEmailHasher;
+    private final CompanyRepository companies;
 
     public AuthService(AuthAccountRepository accounts, RefreshSessionRepository sessions, JwtTokens tokens,
             CreditService credits, EmailVerificationService emailVerification, ExamSessionRepository examSessions,
-            WithdrawnEmailHashService withdrawnEmailHasher) {
+            WithdrawnEmailHashService withdrawnEmailHasher, CompanyRepository companies) {
         this.accounts = accounts;
         this.sessions = sessions;
         this.tokens = tokens;
@@ -54,6 +57,7 @@ public class AuthService {
         this.emailVerification = emailVerification;
         this.examSessions = examSessions;
         this.withdrawnEmailHasher = withdrawnEmailHasher;
+        this.companies = companies;
     }
 
     public void requestEmailVerification(String email) {
@@ -128,6 +132,11 @@ public class AuthService {
         return tokens.verify(token, "access")
                 .flatMap(jwt -> accounts.findById(jwt.userId())
                         .filter(a -> a.isActive() && a.getTokenVersion() == jwt.tokenVersion()));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<UserResponse> findUser(String token) {
+        return findAccount(token).map(this::userResponse);
     }
 
     /** Refresh Token을 원자적으로 교체한다. */
@@ -218,7 +227,14 @@ public class AuthService {
 
     private AuthResponse response(AuthAccount account, String refreshToken, Instant now) {
         return new AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), now), refreshToken,
-                JwtTokens.ACCESS_LIFETIME.toSeconds(), UserResponse.from(account));
+                JwtTokens.ACCESS_LIFETIME.toSeconds(), userResponse(account));
+    }
+
+    private UserResponse userResponse(AuthAccount account) {
+        String companyName = account.getCompanyId() == null ? null : companies.findById(account.getCompanyId())
+                .map(Company::getName)
+                .orElseThrow(() -> new IllegalStateException("회원의 회사를 찾을 수 없습니다: " + account.getCompanyId()));
+        return UserResponse.from(account, companyName);
     }
 
     private static String normalizeEmail(String email) {

@@ -205,6 +205,7 @@ pair:
     docker-image: pair-sandbox
     max-concurrent: 4      # docker 모드에서 동시에 돌 컨테이너 수. 서버 코어 수 이하로 (넘으면 느려져 정상 코드도 시간 초과로 실패)
     queue-wait-seconds: 60 # 자리가 날 때까지 기다리는 최대 시간. 넘으면 실행을 거절한다
+    rate-limit-per-minute: 10 # 응시자 1명(실전은 응시 1건)이 1분에 누를 수 있는 빌드·실행 횟수. 넘으면 429
     # remote = 실행을 별도 샌드박스 서버(실행 전용 API, 프로필 sandbox-server)에 맡긴다. 주소와 공유 토큰은 앱·샌드박스 서버가 같은 값을 쓴다
     remote-url: ${PAIR_RUN_REMOTE_URL:}
     remote-token: ${PAIR_RUN_REMOTE_TOKEN:}

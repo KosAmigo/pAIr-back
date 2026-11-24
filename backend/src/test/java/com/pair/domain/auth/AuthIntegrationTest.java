@@ -10,6 +10,8 @@ import com.pair.domain.auth.dto.SignupRequest;
 import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.service.AuthService;
+import com.pair.domain.company.entity.Company;
+import com.pair.domain.company.repository.CompanyRepository;
 import com.pair.global.error.ConflictException;
 import com.pair.global.error.UnauthorizedException;
 import com.pair.global.security.HeaderCurrentUserResolver;
@@ -56,6 +58,7 @@ class AuthIntegrationTest extends BearerIntegrationTest {
     @Autowired JwtTokens tokens;
     @Autowired JdbcTemplate jdbc;
     @Autowired AuthAccountRepository accounts;
+    @Autowired CompanyRepository companies;
     @Autowired PlatformTransactionManager transactions;
 
     @Test
@@ -67,6 +70,8 @@ class AuthIntegrationTest extends BearerIntegrationTest {
                 .andExpect(jsonPath("$.user.role").value("USER"))
                 .andReturn();
         JsonNode signupBody = json.readTree(signup.getResponse().getContentAsString());
+        assertThat(signupBody.path("user").has("companyName")).isTrue();
+        assertThat(signupBody.path("user").path("companyName").isNull()).isTrue();
         String signupToken = signupBody.path("token").asText();
         String refreshToken = signupBody.path("refreshToken").asText();
         assertThat(signupBody.path("expiresIn").asLong()).isEqualTo(900);
@@ -74,7 +79,8 @@ class AuthIntegrationTest extends BearerIntegrationTest {
 
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(signupBody.path("user").path("id").asLong()));
+                .andExpect(jsonPath("$.id").value(signupBody.path("user").path("id").asLong()))
+                .andExpect(jsonPath("$.companyName").doesNotExist());
 
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -100,6 +106,37 @@ class AuthIntegrationTest extends BearerIntegrationTest {
         mvc.perform(tokenRequest("/api/auth/refresh", newRefresh)).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void companyNameIsReturnedForCompanyMembersAndReflectsChanges() throws Exception {
+        Company company = companies.saveAndFlush(new Company("테스트 기업", null, null, Instant.now()));
+        for (String role : new String[] { "MANAGER", "PROCTOR" }) {
+            String email = role.toLowerCase() + "-profile@example.com";
+            JsonNode signup = signupAccount(email);
+            long userId = signup.path("user").path("id").asLong();
+            jdbc.update("update users set role = ?, company_id = ? where user_id = ?", role, company.getId(), userId);
+
+            JsonNode loggedIn = login(email, "secure-pass-123");
+            assertThat(loggedIn.path("user").path("companyId").asLong()).isEqualTo(company.getId());
+            assertThat(loggedIn.path("user").path("companyName").asText()).isEqualTo("테스트 기업");
+            mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + loggedIn.path("token").asText()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.role").value(role))
+                    .andExpect(jsonPath("$.companyName").value("테스트 기업"));
+            mvc.perform(tokenRequest("/api/auth/refresh", loggedIn.path("refreshToken").asText()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.user.companyName").value("테스트 기업"));
+        }
+
+        JsonNode member = login("manager-profile@example.com", "secure-pass-123");
+        jdbc.update("update companies set name = ? where company_id = ?", "변경된 기업", company.getId());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + member.path("token").asText()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companyName").value("변경된 기업"));
+        mvc.perform(tokenRequest("/api/auth/refresh", member.path("refreshToken").asText()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.companyName").value("변경된 기업"));
     }
 
     @Test

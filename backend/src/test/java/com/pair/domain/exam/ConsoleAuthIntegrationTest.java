@@ -115,11 +115,9 @@ class ConsoleAuthIntegrationTest extends ExamIntegrationTest {
     }
 
     @Test
-    @DisplayName("관리자는 회차를 만들 때 회사를 넣어야 한다")
-    void adminMustChooseCompany() throws Exception {
-        mvc.perform(as(post("/api/console/sessions"), 1, "ADMIN", null).contentType(MediaType.APPLICATION_JSON).content(sessionBody(null)))
-                .andExpect(status().isBadRequest());
+    @DisplayName("관리자는 회차를 생성할 수 없다")
+    void adminCannotCreateSession() throws Exception {
         mvc.perform(as(post("/api/console/sessions"), 1, "ADMIN", null).contentType(MediaType.APPLICATION_JSON).content(sessionBody(503L)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isForbidden());
     }
 }
