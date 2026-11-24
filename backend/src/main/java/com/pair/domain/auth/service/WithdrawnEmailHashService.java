@@ -29,7 +29,7 @@ public class WithdrawnEmailHashService {
         this.key = new SecretKeySpec(decoded, ALGORITHM);
     }
 
-    String hash(String normalizedEmail) {
+    public String hash(String normalizedEmail) {
         try {
             Mac mac = Mac.getInstance(ALGORITHM);
             mac.init(key);

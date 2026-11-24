@@ -67,6 +67,8 @@ public class CompanyInviteService {
             }
             old.revoke(now);
         }
+        // IDENTITY 키는 save 때 INSERT 가 바로 나간다. 이전 초대 폐기를 먼저 반영해야 미사용 초대 유니크 인덱스에 걸리지 않는다
+        invites.flush();
         String token = InviteTokenService.next();
         try {
             invites.saveAndFlush(new CompanyInvite(company.getId(), email, CurrentUser.Role.PROCTOR, InviteTokenService.hash(token),

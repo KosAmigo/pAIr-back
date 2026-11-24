@@ -8,7 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -30,6 +33,34 @@ class TossPaymentClientTest {
                         + "\"card\":{\"issuerCode\":\"01\"}}", MediaType.APPLICATION_JSON));
         assertThat(client.confirm("pay", "order-123", 4990, "stable-key").status()).isEqualTo("DONE");
         server.verify();
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "400,INVALID_REJECT_CARD", "403,REJECT_CARD_COMPANY", "404,NOT_FOUND_PAYMENT_SESSION" })
+    void definiteFailuresAreRejected(int status, String code) {
+        assertThatThrownBy(() -> confirmWithError(status, "{\"code\":\"" + code + "\"}"))
+                .isInstanceOf(PaymentRejectedException.class);
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "400,ALREADY_PROCESSED_PAYMENT", "400,ALREADY_PROCESSING_REQUEST", "400,PROVIDER_ERROR",
+            "401,UNAUTHORIZED_KEY", "500,UNKNOWN_PAYMENT_ERROR" })
+    void uncertainFailuresStayRecoverable(int status, String code) {
+        assertThatThrownBy(() -> confirmWithError(status, "{\"code\":\"" + code + "\"}"))
+                .isInstanceOf(PaymentUnavailableException.class);
+    }
+
+    @Test
+    void unreadableErrorBodyStaysRecoverable() {
+        assertThatThrownBy(() -> confirmWithError(400, "<html>")).isInstanceOf(PaymentUnavailableException.class);
+    }
+
+    private static void confirmWithError(int status, String body) {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer.bindTo(builder).build()
+                .expect(requestTo("https://api.tosspayments.com/v1/payments/confirm"))
+                .andRespond(withStatus(HttpStatus.valueOf(status)).contentType(MediaType.APPLICATION_JSON).body(body));
+        new TossPaymentClient("test_gsk_example", builder).confirm("pay", "order-123", 4990, "stable-key");
     }
 
     @Test

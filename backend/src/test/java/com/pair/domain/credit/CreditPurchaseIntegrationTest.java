@@ -7,6 +7,7 @@ import com.pair.domain.credit.repository.CreditLedgerRepository;
 import com.pair.domain.credit.service.CreditPurchaseService;
 import com.pair.domain.credit.service.CreditService;
 import com.pair.domain.credit.exception.InsufficientCreditException;
+import com.pair.infra.payment.PaymentRejectedException;
 import com.pair.infra.payment.PaymentUnavailableException;
 import com.pair.infra.payment.TossPaymentClient;
 import static org.assertj.core.api.Assertions.*;
@@ -119,6 +120,30 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
         when(toss.find(key)).thenReturn(new TossPaymentClient.Payment(key, id, 4990, "DONE"));
         assertThat(purchases.confirm(user, id, key, 4990).status()).isEqualTo(CreditPurchase.Status.PAID);
         assertThat(credits.balance(user)).isEqualTo(1200);
+    }
+
+    @Test
+    void expiredTossPaymentFailsOrderWithoutCredit() {
+        long user = user();
+        String id = purchases.create(user, 1000).orderId();
+        String key = "pay-" + id;
+        when(toss.confirm(anyString(), anyString(), anyInt(), anyString()))
+                .thenThrow(new PaymentUnavailableException("unknown"));
+        when(toss.find(key)).thenReturn(new TossPaymentClient.Payment(key, id, 4990, "EXPIRED"));
+        assertThatThrownBy(() -> purchases.confirm(user, id, key, 4990)).isInstanceOf(PaymentRejectedException.class);
+        assertThat(purchases.history(user, 0, 20).getContent().get(0).status()).isEqualTo(CreditPurchase.Status.FAILED);
+        assertThat(credits.balance(user)).isEqualTo(200);
+    }
+
+    @Test
+    void endedPaymentOfAnotherOrderDoesNotFailThisOrder() {
+        long user = user();
+        String id = purchases.create(user, 1000).orderId();
+        String key = "pay-" + id;
+        when(toss.confirm(anyString(), anyString(), anyInt(), anyString()))
+                .thenReturn(new TossPaymentClient.Payment(key, "other-order", 4990, "EXPIRED"));
+        assertThatThrownBy(() -> purchases.confirm(user, id, key, 4990)).isInstanceOf(PaymentUnavailableException.class);
+        assertThat(purchases.history(user, 0, 20).getContent().get(0).status()).isEqualTo(CreditPurchase.Status.CONFIRMING);
     }
 
     @Test
