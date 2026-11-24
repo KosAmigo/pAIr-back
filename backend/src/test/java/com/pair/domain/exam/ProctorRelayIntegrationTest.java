@@ -221,6 +221,28 @@ class ProctorRelayIntegrationTest {
         return pc;
     }
 
+    /**
+     * 감독관이 이미 열려 있는 짝에 PC 가 (다시) 붙는 경우. paired 다음에 peer 와 viewer-request 3개가 오는데,
+     * peer 는 전송 스레드로, viewer-request 는 바로 나가므로 서로의 순서는 보장되지 않는다. 프런트도 순서에 기대지 않는다.
+     */
+    private Client connectPcWithViewers(long sessionId, long participantId) throws Exception {
+        when(authorizer.authorize(TOKEN)).thenReturn(true);
+        when(authorizer.identify(TOKEN)).thenReturn(java.util.Optional.of(new com.pair.domain.exam.dto.RelayIdentityDto(sessionId, participantId)));
+        Client pc = connect();
+        pc.session.sendMessage(new TextMessage("{\"type\":\"hello-pc\",\"invite\":\"" + TOKEN + "\"}"));
+        assertThat(nextJson(pc).get("type").asText()).isEqualTo("paired");
+        java.util.List<String> types = new java.util.ArrayList<>();
+        java.util.Set<String> channels = new java.util.TreeSet<>();
+        for (int i = 0; i < 4; i++) {
+            JsonNode m = nextJson(pc);
+            types.add(m.get("type").asText());
+            if ("viewer-request".equals(m.get("type").asText())) channels.add(m.get("channel").asText());
+        }
+        assertThat(types).containsExactlyInAnyOrder("peer", "viewer-request", "viewer-request", "viewer-request");
+        assertThat(channels).containsExactly("phone", "screen", "webcam");
+        return pc;
+    }
+
     private Client openViewer(long sessionId, long participantId) throws Exception {
         Client viewer = connect();
         viewer.session.sendMessage(new TextMessage("{\"type\":\"watch\",\"sessionId\":" + sessionId + ",\"participantId\":" + participantId
@@ -323,9 +345,8 @@ class ProctorRelayIntegrationTest {
         pc.session.close();
         assertThat(nextJson(viewer).get("state").asText()).isEqualTo("offline");
 
-        Client again = connectPc(sid, pid);
+        Client again = connectPcWithViewers(sid, pid);
         assertThat(nextJson(viewer).get("state").asText()).isEqualTo("watching");
-        readViewerRequests(again);
     }
 
     @Test
