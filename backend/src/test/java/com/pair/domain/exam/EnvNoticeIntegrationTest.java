@@ -1,5 +1,6 @@
 package com.pair.domain.exam;
 
+import com.pair.domain.exam.dto.EnvCheckFailureResponse;
 import com.pair.domain.exam.dto.EnvCheckResponse;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -113,6 +114,50 @@ class EnvNoticeIntegrationTest {
         var saved = envCheck.view(s.id(), pid);
         assertThat(saved.source()).isEqualTo(EnvCheckResponse.Source.SAVED);
         assertThat(saved.result().get("light").asText()).isEqualTo("fail");
+    }
+
+    @Test
+    @DisplayName("점검 미통과 입장자: 실패 항목이 있는 채 입장한 사람만 모으고, 안내를 보냈는지 함께 보여 준다")
+    void failuresOfSession() throws Exception {
+        SessionSummaryResponse s = createSession(310L, true);
+        String failed = invite(s.id(), "fail@test.dev");
+        String clean = invite(s.id(), "clean@test.dev");
+        String notEntered = invite(s.id(), "wait@test.dev");
+        Long failedId = pid(s.id(), "fail@test.dev");
+
+        entry.consent(failed, new ConsentRequest("v1", json.readTree("""
+                {"pc":{"items":[{"id":"light","label":"밝기","status":"fail","detail":"너무 어둡습니다"},
+                                {"id":"face","label":"얼굴","status":"pass","detail":""}]},
+                 "phone":{"items":[{"id":"desk","label":"책상 위","status":"fail","detail":"스캔 실패"},
+                                   {"id":"hand","label":"손","status":"warn","detail":""}]}}""")));
+        entry.enter(failed);
+        entry.consent(clean, new ConsentRequest("v1", json.readTree("{\"pc\":{\"items\":[{\"id\":\"light\",\"status\":\"pass\"}]},\"phone\":null}")));
+        entry.enter(clean);
+        entry.consent(notEntered, new ConsentRequest("v1", json.readTree("{\"pc\":{\"items\":[{\"id\":\"light\",\"status\":\"fail\"}]}}"))); // 점검만 하고 입장은 안 함
+
+        var list = envCheck.failuresOf(s.id());
+
+        assertThat(list).singleElement().satisfies(f -> {
+            assertThat(f.participantId()).isEqualTo(failedId);
+            assertThat(f.failed()).extracting(EnvCheckFailureResponse.Item::id).containsExactly("light", "desk"); // warn 은 제외
+            assertThat(f.failed().get(0).detail()).isEqualTo("너무 어둡습니다");
+            assertThat(f.noticeSent()).isFalse();
+        });
+
+        notices.send(s.id(), failedId, "방을 더 밝게 해 주세요.", 1L);
+        assertThat(envCheck.failuresOf(s.id())).singleElement().satisfies(f -> assertThat(f.noticeSent()).isTrue());
+    }
+
+    @Test
+    @DisplayName("점검 미통과 입장자: 입장한 사람이 없거나 점검 JSON 모양이 달라도 오류 없이 빈 목록")
+    void failuresOfEmptyAndMalformed() throws Exception {
+        SessionSummaryResponse s = createSession(311L, true);
+        assertThat(envCheck.failuresOf(s.id())).isEmpty();
+
+        String token = invite(s.id(), "odd@test.dev");
+        entry.consent(token, new ConsentRequest("v1", json.readTree("{\"pc\":{\"items\":\"not-a-list\"},\"phone\":7}")));
+        entry.enter(token);
+        assertThat(envCheck.failuresOf(s.id())).isEmpty();
     }
 
     @Test
