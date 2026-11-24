@@ -22,6 +22,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.infra.mail.MailLayout;
 
@@ -33,18 +34,20 @@ public class EmailVerificationService {
     private static final PasswordEncoder CODE_ENCODER = new BCryptPasswordEncoder(10);
 
     private final EmailVerificationRepository verifications;
+    private final TransactionTemplate tx;
     private final JavaMailSender mail;
     private final String mailFrom;
     private final Duration codeLifetime;
     private final Duration resendInterval;
     private final int maxAttempts;
 
-    public EmailVerificationService(EmailVerificationRepository verifications, JavaMailSender mail,
+    public EmailVerificationService(EmailVerificationRepository verifications, TransactionTemplate tx, JavaMailSender mail,
             @Value("${pair.auth.email-from:no-reply@pair.test}") String mailFrom,
             @Value("${pair.auth.email-verification.code-lifetime:10m}") Duration codeLifetime,
             @Value("${pair.auth.email-verification.resend-interval:60s}") Duration resendInterval,
             @Value("${pair.auth.email-verification.max-attempts:5}") int maxAttempts) {
         this.verifications = verifications;
+        this.tx = tx;
         this.mail = mail;
         this.mailFrom = mailFrom;
         this.codeLifetime = codeLifetime;
@@ -56,37 +59,51 @@ public class EmailVerificationService {
         }
     }
 
-    @Transactional
+    /** 호출하는 쪽에 트랜잭션이 없어야 한다. 메일 서버를 기다리는 동안 DB 커넥션을 쥐지 않기 위해서다. */
     public void sendCode(String email) {
         sendCode(email, false);
     }
 
-    @Transactional
     public void sendOnboardingCode(String email) {
         sendCode(email, true);
     }
 
+    /**
+     * 코드 저장(짧은 트랜잭션) → 메일 발송(트랜잭션 밖) 순서로 처리한다.
+     * 발송이 실패하면 방금 저장한 코드를 지워, 재요청 제한에 걸리지 않고 바로 다시 요청할 수 있게 한다.
+     */
     private void sendCode(String email, boolean noExpiry) {
         Instant now = Instant.now();
-        EmailVerification verification = verifications.findByEmailForUpdate(email).orElse(null);
-        if (verification != null && now.isBefore(verification.getCreatedAt().plus(resendInterval))) {
-            throw new IllegalStateException("인증 코드는 %d분 후 다시 요청할 수 있습니다."
-                    .formatted(Math.max(1, resendInterval.toMinutes())));
-        }
-
         String code = "%06d".formatted(RANDOM.nextInt(1_000_000));
-        if (verification == null) {
-            verification = new EmailVerification(email, CODE_ENCODER.encode(code), now, noExpiry ? null : now.plus(codeLifetime));
-        } else {
-            verification.replaceCode(CODE_ENCODER.encode(code), now, noExpiry ? null : now.plus(codeLifetime));
-        }
-        verifications.save(verification);
+        String codeHash = CODE_ENCODER.encode(code);
+        tx.executeWithoutResult(status -> {
+            EmailVerification verification = verifications.findByEmailForUpdate(email).orElse(null);
+            if (verification != null && now.isBefore(verification.getCreatedAt().plus(resendInterval))) {
+                throw new IllegalStateException("인증 코드는 %d분 후 다시 요청할 수 있습니다."
+                        .formatted(Math.max(1, resendInterval.toMinutes())));
+            }
+            Instant expiresAt = noExpiry ? null : now.plus(codeLifetime);
+            if (verification == null) {
+                verification = new EmailVerification(email, codeHash, now, expiresAt);
+            } else {
+                verification.replaceCode(codeHash, now, expiresAt);
+            }
+            verifications.save(verification);
+        });
 
         try {
             mail.send(codeMessage(email, code, noExpiry));
         } catch (MailException e) {
+            discard(email, codeHash);
             throw new MailDeliveryException(e);
         }
+    }
+
+    /** 발송에 실패한 코드를 지운다. 그 사이 새 코드가 발급됐으면 건드리지 않는다. */
+    private void discard(String email, String codeHash) {
+        tx.executeWithoutResult(status -> verifications.findByEmailForUpdate(email)
+                .filter(v -> v.getCodeHash().equals(codeHash))
+                .ifPresent(verifications::delete));
     }
 
     /** 시험 초대 메일과 같은 서식(머리띠·표·안내 문구)으로 만든 인증 코드 메일. 글자 본문도 함께 담는다 */

@@ -171,6 +171,23 @@ class CompanyOnboardingIntegrationTest {
     }
 
     @Test
+    void failedInviteMailRevokesInviteSoManagerCanInviteAgain() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        AuthAccount manager = approvedManager(suffix);
+        CurrentUser user = new CurrentUser(manager.getId(), CurrentUser.Role.MANAGER, manager.getCompanyId());
+        String email = "retry-" + suffix + "@test.dev";
+        doThrow(new MailDeliveryException(new MailSendException("smtp down")))
+                .doNothing().when(mailer).sendProctorInvite(anyString(), anyString(), anyString());
+
+        assertThatThrownBy(() -> invites.inviteProctor(user, email)).isInstanceOf(MailDeliveryException.class);
+        assertThat(jdbc.queryForObject("select count(*) from company_invites where lower(email) = ? and revoked_at is null",
+                Integer.class, email)).isZero();
+        invites.inviteProctor(user, email);
+        assertThat(jdbc.queryForObject("select count(*) from company_invites where lower(email) = ? and revoked_at is null",
+                Integer.class, email)).isEqualTo(1);
+    }
+
+    @Test
     void credentialMailFailureKeepsApprovalAndMarksAccountFailed() {
         doThrow(new MailDeliveryException(new MailSendException("smtp down")))
                 .when(mailer).sendCredentials(any(AuthAccount.class), anyString());

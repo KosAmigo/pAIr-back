@@ -279,6 +279,41 @@ class AuthIntegrationTest extends BearerIntegrationTest {
     }
 
     @Test
+    @DisplayName("인증 메일을 보내는 동안 DB 커넥션을 쥐지 않는다")
+    void verificationMailIsSentWithoutHoldingConnection() throws Exception {
+        HikariDataSource pool = dataSource.unwrap(HikariDataSource.class);
+        int[] activeWhileSending = { -1 };
+        AuthTestSupport.prepareMail(mail);
+        org.mockito.Mockito.doAnswer(inv -> {
+            activeWhileSending[0] = pool.getHikariPoolMXBean().getActiveConnections();
+            return null;
+        }).when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest("no-conn@example.com"))))
+                .andExpect(status().isAccepted());
+        assertThat(activeWhileSending[0]).isZero();
+    }
+
+    @Test
+    @DisplayName("인증 메일 발송이 실패하면 코드를 지워 바로 다시 요청할 수 있다")
+    void failedVerificationMailDiscardsCodeAndAllowsImmediateRetry() throws Exception {
+        String email = "mail-fail@example.com";
+        AuthTestSupport.prepareMail(mail);
+        org.mockito.Mockito.doThrow(new org.springframework.mail.MailSendException("smtp down"))
+                .when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest(email))))
+                .andExpect(status().is5xxServerError());
+        assertThat(jdbc.queryForObject("select count(*) from email_verifications where email = ?",
+                Integer.class, email)).isZero();
+
+        org.mockito.Mockito.doNothing().when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest(email))))
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
     void rejectsExpiredTamperedWrongTypeAndLegacyTokens() throws Exception {
         String code = requestVerificationCode("jwt-check@example.com");
         MvcResult result = mvc.perform(signup("테스트 사용자", "jwt-check@example.com", "secure-pass-123", code))
