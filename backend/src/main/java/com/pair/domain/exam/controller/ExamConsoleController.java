@@ -102,7 +102,7 @@ public class ExamConsoleController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public SessionSummaryResponse create(CurrentUser user, @Valid @RequestBody ExamSessionRequest req) {
-        access.requireManager(user);
+        access.requireSessionCreation(user);
         return sessions.create(req.withCompany(access.companyFor(user, req.companyId())), user.userId());
     }
 
