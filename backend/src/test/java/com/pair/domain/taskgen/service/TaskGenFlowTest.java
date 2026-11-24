@@ -170,7 +170,7 @@ class TaskGenFlowTest {
         assertThat(t.getTrack()).isEqualTo("DEV");
         assertThat(t.getUsage()).isEqualTo(Task.Usage.SELF);
         assertThat(t.getTimeLimitMin()).isEqualTo(60);
-        assertThat(t.getDifficulty()).isEqualTo("고급"); // 60분
+        assertThat(t.getDifficulty()).isEqualTo("어려움"); // 60분
         assertThat(t.getCategory()).isEqualTo("장애 분석");
         assertThat(t.getSummary()).isEqualTo(good("x").summary());
 
@@ -189,16 +189,16 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("20분 과제: 제한 시간 20, d4Minutes 는 비례해서 줄고, 난이도는 AI 가 아니라 제한 시간으로 정한다(20분=초급)")
+    @DisplayName("20분 과제: 제한 시간 20, d4Minutes 는 비례해서 줄고, 난이도는 AI 가 아니라 제한 시간으로 정한다(20분=쉬움)")
     void twentyMinutesAndDifficultyByTime() {
         DevDraftDto g = good("flow-20min");
-        ai.script.add(TaskGenFixtures.edit(g, b -> b.difficulty("고급")));
+        ai.script.add(TaskGenFixtures.edit(g, b -> b.difficulty("어려움")));
         var form = new TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 중복 적용", "SELF", 20);
         generator.generate(form, 1L, steps::add);
 
         Task t = records.findByCode("flow-20min").orElseThrow();
         assertThat(t.getTimeLimitMin()).isEqualTo(20);
-        assertThat(t.getDifficulty()).isEqualTo("초급"); // AI 가 고급이라 해도 무시
+        assertThat(t.getDifficulty()).isEqualTo("쉬움"); // AI 가 어려움이라 해도 무시
         assertThat(tasks.get("flow-20min").d4Minutes()).containsExactly(6, 10, 13, 16);
         assertThat(ai.users.get(0)).contains("제한 시간: 20분").doesNotContain("직군", "난이도");
     }

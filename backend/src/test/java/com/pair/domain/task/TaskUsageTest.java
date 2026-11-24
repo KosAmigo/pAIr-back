@@ -54,7 +54,7 @@ class TaskUsageTest extends ExamIntegrationTest {
 
     private void row(long id, String code, Task.Status status, Long parent) {
         Task t = new Task(id, code, "제목 " + code, "DEV", 60, Task.Usage.SELF, status, parent, 1L, AT);
-        t.setCard("소개 " + code, "장애 분석", "중급");
+        t.setCard("소개 " + code, "장애 분석", "보통");
         records.save(t);
     }
 
@@ -108,7 +108,7 @@ class TaskUsageTest extends ExamIntegrationTest {
 
         JsonNode hidden = byId.get("usage-hidden");
         assertThat(hidden.get("track").asText()).isEqualTo("DEV");
-        assertThat(hidden.get("difficulty").asText()).isEqualTo("중급");
+        assertThat(hidden.get("difficulty").asText()).isEqualTo("보통");
         assertThat(hidden.get("category").asText()).isEqualTo("장애 분석");
         assertThat(hidden.get("summary").asText()).isEqualTo("소개 usage-hidden");
         assertThat(hidden.get("createdAt").asText()).startsWith("2026-11-20");
