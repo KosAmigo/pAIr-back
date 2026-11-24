@@ -13,6 +13,7 @@ import com.pair.domain.auth.AuthTestSupport;
 import com.pair.domain.auth.dto.LoginRequest;
 import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.global.error.UnauthorizedException;
+import com.pair.domain.auth.exception.EmailVerificationException;
 import com.pair.infra.mail.MailDeliveryException;
 import org.springframework.mail.MailSendException;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,6 +120,16 @@ class CompanyOnboardingIntegrationTest {
         verify(mail).send(message.capture());
         String code = verificationCode(message.getValue());
 
+        String wrong = "000000".equals(code) ? "000001" : "000000";
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> invites.accept(
+                new InviteAcceptRequest(token, "감독관", "new-password-123", wrong)))
+                .isInstanceOf(EmailVerificationException.class);
+        assertThat(failedAttempts(proctorEmail)).isEqualTo(1);
+        // 코드는 맞지만 비밀번호가 72바이트를 넘어 실패하면, 코드를 다시 쓸 수 있어야 한다
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> invites.accept(
+                new InviteAcceptRequest(token, "감독관", "가".repeat(25), code)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("72바이트");
+
         var session = invites.accept(new InviteAcceptRequest(token, "감독관", "new-password-123", code));
         assertThat(session.user().role()).isEqualTo(CurrentUser.Role.PROCTOR);
         assertThat(session.user().companyId()).isEqualTo(companyId);
@@ -220,6 +231,9 @@ class CompanyOnboardingIntegrationTest {
                 java.time.Instant.class, manager.getEmail())).isNull();
         assertThat(accounts.findById(manager.getId()).orElseThrow()).isNotNull();
 
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> auth.verifyOnboardingEmail(login.token(),
+                "000000".equals(code) ? "000001" : "000000")).isInstanceOf(EmailVerificationException.class);
+        assertThat(failedAttempts(manager.getEmail())).isEqualTo(1);
         auth.verifyOnboardingEmail(login.token(), code);
         assertThat(accounts.findById(manager.getId()).orElseThrow().isEmailVerified()).isTrue();
         // 메일로 받은 임시 비밀번호를 그대로 새 비밀번호로 쓸 수 없고, 변경 의무도 풀리지 않는다
@@ -286,6 +300,10 @@ class CompanyOnboardingIntegrationTest {
         assertThat(reissued.isEmailVerified()).isFalse();
         assertThat(reissued.isPasswordChangeRequired()).isTrue();
         assertThat(reissued.getOnboardingMailStatus()).isEqualTo("SENT");
+    }
+
+    private Integer failedAttempts(String email) {
+        return jdbc.queryForObject("select failed_attempts from email_verifications where email = ?", Integer.class, email);
     }
 
     private AuthAccount approvedManager(String suffix) {

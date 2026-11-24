@@ -1,5 +1,6 @@
 package com.pair.domain.company.service;
 
+import com.pair.domain.auth.exception.EmailVerificationException;
 import com.pair.domain.company.dto.InviteAcceptRequest;
 import com.pair.domain.company.dto.InviteInfoResponse;
 import com.pair.domain.company.entity.Company;
@@ -94,13 +95,13 @@ public class CompanyInviteService {
         emailVerification.sendCode(invite.getEmail());
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = EmailVerificationException.class)
     public com.pair.domain.auth.dto.AuthResponse accept(InviteAcceptRequest request) {
         CompanyInvite invite = findUsableForUpdate(request.token());
         if (accounts.existsByEmailIgnoreCase(invite.getEmail())) throw new ConflictException("이미 가입된 이메일입니다.");
         var result = emailVerification.consume(invite.getEmail(), request.code());
         if (result != EmailVerificationService.ConsumeResult.CONSUMED) {
-            throw new IllegalArgumentException(result.message());
+            throw new EmailVerificationException(result.message());
         }
         var account = corporateAccounts.signupProctor(invite.getEmail(), request.name(), request.password(), invite.getCompanyId());
         invite.accept(account.getId(), Instant.now());
