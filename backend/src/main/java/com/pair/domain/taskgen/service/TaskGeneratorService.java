@@ -34,7 +34,7 @@ public abstract class TaskGeneratorService<D> {
     static final String BOUNDARY = """
             [명세와 답 노출의 경계] 줘도 되는 것은 무엇이 맞는 결과인지입니다(입력과 기대 출력의 예, 항상 성립해야 하는 조건, 현상과 재현 값, 측정 범위나 집계 정의 같은 사실). \
             주면 안 되는 것은 왜 틀렸는지와 어디를 어떻게 고칠지입니다(원인, 결함 위치, 고치는 방법, 계산 순서나 절차, "~해야 한다", "~해서는 안 된다", "~만으로 판단하지 않는다" 같은 지시. 문항 문구도 계산법을 지정하지 않습니다). \
-            결함을 피하는 데 꼭 필요한 기대 결과(예: 끝나는 시각에 바로 시작하는 예약)는 여러 예 가운데 하나로 두고, 따로 떼어 규칙 문장으로 강조하지 않습니다. 규칙 문장("~하면 예외가 발생한다"), 원인 문장, "~하지 않는다"·"~로 잡히지 않는다" 꼴, 값을 합치는 방법(차이, 비율, 가중치)은 쓰지 않습니다. 정의는 무엇을 세는지(대상과 범위)까지만 쓰고, 두 대상이 서로 다르다고 직접 짚는 문장("A와 B는 다르다")과 "원인:" 표지도 쓰지 않습니다.
+            결함을 피하는 데 꼭 필요한 기대 결과(예: 끝나는 시각에 바로 시작하는 예약)는 여러 예 가운데 하나로 두고, 따로 떼어 규칙 문장으로 강조하지 않습니다(M3·E3: 숨은 결함을 피하는 기대 결과가 요구사항에 "각 구간 이름은 오름차순이다", "반환 건수는 n과 전체 중 작은 값이다" 같은 한 줄 규칙으로 적히면 결함이 숨겨지지 않은 것입니다. 이런 결과는 입력→기대 출력 예에서만 보이게 합니다). 규칙 문장("~하면 예외가 발생한다"), 원인 문장, "~하지 않는다"·"~로 잡히지 않는다" 꼴, 값을 합치는 방법(차이, 비율, 가중치)은 쓰지 않습니다. 정의는 무엇을 세는지(대상과 범위)까지만 쓰고, 두 대상이 서로 다르다고 직접 짚는 문장("A와 B는 다르다")과 "원인:" 표지도 쓰지 않습니다.
             """;
 
     public static final String STEP_GENERATING = "생성 중";
@@ -84,11 +84,68 @@ public abstract class TaskGeneratorService<D> {
 
     private final TaskGenAiService ai;
     private final TaskGenProperties props;
+    /** 단계별 생성(기본). null 이거나 pair.taskgen.pipeline=oneshot 이면 옛 방식(한 번에 과제 전체) */
+    private final TaskPipelineService<D> pipeline;
 
     protected TaskGeneratorService(TaskGenAiService ai, TaskGenProperties props) {
+        this(ai, props, null);
+    }
+
+    protected TaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, TaskPipelineService<D> pipeline) {
         this.ai = ai;
         this.props = props;
+        this.pipeline = pipeline;
         this.leakJudge = new AnswerLeakJudgeService(ai, props);
+    }
+
+    private boolean staged() {
+        return pipeline != null && props.staged();
+    }
+
+    /** 옛 방식: 한 번의 호출이 과제 전체를 쓰고, 실패하면 실패 내용을 붙여 처음부터 다시 쓴다 */
+    private final class OneShotRun implements TaskPipelineService.Run<D> {
+        private final TaskGenRequest form;
+        private final String system;
+        private long in, out;
+
+        OneShotRun(TaskGenRequest form) {
+            this.form = form;
+            this.system = system(form);
+        }
+
+        private D call(List<GenCheckResultDto> failed) {
+            TaskGenAiService.Output<D> o = ai.generate(props.model(), system, user(form, failed), draftType());
+            in += o.inputTokens();
+            out += o.outputTokens();
+            return o.value();
+        }
+
+        @Override
+        public D create(Consumer<String> onStep) {
+            onStep.accept(STEP_GENERATING);
+            return call(List.of());
+        }
+
+        @Override
+        public D redo(List<GenCheckResultDto> failed, Consumer<String> onStep) {
+            onStep.accept(STEP_REGENERATING);
+            return call(failed);
+        }
+
+        @Override
+        public List<GenCheckResultDto> checks() {
+            return List.of();
+        }
+
+        @Override
+        public List<com.pair.domain.taskgen.dto.StageUsageDto> usage() {
+            return List.of(new com.pair.domain.taskgen.dto.StageUsageDto("ONESHOT", props.model(), props.effort(), in, out, 0));
+        }
+
+        @Override
+        public List<String> redone() {
+            return List.of();
+        }
     }
 
     /** M5 답 노출 AI 판정 */
@@ -138,35 +195,30 @@ public abstract class TaskGeneratorService<D> {
     public final Outcome generate(TaskGenRequest form, long adminId, Consumer<String> onStep) {
         long started = System.nanoTime();
         String model = props.model();
-        String system = system(form);
+        TaskPipelineService.Run<D> run = staged() ? pipeline.start(form) : new OneShotRun(form);
 
         List<AttemptLog> attemptLog = new java.util.ArrayList<>();
         long attemptStarted = System.nanoTime();
-        onStep.accept(STEP_GENERATING);
-        TaskGenAiService.Output<D> first = ai.generate(model, system, user(form, List.of()), draftType());
-        long in = first.inputTokens(), out = first.outputTokens();
-        D draft = first.value();
+        D draft = run.create(onStep); // 첫 생성이 실패하면 예외를 그대로 던지고 저장하지 않는다
         int attempts = 1;
         String retryError = null;
 
         onStep.accept(STEP_CHECKING);
-        Checked checked = runAll(form, draft);
+        Checked checked = runAll(form, draft, run);
         List<GenCheckResultDto> results = checked.results();
         Extra extra = checked.extra();
         attemptLog.add(attemptLog(1, attemptStarted, results));
         List<GenCheckResultDto> failed = results.stream().filter(GenCheckResultDto::needsRegeneration).toList();
 
         if (!failed.isEmpty()) {
-            onStep.accept(STEP_REGENERATING);
             attemptStarted = System.nanoTime();
             try {
-                TaskGenAiService.Output<D> second = ai.generate(model, system, user(form, failed), draftType());
-                in += second.inputTokens();
-                out += second.outputTokens();
+                // 단계별 생성은 실패한 검사를 낸 단계부터, 모르면 설계도부터 1번만 다시 만든다
+                D second = run.redo(failed, onStep);
                 attempts = 2;
-                draft = second.value();
+                draft = second;
                 onStep.accept(STEP_CHECKING);
-                checked = runAll(form, draft);
+                checked = runAll(form, draft, run);
                 results = checked.results();
                 extra = checked.extra();
                 attemptLog.add(attemptLog(2, attemptStarted, results));
@@ -180,6 +232,13 @@ public abstract class TaskGeneratorService<D> {
 
         java.util.Map<String, Object> detail = new java.util.LinkedHashMap<>(details(draft));
         detail.putAll(extra.details());
+        var usage = run.usage();
+        if (staged()) { // 단계별 토큰·모델·추론 강도(비용 확인용)와 다시 돌린 단계
+            detail.put("stages", usage);
+            if (!run.redone().isEmpty()) detail.put("redoStages", run.redone());
+        }
+        long in = usage.stream().mapToLong(com.pair.domain.taskgen.dto.StageUsageDto::inputTokens).sum();
+        long out = usage.stream().mapToLong(com.pair.domain.taskgen.dto.StageUsageDto::outputTokens).sum();
 
         // warn 검사는 통과 여부에 영향을 주지 않는다(검수자에게 알리기만 한다)
         boolean passed = results.stream().noneMatch(GenCheckResultDto::needsRegeneration);
@@ -195,8 +254,9 @@ public abstract class TaskGeneratorService<D> {
     private record Checked(List<GenCheckResultDto> results, Extra extra) {}
 
     /** 기본 검사 + 시도마다 도는 후속 검사(afterChecks). 후속 검사 결과도 results 에 들어간다 */
-    private Checked runAll(TaskGenRequest form, D draft) {
-        List<GenCheckResultDto> results = runChecks(form, draft);
+    private Checked runAll(TaskGenRequest form, D draft, TaskPipelineService.Run<D> run) {
+        List<GenCheckResultDto> results = new java.util.ArrayList<>(runChecks(form, draft));
+        results.addAll(run.checks()); // 단계 결과를 코드가 확인한 검사(설계도 형식, 사실이 글에 들어감, 숫자표 대조)
         Extra extra = afterChecks(form, draft, results);
         if (!extra.checks().isEmpty()) {
             List<GenCheckResultDto> all = new java.util.ArrayList<>(results);

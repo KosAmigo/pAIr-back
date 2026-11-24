@@ -40,24 +40,24 @@ public final class BizCheckService {
     static final String TRAP_QUESTION = "함정 문항이 자료 대조를 요구함"; // E3, M3 (단순 조회·같은 계산 반복 금지)
 
     /** 근거 문장이 응시자에게 해석을 지시하는 말투 */
-    private static final Pattern DIRECTIVE = Pattern.compile("판단하지\\s*않|해서는\\s*안|하면\\s*안\\s*된|혼동하지|만으로.*하지\\s*않"
+    static final Pattern DIRECTIVE = Pattern.compile("판단하지\\s*않|해서는\\s*안|하면\\s*안\\s*된|혼동하지|만으로.*하지\\s*않"
             + "|(잡히|합산되|포함되|반영되|인정되)지\\s*않(는다|습니다|음)" // 규칙 문장("실적으로 잡히지 않는다")
             + "|원인(은|이)|때문에[^.\\n]{0,30}(과대|과소|부풀|왜곡)|서로\\s*다른\\s*관측값"); // 원인 설명
 
     /** 지표·용어 정의나 문항이 값을 합치는 방법(차이, 곱, 가중, 비율의 금액)을 알려 주는 말 */
-    private static final Pattern PROCEDURE = Pattern.compile("(차이|곱|합산|가중\\s*(평균|합))(을|를|이|가)?\\s*(뜻|의미|말합|가리킵|해당)"
+    static final Pattern PROCEDURE = Pattern.compile("(차이|곱|합산|가중\\s*(평균|합))(을|를|이|가)?\\s*(뜻|의미|말합|가리킵|해당)"
             + "|비율에\\s*해당하는\\s*(금액|값|수)|각각\\s*곱해|(를|을)\\s*(빼서|빼고|나누어|나눠|곱해|곱하여)\\s*(구|계산)"
             + "|(뺀|나눈|곱한|더한)\\s*(값|것)(을|이|으로)?\\s*(뜻|의미|말합|합니다)");
 
     // M5: 정의에 계산 방법("A 대비 B의 상대적 증가 정도를 뜻한다", "A를 B로 나눈 값")
-    private static final Pattern DEFINITION_CALC = Pattern.compile("[은는][^.\\n]{0,80}(기준으로\\s*(본|하여|해)|대비)[^.\\n]{0,60}(뜻|의미|말합|가리킵)"
+    static final Pattern DEFINITION_CALC = Pattern.compile("[은는][^.\\n]{0,80}(기준으로\\s*(본|하여|해)|대비)[^.\\n]{0,60}(뜻|의미|말합|가리킵)"
             + "|(을|를)[^.\\n]{0,30}(으로|로)\\s*나눈\\s*(값|비율|몫)");
     // M5: 두 대상의 차이를 직접 말하는 문장("A와 B는 (서로) 다르다")
-    private static final Pattern DIFFERENCE = Pattern.compile("(과|와)[^.\\n]{1,40}(은|는|이|가)\\s*(서로\\s*)?(다릅니다|다르다|다르며|다르지만)");
+    static final Pattern DIFFERENCE = Pattern.compile("(과|와)[^.\\n]{1,40}(은|는|이|가)\\s*(서로\\s*)?(다릅니다|다르다|다르며|다르지만)");
     // M5: 원인 표지, 지시 말투. 결과물 쓰기 안내("작성해야 한다")는 제외
-    private static final Pattern CAUSE_LABEL = Pattern.compile("원인\\s*[:：]");
-    private static final Pattern MUST = Pattern.compile("해야\\s*(한다|합니다)");
-    private static final Pattern MUST_OK = Pattern.compile("(제출|작성|포함|기재|표시|명시|선택|설명|구분|담|답|입력|기록|정리)(해야|하여야)");
+    static final Pattern CAUSE_LABEL = Pattern.compile("원인\\s*[:：]");
+    static final Pattern MUST = Pattern.compile("해야\\s*(한다|합니다)");
+    static final Pattern MUST_OK = Pattern.compile("(제출|작성|포함|기재|표시|명시|선택|설명|구분|담|답|입력|기록|정리)(해야|하여야)");
 
     private static final Pattern NAME = Pattern.compile("자료/[\\p{L}\\p{N}_ ()\\-]+\\.(csv|pdf)");
     private static final ObjectMapper JSON = new ObjectMapper();

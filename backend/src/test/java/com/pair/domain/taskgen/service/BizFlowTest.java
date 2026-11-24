@@ -75,6 +75,7 @@ class BizFlowTest {
     static void props(DynamicPropertyRegistry r) {
         r.add("pair.data-dir", () -> dataDir.toString());
         r.add("pair.taskgen.file-storage", () -> "local");
+        r.add("pair.taskgen.pipeline", () -> "oneshot"); // 한 번에 과제 전체를 돌려주는 가짜 AI 용
     }
 
     static class ScriptedAi implements TaskGenAiService {

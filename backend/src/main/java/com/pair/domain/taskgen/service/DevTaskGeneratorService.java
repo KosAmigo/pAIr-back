@@ -42,7 +42,7 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
             규칙:
             - 순수 Java 21 + JUnit 5 만 씁니다. 외부 라이브러리, 파일, 네트워크, Spring 은 쓰지 않습니다. 패키지는 하나(예: shop)이고 경로는 src/<패키지>/X.java, test/<패키지>/XTest.java 입니다.
             - 시작 코드는 컴파일되고 공개 테스트를 통과합니다. 공개 테스트는 기본 동작만 확인합니다. 결함이나 그 위치를 알리는 주석은 쓰지 않습니다.
-            - 판단 지점(judgmentPoints): 요구 중 1~2개는 일부러 모호해서 사람이 가정을 밝히거나 자료로 판단해야 합니다. 각각 question(무엇을 정해야 하나), options(고를 수 있는 선택지 2개 이상), basis(판단 근거가 되는 문장. 응시자에게 보이는 설명·요구사항·NOTES.md·코드 주석에 있는 그대로 한 줄 복사)를 씁니다. evidence 에는 선택지마다 그 선택을 뒷받침하는 사실 한 줄씩을 씁니다(보이는 자료에 있는 그대로 복사. 예: "소비자 A 는 -1 을, 소비자 B 는 현재 수량을 받는다"). "운영 자료에 사례가 있다", "정책이 정해지지 않았다", "서비스마다 다르다"처럼 자료가 있다고만 가리키는 문장은 근거가 아니므로, 사례와 값을 NOTES.md 나 요구사항에 실제로 적습니다. 어느 쪽을 골라도 자료를 근거로 설명할 수 있어야 하고, 숨은 테스트는 어느 선택지를 골라도 통과하도록 선택지와 상관없이 항상 성립하는 결과만 확인합니다.
+            - 판단 지점(judgmentPoints): 요구 중 1~2개는 일부러 모호해서 사람이 가정을 밝히거나 자료로 판단해야 합니다. 각각 question(무엇을 정해야 하나), options(고를 수 있는 선택지 2개 이상), basis(판단 근거가 되는 문장. 응시자에게 보이는 설명·요구사항·NOTES.md·코드 주석에 있는 그대로 한 줄 복사)를 씁니다. evidence 에는 선택지마다 그 선택을 뒷받침하는 사실 한 줄씩을 씁니다(보이는 자료에서 문장을 그대로 복사하며 "파일명 N쪽" 같은 위치만 적지 않음. 한 문장이 두 선택지를 함께 말해도 됨. 예: "소비자 A 는 -1 을, 소비자 B 는 현재 수량을 받는다"). "운영 자료에 사례가 있다", "정책이 정해지지 않았다", "서비스마다 다르다"처럼 자료가 있다고만 가리키는 문장은 근거가 아니므로, 사례와 값을 NOTES.md 나 요구사항에 실제로 적습니다. 어느 쪽을 골라도 자료를 근거로 설명할 수 있어야 하고, 숨은 테스트는 어느 선택지를 골라도 통과하도록 선택지와 상관없이 항상 성립하는 결과만 확인합니다.
             - 숨은 결함(hiddenFlaws): AI 가 흔히 틀리는 지점(경계값, 시간대·날짜, 반올림·단위, 동시성, 빠진 예외 처리)에 둡니다. 각각 description(결함 설명), verifyWith(자료나 테스트 어디와 대조하면 보이는지), caughtBy(이 결함을 잡는 숨은 테스트 메서드 이름 1개. 그 테스트는 시작 코드나 wrongFixes 중 하나에서 실제로 실패해야 함)를 씁니다. 결함의 근거는 코드, 설명, NOTES.md 의 사실로 확인할 수 있어야 하고 자료에 없는 지식이 필요한 결함은 쓰지 않습니다. 결함이 시작 코드나 공개 테스트의 한 줄에서 바로 보이면 안 됩니다.
             - 숨은 테스트는 시작 코드에서 실패하고 올바르게 풀면 통과합니다. NOTES.md 에 적은 사례만 확인하지 말고, 사례 밖의 경우(같은 원인의 다른 경계)를 1개 이상 포함해 사례 값만 하드코딩한 풀이가 실패하게 합니다. 동시성 테스트는 assertTimeoutPreemptively 로 10초 안에 끝나게 하고 충분히 반복합니다.
             - 동시성·타이밍 테스트의 대기 장치(CyclicBarrier, CountDownLatch 등)는 타임아웃이 나도 테스트를 실패시키지 말고(예외를 삼키고) 진행하게 합니다. 단언은 결과(재고가 음수인지, 승인된 개수 등)만 하고 특정 구현 구조(어떤 락을 쓰는지, 어떤 메서드를 락 안에서 부르는지)를 전제하지 않습니다.
@@ -74,9 +74,16 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
     private final GeneratedTaskRepository writer;
     private final SoloSolveService solo;
 
+    /** 단계별 생성 없이(옛 방식만) 만든다(테스트용) */
     public DevTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, CodeRunner runner, GeneratedTaskRepository writer,
             SoloSolveService solo) {
-        super(ai, props);
+        this(ai, props, runner, writer, solo, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DevTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, CodeRunner runner, GeneratedTaskRepository writer,
+            SoloSolveService solo, DevPipelineService pipeline) {
+        super(ai, props, pipeline);
         this.runner = runner;
         this.writer = writer;
         this.solo = solo;

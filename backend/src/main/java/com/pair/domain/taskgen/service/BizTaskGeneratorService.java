@@ -44,7 +44,7 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
             - 실제 업무에서 볼 법한 상황, 자료, 말투로 쓰고, 실제 회사처럼 보이는 가상의 회사와 수치를 씁니다. 실존 회사 이름은 쓰지 않습니다. 일부러 만든 티가 나는 오답이나 읽기 어렵게 꼬인 문장은 쓰지 않습니다.
             - 자료는 두 종류입니다(제한 시간별 개수는 아래 깊이 규칙을 따름). csvFiles: 자료/이름.csv 1~2개(쉼표 구분, 첫 줄 머리글, 칸 안에 쉼표 없음). documents: 자료/이름.pdf 2~3개이며 각 문서를 쪽별 글(pages 배열)로 씁니다. 쪽 하나는 900자 이내, 30줄 이내로 쓰고 마크다운 기호(#, **, 표), 이모지, 특수 기호는 쓰지 않습니다. 자료 전체는 합쳐서 3,000~10,000자(20분은 깊이 규칙의 분량).
             - 근거 문서는 2개 이상이고, 모든 정답 계산을 자료의 숫자로 다시 할 수 있어야 합니다. 자료에 없는 값이나 서로 모순되는 내용은 없어야 합니다. 업계 지식이 없어도 풀 수 있게 필요한 용어와 규칙은 자료 안에 씁니다.
-            - 판단 지점(judgmentPoints, 트레이드오프): 기획안에서 사람이 정할 선택 1~2개를 둡니다(예: 두 안 중 어느 쪽을 먼저 할지). 정답이 하나가 아니고 자료의 사실을 근거로 설명하면 인정되는 선택이어야 합니다. 각각 question(무엇을 정해야 하나), options(고를 수 있는 선택지 2개 이상), basis(판단 근거가 되는 문장. 응시자에게 보이는 설명·요구사항·자료에 있는 그대로 한 줄 복사)를 씁니다. 문항의 정답은 이 선택에 따라 달라지지 않게 합니다.
+            - 판단 지점(judgmentPoints, 트레이드오프): 기획안에서 사람이 정할 선택 1~2개를 둡니다(예: 두 안 중 어느 쪽을 먼저 할지). 정답이 하나가 아니고 자료의 사실을 근거로 설명하면 인정되는 선택이어야 합니다. 각각 question(무엇을 정해야 하나), options(고를 수 있는 선택지 2개 이상), basis(판단 근거가 되는 문장. 응시자에게 보이는 설명·요구사항·자료에 있는 그대로 한 줄 복사)와 evidence(선택지 근거 문장 1~2개, 자료에서 그대로 복사한 문장이며 "파일명 N쪽" 같은 위치만 적지 않음. 한 문장이 두 선택지를 함께 말해도 됨)를 씁니다. 문항의 정답은 이 선택에 따라 달라지지 않게 합니다.
             - 숨은 결함(trap, hiddenFlaws, 정답 있음): 자료를 서로 대조해야만 보이는 함정을 1개 이상 둡니다(예: 문서마다 다른 집계 기간·범위, 지표 정의의 차이). 겉으로 보이는 오류가 아니라 대조해야 드러나야 하고, 꼼꼼히 보면 피할 수 있어야 합니다. 속임수나 자료 밖 지식이 필요한 함정은 쓰지 않습니다. 근거 문장을 자료(문서 쪽 글이나 CSV)에 넣고 trap.evidence 에 그 문장을 한 줄로 그대로 복사합니다. 과제 설명에는 함정을 알려 주지 않습니다.
             - hiddenFlaws 는 숨은 결함마다 description(결함 설명), verifyWith(자료의 어느 문서·칸과 대조하면 보이는지), caughtBy(결함을 놓치면 답이 달라지는 문항 번호 "Q2" 또는 "결론")를 씁니다. 결함을 놓치면 그 문항의 답이나 결론이 달라져야 합니다.
             - trap.evidence 는 사실 진술(측정 범위, 집계 정의, 같은 기간에 있었던 일)로 씁니다. "더해서는 안 된다", "혼동하지 않는다" 같은 해석 지시는 쓰지 않고, 근거 문장은 따로 떠 있는 한 줄 문단이 아니라 다른 내용과 같은 문단 안에 섞습니다.
@@ -79,9 +79,16 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
     private final GeneratedTaskRepository writer;
     private final BizSoloSolveService solo;
 
+    /** 단계별 생성 없이(옛 방식만) 만든다(테스트용) */
     public BizTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, PdfService pdf, TaskGenSolverService solver,
             GeneratedTaskRepository writer, BizSoloSolveService solo) {
-        super(ai, props);
+        this(ai, props, pdf, solver, writer, solo, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public BizTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, PdfService pdf, TaskGenSolverService solver,
+            GeneratedTaskRepository writer, BizSoloSolveService solo, BizPipelineService pipeline) {
+        super(ai, props, pipeline);
         this.props = props;
         this.pdf = pdf;
         this.solver = solver;

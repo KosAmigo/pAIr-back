@@ -47,6 +47,18 @@ class AnswerLeakJudgeServiceTest {
     }
 
     @Test
+    @DisplayName("E3 M3 v8 02: 요구사항이 숨은 결함을 피하는 결과를 규칙 문장으로 적으면 fail 이고, 판정 기준에 그 항목이 있다")
+    void flawRuleInRequirementsFails() {
+        String rule = "각 점수 구간의 이름은 알파벳 오름차순이다";
+        ai.answer = leaks(rule);
+        GenCheckResultDto r = judge.judge("[요구사항]\n- " + rule + "\n- 반환 건수는 n과 전체 건수 중 작은 값이다", "결함: 같은 점수 구간의 이름 정렬");
+
+        assertThat(r.needsRegeneration()).isTrue();
+        assertThat(r.detail()).contains(rule);
+        assertThat(ai.systems.get(0)).contains("E3").contains("요구사항");
+    }
+
+    @Test
     @DisplayName("위반 문장이 있으면 fail 이고, 위반 문장과 결함이 detail 에 들어간다 (다시 생성 프롬프트에 쓰임)")
     void violationFails() {
         ai.answer = leaks(LEAK);

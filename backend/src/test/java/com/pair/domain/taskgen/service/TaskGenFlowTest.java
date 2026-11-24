@@ -64,6 +64,7 @@ class TaskGenFlowTest {
     static void props(DynamicPropertyRegistry r) {
         r.add("pair.data-dir", () -> dataDir.toString());
         r.add("pair.taskgen.max-concurrent", () -> "2");
+        r.add("pair.taskgen.pipeline", () -> "oneshot"); // 이 테스트는 한 번에 과제 전체를 돌려주는 가짜 AI 를 쓴다(단계별 생성은 TaskPipelineServiceTest)
     }
 
     /** 미리 정한 순서대로 Draft 나 오류를 돌려주는 가짜 AI. gate 가 있으면 열릴 때까지 기다린다 */

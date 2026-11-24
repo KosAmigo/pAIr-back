@@ -80,7 +80,7 @@ public record DevDraftDto(
     /**
      * E2 판단 지점: 사람이 정해야 하는 모호한 요구·트레이드오프. question 은 무엇을 정해야 하나, options 는 고를 수 있는 선택지,
      * basis 는 판단 근거가 되는 문장(응시자에게 보이는 자료에 있는 그대로),
-     * evidence 는 선택지마다 그 선택을 뒷받침하는 사실 한 줄(보이는 자료에 있는 그대로, E2 M4). DEV·BIZ 가 함께 쓴다
+     * evidence 는 선택지를 뒷받침하는 사실 문장(보이는 자료에서 복사한 문장이며 "파일명 N쪽" 같은 위치만 쓰면 warn. 한 문장이 여러 선택지의 근거여도 됨, E2 M4). DEV·BIZ 가 함께 쓴다
      */
     public record JudgmentPoint(String question, List<String> options, String basis, List<String> evidence) {
 

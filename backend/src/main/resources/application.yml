@@ -143,6 +143,14 @@ pair:
     max-concurrent: 2
     effort: medium
     max-tokens: 48000
+    # 생성 방식: staged = 단계별(설계도 → 작성 → 코드 → 정답 쪽, pAIr-docs 설계/과제_생성_파이프라인.md), oneshot = 옛 방식(한 번에 과제 전체)
+    pipeline: staged
+    # staged 단계별 모델·추론 강도·출력 한도(생각 토큰 포함). 비우면 model 과 아래 값
+    stages:
+      blueprint: {model: gpt-6.1-terra, effort: high, max-tokens: 24000}
+      writing: {model: gpt-6.1-terra, effort: medium, max-tokens: 16000}
+      code: {model: gpt-6.1-terra, effort: medium, max-tokens: 24000}
+      answer: {model: gpt-6.1-terra, effort: medium, max-tokens: 32000}
     # 주제·함정 추천: 싼 모델, 짧은 출력. 추론 모델이라 생각 토큰도 상한에 들어간다
     suggest-model: gpt-6-luna
     suggest-max-tokens: 2000
