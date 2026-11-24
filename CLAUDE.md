@@ -3,7 +3,7 @@
 ## Git
 - Before starting: `git status` must be clean (otherwise ask the user), then `git fetch` and `git pull`.
 - Branch from the latest `develop`: `feat|fix|refactor|docs|test|chore/<short-english-name>`. No PRs.
-- When done, merge into develop yourself: `git switch develop && git pull && git merge --no-ff <branch> && ./gradlew build && git push`. If the build fails, don't push.
+- When done, merge into develop yourself: push your branch, check its CI is green (`gh run list --branch <branch>`), then `git switch develop && git pull && git merge --no-ff <branch> && ./gradlew build && git push`. If the build or CI fails, don't merge or push. Locally `build` runs only fast tests; CI (GitHub Actions) runs all tests on every push to any branch. If develop CI goes red, fix it right away.
 - No direct commits on `develop` (merge commits only). Never touch `main`. Never rebase or force-push pushed commits; update a branch with `git merge origin/develop`.
 - Commit/push only when the user asks. Message: `type: 한국어 요약` + a blank line + 2–4 bullets. No Co-Authored-By.
 - Never commit `.env`, `pilot-data/`, build output or secrets.
@@ -51,6 +51,5 @@ com.pair
 
 ## Finishing a task
 - Add tests for new or changed business logic.
-- While working, run `./gradlew fastTest` (skips `@Tag("slow")`, about 1 min).
-- Before merging into develop, run `./gradlew build` (all tests + structure check, about 5 min) and report changed files and results briefly.
+- Run `./gradlew build` before merging and report changed files and results briefly. Locally it skips `@Tag("slow")` (about 1 min); CI runs everything. To run all tests locally: `./gradlew fullTest` (about 5 min), or IntelliJ's shared run configs in `.run/` (빠른 빌드 / 전체 테스트 / 서버 실행). Running one slow test directly (IntelliJ ▶ or `--tests`) still runs it.
 - Read only the files the task needs. Don't add docs or extra agents unless needed. Ask before large refactors.
