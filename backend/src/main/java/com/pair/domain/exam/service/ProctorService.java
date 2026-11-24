@@ -189,6 +189,7 @@ public class ProctorService {
     @Transactional
     public ProctorEventResponse review(Long sessionId, Long eventId, ProctorEvent.Review review, String note, Long reviewerId) {
         ProctorEvent e = eventOf(sessionId, eventId);
+        if (!e.getSource().isCamera()) throw new IllegalArgumentException("브라우저·화면 공유 이벤트는 판정하지 않고 기록만 봅니다.");
         e.review(review, note == null || note.isBlank() ? null : note.trim(), reviewerId, clock.instant());
         return ProctorEventResponse.from(e);
     }

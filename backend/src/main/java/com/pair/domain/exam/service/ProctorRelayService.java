@@ -404,6 +404,10 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
         raw.getAttributes().put(LAST_WATCH, now);
         stopWatching(raw);
         markViewer(raw);
+        if (!props.liveViewEnabled()) {
+            sendWatchState(session, "error", "실시간 영상 보기는 지금 사용하지 않습니다. 이벤트 기록과 사진으로 확인해 주세요.");
+            return;
+        }
         JsonNode sessionIdNode = msg.get("sessionId");
         JsonNode participantIdNode = msg.get("participantId");
         if (sessionIdNode == null || participantIdNode == null || !sessionIdNode.isIntegralNumber() || !participantIdNode.isIntegralNumber()) {

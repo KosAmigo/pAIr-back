@@ -852,7 +852,7 @@ class ExamFlowIntegrationTest {
     }
 
     @Test
-    @DisplayName("증거 구간: 채널(웹캠·휴대폰)마다 최대 12장, 같은 채널은 1초 이상 간격, 사진 한 장은 100KB 이하")
+    @DisplayName("증거 구간: 웹캠 사진만 최대 12장, 같은 채널은 1초 이상 간격, 사진 한 장은 100KB 이하, 휴대폰 사진은 거절")
     void clipChannelRules() {
         SessionSummaryResponse s = createSession(153L, true);
         String token = startWithConsent(s, "clip4@test.dev");
@@ -875,14 +875,15 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
                 List.of(frame(ProctorEvent.Source.PC_CAM, 500))))).hasMessageContaining("1초");
 
-        // 12 + 12 = 24장은 받는다 (이미 저장된 0ms 사진은 건너뛴다)
+        // 웹캠 12장은 받는다 (이미 저장된 0ms 사진은 건너뛴다)
         List<com.pair.domain.exam.dto.ClipFrameRequest> full = new java.util.ArrayList<>();
-        for (int i = 0; i < 12; i++) {
-            full.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 1000));
-            full.add(frame(ProctorEvent.Source.PHONE_CAM, -8000 + i * 1000));
-        }
+        for (int i = 0; i < 12; i++) full.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 1000));
         clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(full));
-        assertThat(clips.countsOfSession(s.id()).values()).containsExactly(24L);
+        assertThat(clips.countsOfSession(s.id()).values()).containsExactly(12L);
+
+        // 휴대폰 사진은 받지 않는다 (웹캠 사진만)
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PHONE_CAM, -500))))).hasMessageContaining("PC_CAM");
     }
 
     @Test
@@ -891,11 +892,10 @@ class ExamFlowIntegrationTest {
         SessionSummaryResponse s = createSession(154L, true);
         String token = startWithConsent(s, "clip5@test.dev");
         proctor.record(token, eventWithId(s, "clip-evt-0005"));
-        // 100KB 이하 사진이라도 합이 2MB 를 넘는 요청은 받지 않는다 (24장 x 99KB = 약 3.1MB base64)
+        // 사진을 사진당 한도보다 크게 보내 합이 2MB 를 넘는 요청은 받지 않는다 (12장 x 200KB = 약 3.2MB base64)
         List<com.pair.domain.exam.dto.ClipFrameRequest> frames = new java.util.ArrayList<>();
         for (int i = 0; i < 12; i++) {
-            frames.add(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PC_CAM, -8000 + i * 1000, jpegB64Sized(99_000)));
-            frames.add(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PHONE_CAM, -8000 + i * 1000, jpegB64Sized(99_000)));
+            frames.add(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PC_CAM, -8000 + i * 1000, jpegB64Sized(200_000)));
         }
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0005", new com.pair.domain.exam.dto.ClipUploadRequest(frames)))
                 .hasMessageContaining("2MB");
@@ -918,7 +918,7 @@ class ExamFlowIntegrationTest {
         var ev = proctor.record(token, eventWithId(s, "clip-evt-0001"));
 
         var req = new com.pair.domain.exam.dto.ClipUploadRequest(List.of(
-                frame(ProctorEvent.Source.PC_CAM, 3000), frame(ProctorEvent.Source.PHONE_CAM, -8000), frame(ProctorEvent.Source.PC_CAM, -500)));
+                frame(ProctorEvent.Source.PC_CAM, 3000), frame(ProctorEvent.Source.PC_CAM, -8000), frame(ProctorEvent.Source.PC_CAM, -500)));
         clips.upload(token, "clip-evt-0001", req);
         clips.upload(token, "clip-evt-0001", req); // 재전송
 
@@ -940,7 +940,7 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(
                 List.of(frame(ProctorEvent.Source.PC_CAM, -9000))))).hasMessageContaining("구간");
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(
-                List.of(frame(ProctorEvent.Source.BROWSER, 0))))).hasMessageContaining("카메라");
+                List.of(frame(ProctorEvent.Source.BROWSER, 0))))).hasMessageContaining("PC_CAM");
         List<com.pair.domain.exam.dto.ClipFrameRequest> many = new java.util.ArrayList<>();
         for (int i = 0; i < 25; i++) many.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 100));
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(many)))
@@ -1165,6 +1165,23 @@ class ExamFlowIntegrationTest {
                 .hasMessageContaining("판정한 사람");
         assertThatThrownBy(() -> proctor.review(s.id() + 999, ev.id(), ProctorEvent.Review.OK, null, 7L))
                 .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    @DisplayName("브라우저 이벤트는 판정할 수 없고(이력만), 회차 목록의 미확인 수에도 세지 않는다")
+    void browserEventsAreNotReviewable() {
+        SessionSummaryResponse s = createSession(125L, true);
+        String token = startWithConsent(s, "browser-review@test.dev");
+        var browser = proctor.record(token, new ProctorEventRequest(ProctorEvent.Type.TAB_HIDDEN, ProctorEvent.Source.BROWSER,
+                s.startsAt().plusSeconds(30), 2000, null, null, null, "brw-evt-0001"));
+        assertThatThrownBy(() -> proctor.review(s.id(), browser.id(), ProctorEvent.Review.SUSPECT, null, 7L))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("판정하지 않고");
+
+        var open = eventRepo.countUnreviewedBySessionIds(List.of(s.id()));
+        assertThat(open).isEmpty(); // 브라우저 이벤트만 있으면 미확인 0건
+
+        proctor.record(token, camEvent(s.startsAt().plusSeconds(60), null));
+        assertThat(eventRepo.countUnreviewedBySessionIds(List.of(s.id()))).singleElement().extracting(o -> o.getOpen()).isEqualTo(1L);
     }
 
     @Test

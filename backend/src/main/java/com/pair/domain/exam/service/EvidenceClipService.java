@@ -86,7 +86,7 @@ public class EvidenceClipService {
         List<ClipFrameRequest> list = req.frames();
         if (list.size() > MAX_FRAMES_PER_EVENT) throw new IllegalArgumentException("증거 사진은 이벤트마다 최대 " + MAX_FRAMES_PER_EVENT + "장입니다.");
         for (ClipFrameRequest f : list) {
-            if (!f.source().isCamera()) throw new IllegalArgumentException("증거 사진은 카메라(PC 웹캠·휴대폰)에서만 받습니다.");
+            if (f.source() != ProctorEvent.Source.PC_CAM) throw new IllegalArgumentException("증거 사진은 PC 웹캠(PC_CAM) 사진만 받습니다.");
             if (f.offsetMs() < MIN_OFFSET_MS || f.offsetMs() > MAX_OFFSET_MS) throw new IllegalArgumentException("증거 구간(이벤트 앞 8초~뒤 4초) 밖의 시각입니다.");
         }
 
