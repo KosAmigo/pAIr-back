@@ -8,8 +8,20 @@ import com.pair.domain.company.service.CompanyAccountMailService;
 import com.pair.domain.company.service.CompanyInquiryService;
 import com.pair.domain.company.service.CompanyInviteService;
 import com.pair.domain.company.service.CompanyMemberService;
+import com.pair.domain.company.service.CorporateAccountService;
+import com.pair.domain.auth.AuthTestSupport;
+import com.pair.domain.auth.dto.LoginRequest;
+import com.pair.domain.auth.dto.WithdrawalRequest;
+import com.pair.global.error.UnauthorizedException;
+import com.pair.infra.mail.MailDeliveryException;
+import org.springframework.mail.MailSendException;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -54,6 +66,7 @@ class CompanyOnboardingIntegrationTest {
     @Autowired CompanyInquiryService inquiries;
     @Autowired CompanyInviteService invites;
     @Autowired CompanyMemberService members;
+    @Autowired CorporateAccountService corporateAccounts;
     @Autowired AuthAccountRepository accounts;
     @Autowired AuthService auth;
     @Autowired JdbcTemplate jdbc;
@@ -111,6 +124,72 @@ class CompanyOnboardingIntegrationTest {
         assertThat(session.user().companyId()).isEqualTo(companyId);
         assertThat(session.user().emailVerified()).isTrue();
         assertThat(session.user().passwordChangeRequired()).isFalse();
+    }
+
+    @Test
+    void proctorCanBeInvitedAgainAndOldLinkStopsWorking() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        AuthAccount manager = approvedManager(suffix);
+        // 운영(V21)의 부분 유니크 인덱스를 H2 에서 흉내 낸다: 미사용 초대일 때만 이메일이 들어가는 계산 열
+        jdbc.execute("alter table company_invites add column pending_email varchar(255) generated always as "
+                + "(case when accepted_at is null and revoked_at is null then lower(email) end)");
+        try {
+            jdbc.execute("create unique index uq_test_pending_invite on company_invites (pending_email)");
+            CurrentUser user = new CurrentUser(manager.getId(), CurrentUser.Role.MANAGER, manager.getCompanyId());
+            String email = "again-" + suffix + "@test.dev";
+            invites.inviteProctor(user, email);
+            invites.inviteProctor(user, email);
+
+            ArgumentCaptor<String> urls = ArgumentCaptor.forClass(String.class);
+            verify(mailer, times(2)).sendProctorInvite(eq(email), anyString(), urls.capture());
+            assertThatThrownBy(() -> invites.inspect(token(urls.getAllValues().get(0))))
+                    .isInstanceOf(UnauthorizedException.class);
+            assertThat(invites.inspect(token(urls.getAllValues().get(1))).email()).isEqualTo(email);
+        } finally {
+            jdbc.execute("drop index if exists uq_test_pending_invite");
+            jdbc.execute("alter table company_invites drop column pending_email");
+        }
+    }
+
+    @Test
+    void credentialMailFailureKeepsApprovalAndMarksAccountFailed() {
+        doThrow(new MailDeliveryException(new MailSendException("smtp down")))
+                .when(mailer).sendCredentials(any(AuthAccount.class), anyString());
+        AuthAccount manager = approvedManager(UUID.randomUUID().toString().substring(0, 8));
+        assertThat(manager.getCompanyId()).isNotNull();
+        assertThat(manager.getOnboardingMailStatus()).isEqualTo("FAILED");
+    }
+
+    @Test
+    void withdrawnMemberRejoinsAsProctorWithSameAccountAndCanWithdrawAgain() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String email = "rejoin-" + suffix + "@test.dev";
+        var first = AuthTestSupport.signup(auth, mail, "회원", email);
+        auth.withdraw(first.token(), new WithdrawalRequest("password123"));
+        AuthAccount manager = approvedManager(suffix);
+
+        AuthAccount rejoined = corporateAccounts.signupProctor(email, "감독관", "password123", manager.getCompanyId());
+        assertThat(rejoined.getId()).isEqualTo(first.user().id());
+        assertThat(rejoined.getRole()).isEqualTo(CurrentUser.Role.PROCTOR);
+        auth.withdraw(auth.login(new LoginRequest(email, "password123")).token(), new WithdrawalRequest("password123"));
+        assertThat(accounts.findById(rejoined.getId()).orElseThrow().getMemberStatus()).isEqualTo("WITHDRAWN");
+
+        AuthAccount created = corporateAccounts.create(email, "감독관", CurrentUser.Role.PROCTOR, manager.getCompanyId());
+        assertThat(created.getId()).isEqualTo(first.user().id());
+        assertThat(created.isActive()).isTrue();
+        assertThat(created.isEmailVerified()).isFalse();
+        assertThat(created.isPasswordChangeRequired()).isTrue();
+    }
+
+    @Test
+    void accountDuplicatedByOldRejoinCanStillWithdraw() {
+        String email = "duplicate-" + UUID.randomUUID() + "@test.dev";
+        var first = AuthTestSupport.signup(auth, mail, "회원", email);
+        auth.withdraw(first.token(), new WithdrawalRequest("password123"));
+        AuthAccount duplicate = accounts.saveAndFlush(new AuthAccount(email, "감독관",
+                new BCryptPasswordEncoder().encode("password123")));
+        auth.withdraw(auth.login(new LoginRequest(email, "password123")).token(), new WithdrawalRequest("password123"));
+        assertThat(accounts.findById(duplicate.getId()).orElseThrow().getMemberStatus()).isEqualTo("WITHDRAWN");
     }
 
     @Test
@@ -200,6 +279,17 @@ class CompanyOnboardingIntegrationTest {
         assertThat(reissued.isEmailVerified()).isFalse();
         assertThat(reissued.isPasswordChangeRequired()).isTrue();
         assertThat(reissued.getOnboardingMailStatus()).isEqualTo("SENT");
+    }
+
+    private AuthAccount approvedManager(String suffix) {
+        var inquiry = inquiries.submit("회사 " + suffix, "사업자" + suffix, "담당자", "contact-" + suffix + "@test.dev",
+                null, csv("manager-" + suffix + "@test.dev,MANAGER"));
+        inquiries.approve(inquiry.id(), admin(suffix).getId());
+        return account("manager-" + suffix + "@test.dev");
+    }
+
+    private static String token(String url) {
+        return url.substring(url.indexOf("token=") + 6);
     }
 
     private AuthAccount admin(String suffix) {
