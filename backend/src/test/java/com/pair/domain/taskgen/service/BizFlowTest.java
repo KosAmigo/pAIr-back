@@ -329,8 +329,8 @@ class BizFlowTest {
     void soloSolvedRegeneratesForLive() throws Exception {
         ai.script.add(BizFixtures.good("biz-live-1"));
         ai.script.add(BizFixtures.good("biz-live-2"));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "23560", "2000")));
+        ai.soloScript.add(BizFixtures.solo("1", "2", "21080", "2000"));
+        ai.soloScript.add(BizFixtures.solo("1", "2", "23560", "2000"));
         var live = new com.pair.domain.taskgen.dto.TaskGenRequest("BIZ", "저가 요금제 출시 여부", "설문 의향을 실제 전환율로 보정하지 않음", "LIVE", 60);
         var o = generator.generate(live, 1L, steps::add);
 
@@ -351,8 +351,8 @@ class BizFlowTest {
     void soloSolvedFailsForSelf() {
         ai.script.add(BizFixtures.good("biz-self-1"));
         ai.script.add(BizFixtures.good("biz-self-2"));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
+        ai.soloScript.add(BizFixtures.solo("1", "2", "21080", "2000"));
+        ai.soloScript.add(BizFixtures.solo("1", "2", "21080", "2000"));
         var o = generate();
 
         assertThat(o.passed()).isFalse();

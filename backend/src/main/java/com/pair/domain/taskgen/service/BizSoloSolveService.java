@@ -3,6 +3,7 @@ package com.pair.domain.taskgen.service;
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.SoloBizAnswerDto;
+import com.pair.domain.taskgen.dto.SoloBizItemDto;
 import com.pair.global.config.PairProperties;
 import com.pair.global.config.TaskGenProperties;
 import java.util.ArrayList;
@@ -24,7 +25,9 @@ public class BizSoloSolveService {
 
     /** 이름을 바꾸면 프런트 표시와 저장된 report.json 에 영향이 있다 */
     static final String NAME = "AI 답을 그대로 내면 함정에 걸림";
-    static final String REQUEST = "위 문항에 답해 주세요. 객관식은 보기 번호, 단답형은 문항이 정한 단위의 숫자만 문항 순서대로 answers 에 담아 주세요.";
+    static final String REQUEST = "위 문항에 답해 주세요. 기획안이나 보고서 같은 글은 쓰지 말고 문항에만 답하세요. "
+            + "answers 에 문항마다 {\"no\": 문항 번호, \"answer\": 답} 한 개씩 담아 주세요. 객관식 answer 는 보기 번호, 단답형 answer 는 문항이 정한 단위의 숫자만 쓰세요.";
+    static final String UNMATCHED = "AI 의 답을 문항에 맞출 수 없어 확인하지 못했어요(문항 번호가 맞지 않거나 빠짐)";
 
     /** 다시 생성할 때 AI 출제자에게 주는 지시 (검사 설명에 붙어 다음 시도 프롬프트로 간다) */
     static final String RETRY_INSTRUCTION = " [다시 설계 지시] 함정의 근거 문장은 자료에 사실로 그대로 두되, 한 번 읽으면 바로 반영되는 곳에 두지 말고 "
@@ -110,14 +113,20 @@ public class BizSoloSolveService {
         } catch (RuntimeException e) {
             return new Result(unchecked(), 0, 0, List.of());
         }
-        List<String> answers = o.value() == null || o.value().answers() == null ? List.of() : o.value().answers();
-        if (answers.isEmpty()) return new Result(unchecked(), o.inputTokens(), o.outputTokens(), answers);
+        List<SoloBizItemDto> items = o.value() == null || o.value().answers() == null ? List.of() : o.value().answers();
+        if (items.isEmpty()) return new Result(unchecked(), o.inputTokens(), o.outputTokens(), List.of());
+        List<String> answers = matchByNumber(items, d.questions().size());
+        if (answers == null) {
+            // 번호가 문항과 맞지 않거나 빠졌다: 틀림으로 세지 않고 확인하지 못한 것으로 둔다. 기록에는 받은 그대로 남긴다
+            List<String> raw = items.stream().map(it -> it == null ? null : it.no() + ":" + it.answer()).toList();
+            return new Result(new GenCheckResultDto(NAME, true, UNMATCHED, GenCheckResultDto.WARN), o.inputTokens(), o.outputTokens(), raw);
+        }
 
         List<Integer> traps = trapQuestions(d);
         List<String> missed = new ArrayList<>(), passed = new ArrayList<>();
         for (int i : traps) {
             var q = d.questions().get(i);
-            String a = i < answers.size() ? answers.get(i) : null;
+            String a = answers.get(i);
             String line = "Q" + (i + 1) + "(AI 답 " + a + ", 정답 " + correctText(q) + ")";
             (isRight(q, a) ? passed : missed).add(line);
         }
@@ -133,6 +142,21 @@ public class BizSoloSolveService {
             check = new GenCheckResultDto(NAME, false, detail, GenCheckResultDto.FAIL);
         }
         return new Result(check, o.inputTokens(), o.outputTokens(), answers);
+    }
+
+    /**
+     * 번호(1부터)로 문항 순서의 답 목록을 만든다. 번호가 없거나 문항 범위 밖인 항목(기획안 같은 덧붙인 글)은 무시한다.
+     * 같은 문항 번호가 겹치거나 문항이 하나라도 빠지면 맞출 수 없으니 null
+     */
+    static List<String> matchByNumber(List<SoloBizItemDto> items, int questionCount) {
+        String[] byNo = new String[questionCount];
+        for (var it : items) {
+            if (it == null || it.no() == null || it.no() < 1 || it.no() > questionCount) continue;
+            if (it.answer() == null || byNo[it.no() - 1] != null) return null;
+            byNo[it.no() - 1] = it.answer();
+        }
+        for (String a : byNo) if (a == null) return null;
+        return List.of(byNo);
     }
 
     private static GenCheckResultDto unchecked() {

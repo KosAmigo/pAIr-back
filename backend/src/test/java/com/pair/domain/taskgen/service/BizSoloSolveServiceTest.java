@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.SoloBizAnswerDto;
+import com.pair.domain.taskgen.dto.SoloBizItemDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
 import com.pair.global.config.PairProperties;
 import com.pair.global.config.TaskGenProperties;
@@ -61,7 +62,7 @@ class BizSoloSolveServiceTest {
 
     /** BizFixtures.good 의 정답은 1, 2, 21080, 2000. 함정 문항은 단답형 Q3, Q4 */
     private static SoloBizAnswerDto answers(String... a) {
-        return new SoloBizAnswerDto(List.of(a));
+        return BizFixtures.solo(a);
     }
 
     /** 첫 객관식을 결론 문항(정답 보기=correctConclusion, 함정 보기=wrongConclusion)으로 바꾼 Draft */
@@ -133,13 +134,65 @@ class BizSoloSolveServiceTest {
     }
 
     @Test
-    @DisplayName("답이 모자라면 빠진 함정 문항은 틀린 것으로 센다")
-    void missingAnswerIsWrong() {
+    @DisplayName("답이 빠지면 틀림으로 세지 않고 warn (문항에 맞출 수 없어 확인하지 못함)")
+    void missingAnswerIsUnchecked() {
         ai.script.add(answers("1", "2", "21080"));
         var r = service().run(BizFixtures.good("biz-solo"));
 
         assertThat(r.check().ok()).isTrue();
-        assertThat(r.check().detail()).contains("Q4(AI 답 null, 정답 2000)");
+        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
+        assertThat(r.check().needsRegeneration()).isFalse();
+        assertThat(r.check().detail()).isEqualTo(BizSoloSolveService.UNMATCHED);
+    }
+
+    private static SoloBizAnswerDto numbered(Object... noAndAnswer) {
+        List<SoloBizItemDto> items = new ArrayList<>();
+        for (int i = 0; i < noAndAnswer.length; i += 2) items.add(new SoloBizItemDto((Integer) noAndAnswer[i], (String) noAndAnswer[i + 1]));
+        return new SoloBizAnswerDto(items);
+    }
+
+    @Test
+    @DisplayName("기획안을 앞에 섞어 보내도(06·08·10 모양) 번호로 맞게 판정한다: 다 맞혔으면 fail")
+    void planMixedInFrontStillMatchedByNumber() {
+        // 06 의 실제 모양: 기획안 전문 + 문항 답. 예전 위치 방식은 답이 한 칸씩 밀렸다
+        ai.script.add(numbered(0, "8월 기획안: 근거는 자료에 있다...", 1, "1", 2, "2", 3, "21080", 4, "2000"));
+        var r = service().run(BizFixtures.good("biz-solo"));
+
+        assertThat(r.check().needsRegeneration()).isTrue();
+        assertThat(r.check().detail()).contains("Q3(AI 답 21080, 정답 21080)", "Q4(AI 답 2000, 정답 2000)");
+        assertThat(r.answers()).containsExactly("1", "2", "21080", "2000");
+    }
+
+    @Test
+    @DisplayName("기획안을 앞에 섞고 번호 순서가 뒤섞여도 번호로 맞춘다: 함정에 빠졌으면 ok")
+    void planMixedAndShuffledTrapMissed() {
+        ai.script.add(numbered(0, "기획안", 4, "2000", 3, "23560", 2, "2", 1, "1"));
+        var r = service().run(BizFixtures.good("biz-solo"));
+
+        assertThat(r.check().ok()).isTrue();
+        assertThat(r.check().level()).isNotEqualTo(GenCheckResultDto.FAIL);
+        assertThat(r.check().detail()).contains("함정 문항에서 틀렸어요", "Q3(AI 답 23560, 정답 21080)");
+    }
+
+    @Test
+    @DisplayName("문항 번호가 겹치거나 번호가 문항 범위를 못 채우면 warn")
+    void badNumbersAreUnchecked() {
+        for (SoloBizAnswerDto bad : List.of(
+                numbered(1, "1", 1, "2", 3, "21080", 4, "2000"),
+                numbered(0, "1", 2, "2", 3, "21080", 4, "2000"),
+                numbered(1, "1", 2, "2", 3, "21080", 5, "2000"),
+                new SoloBizAnswerDto(List.of(new SoloBizItemDto(null, "1"), new SoloBizItemDto(2, "2"), new SoloBizItemDto(3, "21080"), new SoloBizItemDto(4, "2000"))))) {
+            ai.script.add(bad);
+            var r = service().run(BizFixtures.good("biz-solo"));
+            assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
+            assertThat(r.check().detail()).isEqualTo(BizSoloSolveService.UNMATCHED);
+        }
+    }
+
+    @Test
+    @DisplayName("요청 문구는 기획안을 쓰지 말고 번호를 붙여 답하라고 한다")
+    void requestAsksForNumberedAnswers() {
+        assertThat(BizSoloSolveService.REQUEST).contains("기획안", "쓰지 말고", "\"no\"", "\"answer\"");
     }
 
     @Test

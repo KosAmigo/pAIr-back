@@ -79,6 +79,13 @@ final class BizFixtures {
     }
 
     /** Draft 의 일부만 바꾼 복사본 */
+    /** 문항 순서대로 번호(1부터)를 붙인 응시자 AI 답 */
+    static com.pair.domain.taskgen.dto.SoloBizAnswerDto solo(String... a) {
+        List<com.pair.domain.taskgen.dto.SoloBizItemDto> items = new ArrayList<>();
+        for (int i = 0; i < a.length; i++) items.add(new com.pair.domain.taskgen.dto.SoloBizItemDto(i + 1, a[i]));
+        return new com.pair.domain.taskgen.dto.SoloBizAnswerDto(items);
+    }
+
     static BizDraftDto edit(BizDraftDto d, UnaryOperator<Builder> change) {
         return change.apply(new Builder(d)).build();
     }
