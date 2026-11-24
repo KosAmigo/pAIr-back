@@ -37,7 +37,7 @@ public interface ProctorEventRepository extends JpaRepository<ProctorEvent, Long
             """)
     List<ProctorEvent> findBySessionId(@Param("sessionId") Long sessionId);
 
-    /** 회차별 아직 판정하지 않은 이벤트 수 (회차 목록용, 회차마다 따로 세지 않는다) */
+    /** 회차별 아직 판정하지 않은 카메라 이벤트 수 (회차 목록용, 회차마다 따로 세지 않는다). 브라우저 이벤트는 판정 대상이 아니라 세지 않는다 */
     interface SessionOpenCount {
         Long getSessionId();
         long getOpen();
@@ -45,10 +45,14 @@ public interface ProctorEventRepository extends JpaRepository<ProctorEvent, Long
 
     @Query("""
             select p.session.id as sessionId, count(e) as open from ProctorEvent e, ExamParticipant p
-            where p.id = e.participantId and p.session.id in :sessionIds and e.review is null
+            where p.id = e.participantId and p.session.id in :sessionIds and e.review is null and e.type in :cameraTypes
             group by p.session.id
             """)
-    List<SessionOpenCount> countUnreviewedBySessionIds(@Param("sessionIds") Collection<Long> sessionIds);
+    List<SessionOpenCount> countUnreviewedBySessionIds(@Param("sessionIds") Collection<Long> sessionIds, @Param("cameraTypes") Collection<ProctorEvent.Type> cameraTypes);
+
+    default List<SessionOpenCount> countUnreviewedBySessionIds(Collection<Long> sessionIds) {
+        return countUnreviewedBySessionIds(sessionIds, ProctorEvent.Type.cameraTypes());
+    }
 
     /** 대상자·유형별 건수 (회차 결과 화면용, 대상자 전원을 한 번에) */
     interface TypeCount {

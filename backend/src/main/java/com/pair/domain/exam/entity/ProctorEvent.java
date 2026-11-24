@@ -43,6 +43,11 @@ public class ProctorEvent {
         public Source source() {
             return source;
         }
+
+        /** 담당자가 판정(확정·기각)하는 카메라 이벤트 종류. 브라우저·화면 공유 이벤트는 이력만 남긴다 */
+        public static java.util.List<Type> cameraTypes() {
+            return java.util.Arrays.stream(values()).filter(t -> t.source.isCamera()).toList();
+        }
     }
 
     public enum Source {
