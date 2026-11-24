@@ -93,7 +93,7 @@ public class SandboxRunner implements CodeRunner {
         int passed = (int) tests.stream().filter(TestCase::passed).count();
         int failed = tests.size() - passed;
         if (e.timedOut) {
-            lines.add("[TIMEOUT] " + timeoutSeconds + "초 안에 끝나지 않아 실행을 중단했습니다. 교착 상태일 수 있습니다.");
+            lines.add("[TIMEOUT] 실행 제한 시간 " + timeoutSeconds + "초(컨테이너 준비 시간 별도)를 넘겨 실행을 중단했습니다. 교착 상태일 수 있습니다.");
             failed = Math.max(1, failed);
         } else if (tests.isEmpty() && (e.exitCode != 0 || e.junitExit == null || e.junitExit != 0)) {
             // 리포트 없이 끝남: 테스트 실행기가 죽었다 (메모리 초과, 디스크 가득 참 등)
