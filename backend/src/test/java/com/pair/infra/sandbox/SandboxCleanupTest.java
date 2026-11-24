@@ -34,13 +34,16 @@ class SandboxCleanupTest {
         return !docker("ps", "-aq", "--filter", "name=^" + name + "$").isEmpty();
     }
 
+    /** 다른 테스트가 세는 pair-run-* 와 겹치지 않는 이름을 쓴다(테스트는 병렬로 돌고 Docker 를 같이 쓴다) */
+    private static final String PREFIX = "pair-cleanup-test-";
+
     private static SandboxRunner runner(int timeoutSeconds) {
-        return new SandboxRunner(new PairProperties(null, null, null, null, new PairProperties.Run(timeoutSeconds), null, null));
+        return new SandboxRunner(new PairProperties(null, null, null, null, new PairProperties.Run(timeoutSeconds), null, null), PREFIX);
     }
 
     @Test
     void 시작할_때_남은_실행_컨테이너만_지우고_다른_컨테이너는_둔다() throws Exception {
-        String leftover = SandboxRunner.CONTAINER_PREFIX + "leftover-" + UUID.randomUUID();
+        String leftover = PREFIX + "leftover-" + UUID.randomUUID();
         String other = "other-keep-" + UUID.randomUUID();
         try {
             docker("run", "-d", "--name", leftover, "--entrypoint", "sleep", "pair-sandbox", "300");
@@ -72,7 +75,7 @@ class SandboxCleanupTest {
             for (Path p : new Path[] {work, src, file.getParent()}) Files.setPosixFilePermissions(p, PosixFilePermissions.fromString("rwxr-xr-x"));
             Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
         }
-        String name = SandboxRunner.CONTAINER_PREFIX + "orphan-" + UUID.randomUUID();
+        String name = PREFIX + "orphan-" + UUID.randomUUID();
         Process cli = new ProcessBuilder(runner.dockerRunCommand(name, "@@PAIR-test@@", src.toRealPath(), "run")).redirectErrorStream(true).start();
         try {
             long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
