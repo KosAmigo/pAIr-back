@@ -197,13 +197,17 @@ pair:
   # 응시자 코드 테스트 실행
   run:
     # local(기본) = 이 서버의 JVM 에서 바로 실행. 격리가 없어 개발용으로만 쓴다
-    # docker = 실행마다 격리 컨테이너(sh docker/sandbox/build.sh 로 pair-sandbox 이미지 필요). 배포는 PAIR_RUN_MODE=docker
+    # docker = 실행마다 격리 컨테이너(sh docker/sandbox/build.sh 로 pair-sandbox 이미지 필요). 앱과 샌드박스를 한 서버에 둘 때의 배포값
+    # remote = 별도 샌드박스 서버에 맡김(아래 remote-url, remote-token). 앱 서버에는 DB·API 키가 있고 샌드박스 서버에는 없다
     mode: ${PAIR_RUN_MODE:local}
     timeout-seconds: 30
     docker-bin: docker
     docker-image: pair-sandbox
     max-concurrent: 4      # docker 모드에서 동시에 돌 컨테이너 수. 서버 코어 수 이하로 (넘으면 느려져 정상 코드도 시간 초과로 실패)
     queue-wait-seconds: 60 # 자리가 날 때까지 기다리는 최대 시간. 넘으면 실행을 거절한다
+    # remote = 실행을 별도 샌드박스 서버(실행 전용 API, 프로필 sandbox-server)에 맡긴다. 주소와 공유 토큰은 앱·샌드박스 서버가 같은 값을 쓴다
+    remote-url: ${PAIR_RUN_REMOTE_URL:}
+    remote-token: ${PAIR_RUN_REMOTE_TOKEN:}
 
   # 채점 툴 (메인 화면 오른쪽 위 아이콘). 프롬프트 버전과 샘플 응시는 grader/ 폴더로 git 공유.
   grader:
