@@ -180,7 +180,7 @@ class TaskSuggestionServiceTest {
     void promptHasExisting() throws Exception {
         Task t = new Task(9001L, "sug-existing", "겹치면 안 되는 제목", "DEV", 60, Task.Usage.SELF,
                 Task.Status.HIDDEN, null, 1L, Instant.parse("2026-11-20T00:00:00Z"));
-        t.setCard("겹치면 안 되는 소개", "기능 구현", "중급");
+        t.setCard("겹치면 안 되는 소개", "기능 구현", "보통");
         records.save(t);
         ai.script.add(three());
         mvc.perform(call("ADMIN", "{\"track\":\"dev\",\"jobRole\":\"데이터 엔지니어\",\"difficulty\":\"최상급\",\"exclude\":[\"이전에 받은 상황\"]}"))

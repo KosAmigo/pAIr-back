@@ -99,7 +99,7 @@ class DailyUsageRegressionTest {
                         f("test/shop/DailyUsageTest.java", PUBLIC_TEST)),
                 List.of(f("test/shop/HiddenDailyWindowTest.java", HIDDEN_BASE + "}\n")),
                 List.of(src("DailyWindow", SOLVED)),
-                "중급", null,
+                "보통", null,
                 List.of("서머타임", "전환일", "24시간"),
                 List.of(new DevDraftDto.WrongFix("겹치는 자정에서 늦은 쪽 시각을 골라 가장 이른 시각이 아니게 된다", wrongFiles(WRONG_LATER_OFFSET)),
                         new DevDraftDto.WrongFix("ZonedDateTime.plusDays(1) 은 날짜가 통째로 없는 날에서 빈 구간이 되지 않는다", wrongFiles(WRONG_PLUS_DAYS))),
