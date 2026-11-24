@@ -171,6 +171,22 @@ class CompanyOnboardingIntegrationTest {
     }
 
     @Test
+    void reissueRejectsNonCompanyAndWithdrawnAccounts() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        AuthAccount admin = admin(suffix);
+        CurrentUser asAdmin = new CurrentUser(admin.getId(), CurrentUser.Role.ADMIN, null);
+        var plain = AuthTestSupport.signup(auth, mail, "회원", "plain-" + suffix + "@test.dev");
+        assertThatThrownBy(() -> members.reissue(plain.user().id(), asAdmin))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("기업 계정이 아닙니다");
+
+        AuthAccount manager = approvedManager(suffix, admin);
+        AuthAccount proctor = corporateAccounts.signupProctor("gone-" + suffix + "@test.dev", "감독관", "password123", manager.getCompanyId());
+        auth.withdraw(auth.login(new LoginRequest(proctor.getEmail(), "password123")).token(), new WithdrawalRequest("password123"));
+        assertThatThrownBy(() -> members.reissue(proctor.getId(), asAdmin))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void failedInviteMailRevokesInviteSoManagerCanInviteAgain() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         AuthAccount manager = approvedManager(suffix);
