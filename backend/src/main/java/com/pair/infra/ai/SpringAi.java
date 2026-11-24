@@ -41,6 +41,25 @@ final class SpringAi {
                 .build();
     }
 
+    /** 호출 시간·성공 여부·토큰을 지표로 남긴다. 어떤 예외든 시간은 error 로 기록하고 그대로 다시 던진다. */
+    private static ChatResponse measured(String provider, Supplier<ChatResponse> call, long started) {
+        boolean ok = false;
+        String model = "unknown";
+        try {
+            ChatResponse res = call.get();
+            if (res == null) throw new AiUnavailableException(provider + " 응답이 비어 있습니다.");
+            var meta = res.getMetadata();
+            if (meta != null && meta.getModel() != null && !meta.getModel().isBlank()) model = meta.getModel();
+            if (meta != null && meta.getUsage() != null) {
+                AiMetrics.tokens(provider, model, n(meta.getUsage().getPromptTokens()), n(meta.getUsage().getCompletionTokens()));
+            }
+            ok = true;
+            return res;
+        } finally {
+            AiMetrics.call(provider, model, ok, System.nanoTime() - started);
+        }
+    }
+
     /** 스트리밍 중 난 예외를 화면에 보여 줄 수 있는 예외로 바꾼다. */
     static AiUnavailableException unavailable(String provider, RuntimeException e) {
         String m = String.valueOf(e.getMessage());
@@ -51,10 +70,9 @@ final class SpringAi {
 
     /** 호출하고, Spring AI 예외를 화면에 보여 줄 수 있는 AiUnavailableException 으로 바꾼다. */
     static ChatResponse call(String provider, Supplier<ChatResponse> call) {
+        long started = System.nanoTime();
         try {
-            ChatResponse res = call.get();
-            if (res == null) throw new AiUnavailableException(provider + " 응답이 비어 있습니다.");
-            return res;
+            return measured(provider, call, started);
         } catch (NonTransientAiException e) {
             String m = String.valueOf(e.getMessage());
             if (m.contains("401")) throw new AiUnavailableException(provider + " API 키가 올바르지 않습니다 (401).");

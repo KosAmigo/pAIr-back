@@ -1,0 +1,14 @@
+# 개발용 Prometheus 설정. 백엔드가 컨테이너(app 프로필)면 backend:8181, 내 PC 에서 직접 돌리면 host.docker.internal:8181 로 읽는다.
+# 안 떠 있는 쪽은 /targets 에서 down 으로 보일 뿐 문제 없다.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: pair-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8181", "host.docker.internal:8181"]
