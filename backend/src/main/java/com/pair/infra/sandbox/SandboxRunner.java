@@ -19,6 +19,7 @@ import java.util.stream.Stream;
 
 import jakarta.annotation.PostConstruct;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -53,8 +54,16 @@ public class SandboxRunner implements CodeRunner {
     /** 동시 실행 상한. 공정(fair)이라 먼저 온 순서대로 자리가 난다. */
     private final Semaphore slots;
     private final int queueWaitSeconds;
+    private final String containerPrefix;
 
+    @Autowired
     public SandboxRunner(PairProperties props) {
+        this(props, CONTAINER_PREFIX);
+    }
+
+    /** 테스트용: 컨테이너 이름 앞부분을 바꿔, 병렬로 도는 다른 테스트의 컨테이너를 세거나 지우지 않게 한다 */
+    SandboxRunner(PairProperties props, String containerPrefix) {
+        this.containerPrefix = containerPrefix;
         this.timeoutSeconds = props.run().timeoutSeconds();
         this.dockerBin = props.run().dockerBin();
         this.image = props.run().dockerImage();
@@ -130,7 +139,7 @@ public class SandboxRunner implements CodeRunner {
     private Exec execInContainer(String mode, Map<String, String> sources) {
         long started = System.nanoTime(); // 대기 시간은 제외하고 실제 실행 시간만 잰다
         Path work = null;
-        String name = CONTAINER_PREFIX + UUID.randomUUID();
+        String name = containerPrefix + UUID.randomUUID();
         try {
             work = Files.createTempDirectory("pair-sbx-");
             Path src = work.resolve("src");
@@ -201,7 +210,7 @@ public class SandboxRunner implements CodeRunner {
     @PostConstruct
     void removeLeftoverContainers() {
         try {
-            Process ps = new ProcessBuilder(dockerBin, "ps", "-aq", "--filter", "name=" + CONTAINER_PREFIX).redirectErrorStream(true).start();
+            Process ps = new ProcessBuilder(dockerBin, "ps", "-aq", "--filter", "name=" + containerPrefix).redirectErrorStream(true).start();
             String out = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             if (!ps.waitFor(15, TimeUnit.SECONDS) || ps.exitValue() != 0) return;
             List<String> ids = out.lines().map(String::strip).filter(l -> !l.isEmpty()).toList();
