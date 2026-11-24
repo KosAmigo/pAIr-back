@@ -87,12 +87,6 @@ public class GeneratedTaskRepository {
         return D4_BASE.stream().map(m -> m * minutes / 60).toList();
     }
 
-    /** 모델이 정한 난이도. 초급·중급·고급이 아니면 중급 */
-    public static String difficultyOf(String v) {
-        String s = v == null ? "" : v.strip();
-        return TaskGenRequest.DIFFICULTIES.contains(s) ? s : "중급";
-    }
-
     private final TaskRepository records;
     private final TaskFileRepository files;
     private final TaskQuestionRepository questions;
@@ -145,7 +139,7 @@ public class GeneratedTaskRepository {
 
         Task t = new Task(id, code, cut(d.title(), 200), "DEV", form.minutes(), form.usageValue(),
                 Task.Status.HIDDEN, null, adminId, now);
-        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), difficultyOf(d.difficulty()));
+        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기능 구현"), 30), TaskGenRequest.difficultyOf(form.minutes()));
         t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), settings(d, form));
         records.save(t);
 
@@ -218,7 +212,7 @@ public class GeneratedTaskRepository {
 
         Task t = new Task(id, code, cut(d.title(), 200), "BIZ", form.minutes(), form.usageValue(),
                 Task.Status.HIDDEN, null, adminId, now);
-        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), difficultyOf(d.difficulty()));
+        t.setCard(cut(orElse(d.summary(), d.title()), 200), cut(orElse(d.category(), "기획안 작성"), 30), TaskGenRequest.difficultyOf(form.minutes()));
         t.setContent(String.join("\n", d.description()), String.join("\n", d.requirements()), bizSettings(form));
         records.save(t);
 

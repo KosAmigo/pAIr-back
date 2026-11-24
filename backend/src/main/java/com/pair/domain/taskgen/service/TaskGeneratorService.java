@@ -15,6 +15,23 @@ import java.util.function.Consumer;
  */
 public abstract class TaskGeneratorService<D> {
 
+    /**
+     * 생성 프롬프트의 맨 앞에 붙는 핵심 정의. 기준 문서(pAIr-docs 설계/좋은_과제_기준.md) 1장, M3, M5, Q3.
+     * 프롬프트에서 '%' 를 쓰지 않는다(SYSTEM.formatted 로 합쳐진다).
+     */
+    static final String PURPOSE = """
+            [과제의 목적] AI 를 쓰면 빨라지지만, AI 답을 그대로 받아들이면 함정에 걸려서, 문제를 나누고 AI 결과를 검증하고 판단하는 사람이 더 높은 점수를 받는 과제를 만듭니다. \
+            응시자가 과제 설명과 자료를 AI 에 그대로 붙여 넣고 나온 답을 손대지 않고 내면 함정에 걸려야 합니다. \
+            그렇다고 AI 를 써도 못 풀 만큼 꼬아서 어렵게 만들면 안 됩니다. 꼼꼼히 확인하면 함정을 피할 수 있어야 합니다.
+            """;
+
+    /** 명세와 답 노출의 경계. 기준 문서 2장(M1, M4). 양쪽 생성기가 같은 문장을 쓴다 */
+    static final String BOUNDARY = """
+            [명세와 답 노출의 경계] 줘도 되는 것은 무엇이 맞는 결과인지입니다(입력과 기대 출력의 예, 항상 성립해야 하는 조건, 현상과 재현 값, 측정 범위나 집계 정의 같은 사실). \
+            주면 안 되는 것은 왜 틀렸는지와 어디를 어떻게 고칠지입니다(원인, 버그 위치, 고치는 방법, 계산 순서나 절차, "~해야 한다", "~해서는 안 된다", "~만으로 판단하지 않는다" 같은 지시). \
+            함정을 피하는 데 꼭 필요한 기대 결과(예: 끝나는 시각에 바로 시작하는 예약)는 여러 예 가운데 하나로 두고, 따로 떼어 규칙 문장으로 강조하지 않습니다.
+            """;
+
     public static final String STEP_GENERATING = "생성 중";
     public static final String STEP_CHECKING = "확인 중";
     public static final String STEP_REGENERATING = "다시 생성 중";

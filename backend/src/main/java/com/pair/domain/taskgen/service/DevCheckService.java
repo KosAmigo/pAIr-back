@@ -16,19 +16,20 @@ import com.pair.infra.sandbox.CodeRunner.RunResult;
 /** 개발 과제 검사 13개 (설계 6장 + 검수 결과로 더한 7개). 실행은 CodeRunner 인터페이스로만 한다 */
 final class DevCheckService {
 
-    static final String FORMAT = "형식";
-    static final String NO_HINT = "버그 힌트 주석 없음";
-    static final String START_PASSES = "시작 코드 + 공개 테스트 통과";
-    static final String HIDDEN_CATCHES = "숨은 테스트가 버그를 잡음";
-    static final String SOLVED_PASSES = "정답은 전부 통과";
-    static final String TIME = "각 실행 30초 안";
-    static final String TRAP_WORDS = "함정 핵심어 노출 없음";
-    static final String WRONG_FIXES = "그럴듯한 오답을 숨은 테스트가 걸러냄";
-    static final String AMOUNT = "분량 대비 시간";
-    static final String MATERIALS = "과제 종류별 필수 자료";
-    static final String FOLLOW_UP = "후속 질문이 과제에 맞음";
-    static final String ALT_SOLUTIONS = "다른 방식의 올바른 풀이도 통과";
-    static final String NO_SOLUTION_TEXT = "요구사항·메모에 해법 문장 없음";
+    // 기준 문서(pAIr-docs 설계/좋은_과제_기준.md) 번호 대응. M5 는 SoloSolveService 가 맡는다(afterChecks)
+    static final String FORMAT = "형식"; // M1 전제
+    static final String NO_HINT = "버그 힌트 주석 없음"; // M4 (버그 위치 주석 금지)
+    static final String START_PASSES = "시작 코드 + 공개 테스트 통과"; // 4장 DEV (시작 코드는 컴파일되고 공개 테스트를 통과)
+    static final String HIDDEN_CATCHES = "숨은 테스트가 버그를 잡음"; // M3, 4장 DEV (숨은 테스트에서만 실패)
+    static final String SOLVED_PASSES = "정답은 전부 통과"; // M1 (정답으로 풀 수 있다)
+    static final String TIME = "각 실행 30초 안"; // 4장 DEV (맞는 풀이를 시간 초과로 떨어뜨리지 않음)
+    static final String TRAP_WORDS = "함정 핵심어 노출 없음"; // M4
+    static final String WRONG_FIXES = "그럴듯한 오답을 숨은 테스트가 걸러냄"; // M3, M5 (그럴듯한 오답이 숨은 테스트에 걸림)
+    static final String AMOUNT = "분량 대비 시간"; // Q1 (5장 표)
+    static final String MATERIALS = "과제 종류별 필수 자료"; // M1 (장애 분석 과제의 재현 자료)
+    static final String FOLLOW_UP = "후속 질문이 과제에 맞음"; // M4
+    static final String ALT_SOLUTIONS = "다른 방식의 올바른 풀이도 통과"; // M2 (다른 방식의 올바른 풀이도 통과)
+    static final String NO_SOLUTION_TEXT = "요구사항·메모에 해법 문장 없음"; // M4, 4장 DEV, 2장 경계 (요구사항·메모는 줘도 되는 것만)
 
     static final long TIME_LIMIT_MS = 30_000;
 

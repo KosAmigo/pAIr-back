@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
@@ -52,6 +54,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("examtest")
+@Tag("slow")
 class TaskGenFlowTest {
 
     @TempDir
@@ -167,7 +170,7 @@ class TaskGenFlowTest {
         assertThat(t.getTrack()).isEqualTo("DEV");
         assertThat(t.getUsage()).isEqualTo(Task.Usage.SELF);
         assertThat(t.getTimeLimitMin()).isEqualTo(60);
-        assertThat(t.getDifficulty()).isEqualTo("중급");
+        assertThat(t.getDifficulty()).isEqualTo("고급"); // 60분
         assertThat(t.getCategory()).isEqualTo("장애 분석");
         assertThat(t.getSummary()).isEqualTo(good("x").summary());
 
@@ -186,8 +189,8 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("20분 과제: 제한 시간 20, d4Minutes 는 비례해서 줄고, AI 가 정한 난이도를 저장한다")
-    void twentyMinutesAndAiDifficulty() {
+    @DisplayName("20분 과제: 제한 시간 20, d4Minutes 는 비례해서 줄고, 난이도는 AI 가 아니라 제한 시간으로 정한다(20분=초급)")
+    void twentyMinutesAndDifficultyByTime() {
         DevDraftDto g = good("flow-20min");
         ai.script.add(TaskGenFixtures.edit(g, b -> b.difficulty("고급")));
         var form = new TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 중복 적용", "SELF", 20);
@@ -195,7 +198,7 @@ class TaskGenFlowTest {
 
         Task t = records.findByCode("flow-20min").orElseThrow();
         assertThat(t.getTimeLimitMin()).isEqualTo(20);
-        assertThat(t.getDifficulty()).isEqualTo("고급");
+        assertThat(t.getDifficulty()).isEqualTo("초급"); // AI 가 고급이라 해도 무시
         assertThat(tasks.get("flow-20min").d4Minutes()).containsExactly(6, 10, 13, 16);
         assertThat(ai.users.get(0)).contains("제한 시간: 20분").doesNotContain("직군", "난이도");
     }
@@ -579,26 +582,26 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("fail 검사가 모두 통과하면 AI 혼자 풀기를 2번 돌리고 풀이 파일(_gen/solo)과 토큰을 저장한다. 2번 다 풀면 warn 이라 생성은 통과")
+    @DisplayName("fail 검사가 모두 통과하면 AI 혼자 풀기를 2번 돌리고 풀이 파일(_gen/solo)과 토큰을 저장한다. 2번 다 풀면 SELF 여도 fail 이라 1회 다시 만든다")
     void soloAllSolved() throws Exception {
+        ai.script.add(good("flow-solo-1"));
         ai.script.add(good("flow-solo"));
-        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
-        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        for (int i = 0; i < 4; i++) ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
         var o = generate();
 
-        assertThat(o.passed()).isTrue();
-        assertThat(o.attempts()).isEqualTo(1);
-        assertThat(ai.users).hasSize(1);
-        assertThat(ai.soloUsers).hasSize(2);
+        assertThat(o.passed()).isFalse(); // 다시 만들어도 풀리면 fail 이 남는다(저장은 한다)
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(ai.users).hasSize(2);
+        assertThat(ai.soloUsers).hasSize(4);
         assertThat(ai.soloUsers.get(0)).doesNotContain("HiddenCartTest", "couponOnce", "쿠폰은 한 장만 적용한다", "중복 적용");
         assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement().satisfies(c -> {
             assertThat(c.ok()).isFalse();
-            assertThat(c.level()).isEqualTo("warn");
+            assertThat(c.level()).isEqualTo("fail");
         });
 
         var report = json.readTree(writer.report("flow-solo"));
-        assertThat(report.get("passed").asBoolean()).isTrue();
-        assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
+        assertThat(report.get("passed").asBoolean()).isFalse();
+        assertThat(report.get("inputTokens").asLong()).isEqualTo(2000);
         assertThat(report.get("details").get("soloTokens").get("input").asLong()).isEqualTo(60);
         assertThat(report.get("details").get("soloTokens").get("output").asLong()).isEqualTo(40);
         assertThat(tasks.hiddenFiles("flow-solo")).containsKeys("_gen/solo/1/src/shop/Cart.java.txt", "_gen/solo/2/src/shop/Cart.java.txt");

@@ -32,7 +32,14 @@ public record TaskGenRequest(String track, String topic, String trap, String usa
         this(track, topic, trap, usage, minutes, List.of());
     }
 
-    public static final Set<String> DIFFICULTIES = Set.of("초급", "중급", "고급");
+    /** 제한 시간(분) → 난이도. 난이도 이름이나 대응을 바꿀 때 고치는 유일한 곳(DB 값과 프런트 표시도 함께) */
+    public static String difficultyOf(int minutes) {
+        return switch (minutes) {
+            case 20 -> "초급";
+            case 40 -> "중급";
+            default -> "고급";
+        };
+    }
     public static final Set<Integer> MINUTES = Set.of(20, 40, 60);
 
     /** 빈 값·범위를 검사하고 기본값을 채운 새 폼을 돌려준다. 잘못되면 IllegalArgumentException(400) */
