@@ -126,12 +126,12 @@ public class AuthService {
         return createSession(account);
     }
 
-    /** Access Token을 검증하고 현재 회원 상태와 권한을 DB에서 확인한다. */
+    /** Access Token을 검증하고 현재 회원 상태와 권한, 토큰이 속한 로그인 세션이 살아 있는지를 DB에서 확인한다. */
     @Transactional(readOnly = true)
     public Optional<AuthAccount> findAccount(String token) {
         return tokens.verify(token, "access")
                 .flatMap(jwt -> accounts.findById(jwt.userId())
-                        .filter(a -> a.isActive() && a.getTokenVersion() == jwt.tokenVersion()));
+                        .filter(a -> isCurrent(a, jwt)));
     }
 
     @Transactional(readOnly = true)
@@ -151,10 +151,10 @@ public class AuthService {
         int updated = sessions.rotate(jwt.sessionId(), account.getId(), InviteTokenService.hash(refreshToken),
                 InviteTokenService.hash(replacement), now, now.plus(JwtTokens.REFRESH_LIFETIME));
         if (updated != 1) throw new UnauthorizedException("유효하지 않은 리프레시 토큰입니다.");
-        return response(account, replacement, now);
+        return response(account, jwt.sessionId(), replacement, now);
     }
 
-    /** 현재 Refresh Token을 폐기한다. 발급된 Access Token은 만료까지 유효하다. */
+    /** 현재 Refresh Token과 로그인 세션을 폐기한다. 그 세션의 Access Token도 바로 쓸 수 없고, 다른 기기의 세션은 그대로다. */
     @Transactional
     public void logout(String refreshToken) {
         JwtTokens.VerifiedToken jwt = tokens.verify(refreshToken, "refresh")
@@ -170,6 +170,10 @@ public class AuthService {
         AuthAccount account = lockCurrentAccount(jwt);
         requirePassword(account, request.currentPassword());
         requireBcryptLength(request.newPassword());
+        // 현재 비밀번호는 위에서 확인했으므로 문자열 비교로 충분하다. 메일로 받은 임시 비밀번호를 그대로 쓰면 변경 의무를 피하게 된다
+        if (request.newPassword().equals(request.currentPassword())) {
+            throw new IllegalArgumentException("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
+        }
         account.changePassword(PASSWORD_ENCODER.encode(request.newPassword()));
         sessions.revokeAll(account.getId());
     }
@@ -208,8 +212,14 @@ public class AuthService {
 
     private AuthAccount lockCurrentAccount(JwtTokens.VerifiedToken jwt) {
         return accounts.lockById(jwt.userId())
-                .filter(a -> a.isActive() && a.getTokenVersion() == jwt.tokenVersion())
+                .filter(a -> isCurrent(a, jwt))
                 .orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
+    }
+
+    /** 활성 계정이고, 토큰 버전이 같고, 토큰의 로그인 세션이 폐기·만료되지 않았는지 */
+    private boolean isCurrent(AuthAccount account, JwtTokens.VerifiedToken jwt) {
+        return account.isActive() && account.getTokenVersion() == jwt.tokenVersion()
+                && sessions.existsBySessionIdAndUserIdAndExpiresAtAfter(jwt.sessionId(), account.getId(), Instant.now());
     }
 
     private void requirePassword(AuthAccount account, String password) {
@@ -226,11 +236,11 @@ public class AuthService {
         String refreshToken = tokens.refresh(account.getId(), sessionId, now);
         sessions.save(new RefreshSession(sessionId, account.getId(), InviteTokenService.hash(refreshToken),
                 now, now.plus(JwtTokens.REFRESH_LIFETIME)));
-        return response(account, refreshToken, now);
+        return response(account, sessionId, refreshToken, now);
     }
 
-    private AuthResponse response(AuthAccount account, String refreshToken, Instant now) {
-        return new AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), now), refreshToken,
+    private AuthResponse response(AuthAccount account, String sessionId, String refreshToken, Instant now) {
+        return new AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), sessionId, now), refreshToken,
                 JwtTokens.ACCESS_LIFETIME.toSeconds(), userResponse(account));
     }
 

@@ -104,8 +104,42 @@ class AuthIntegrationTest extends BearerIntegrationTest {
         mvc.perform(tokenRequest("/api/auth/logout", newRefresh))
                 .andExpect(status().isNoContent());
         mvc.perform(tokenRequest("/api/auth/refresh", newRefresh)).andExpect(status().isUnauthorized());
+        // 로그아웃하면 그 세션의 액세스 토큰(가입 때 것, 재발급 때 것 모두)도 바로 쓸 수 없다
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + refreshedBody.path("token").asText()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void logoutEndsOnlyThatDevicesAccessToken() throws Exception {
+        String email = "logout-device@example.com";
+        JsonNode phone = signupAccount(email);
+        JsonNode laptop = login(email, "secure-pass-123");
+
+        mvc.perform(tokenRequest("/api/auth/logout", phone.path("refreshToken").asText())).andExpect(status().isNoContent());
+
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + phone.path("token").asText()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + laptop.path("token").asText()))
                 .andExpect(status().isOk());
+        mvc.perform(tokenRequest("/api/auth/refresh", laptop.path("refreshToken").asText())).andExpect(status().isOk());
+    }
+
+    @Test
+    void accessTokenStopsWorkingWhenItsSessionExpiredOrIsMissing() throws Exception {
+        JsonNode session = signupAccount("session-expired@example.com");
+        long userId = session.path("user").path("id").asLong();
+        String token = session.path("token").asText();
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+
+        jdbc.update("update auth_refresh_sessions set expires_at = ? where user_id = ?", Instant.now().minusSeconds(1), userId);
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+
+        String unknownSession = tokens.access(userId, 0, com.pair.global.security.InviteTokenService.next(), Instant.now());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + unknownSession)).andExpect(status().isUnauthorized());
+        String withoutSession = tokens.access(userId, 0, null, Instant.now());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + withoutSession)).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -215,7 +249,8 @@ class AuthIntegrationTest extends BearerIntegrationTest {
         JsonNode body = json.readTree(result.getResponse().getContentAsString());
         long userId = body.path("user").path("id").asLong();
         String access = body.path("token").asText();
-        String expiredAccess = tokens.access(userId, 0, Instant.now().minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1));
+        String expiredAccess = tokens.access(userId, 0, com.pair.global.security.InviteTokenService.next(),
+                Instant.now().minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1));
         String expiredRefresh = tokens.refresh(userId, com.pair.global.security.InviteTokenService.next(),
                 Instant.now().minus(JwtTokens.REFRESH_LIFETIME).minusSeconds(1));
         String[] parts = access.split("\\.");
@@ -269,6 +304,12 @@ class AuthIntegrationTest extends BearerIntegrationTest {
                 .andExpect(status().isUnauthorized());
         mvc.perform(passwordChange(first.path("token").asText(), "secure-pass-123", "가".repeat(25)))
                 .andExpect(status().isBadRequest());
+        // 현재 비밀번호와 같은 새 비밀번호는 거부한다 (실패해도 세션은 그대로)
+        mvc.perform(passwordChange(first.path("token").asText(), "secure-pass-123", "secure-pass-123"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("새 비밀번호는 현재 비밀번호와 달라야 합니다."));
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + first.path("token").asText()))
+                .andExpect(status().isOk());
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + second.path("token").asText()))
                 .andExpect(status().isOk());
 

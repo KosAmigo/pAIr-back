@@ -222,6 +222,13 @@ class CompanyOnboardingIntegrationTest {
 
         auth.verifyOnboardingEmail(login.token(), code);
         assertThat(accounts.findById(manager.getId()).orElseThrow().isEmailVerified()).isTrue();
+        // 메일로 받은 임시 비밀번호를 그대로 새 비밀번호로 쓸 수 없고, 변경 의무도 풀리지 않는다
+        mvc.perform(patch("/api/auth/password").header("Authorization", "Bearer " + login.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"" + temporaryPassword.getValue()
+                                + "\",\"newPassword\":\"" + temporaryPassword.getValue() + "\"}"))
+                .andExpect(status().isBadRequest());
+        assertThat(accounts.findById(manager.getId()).orElseThrow().isPasswordChangeRequired()).isTrue();
         mvc.perform(patch("/api/auth/password").header("Authorization", "Bearer " + login.token())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"currentPassword\":\"" + temporaryPassword.getValue()
