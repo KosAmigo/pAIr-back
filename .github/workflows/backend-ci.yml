@@ -3,7 +3,6 @@ name: Backend CI
 # 전체 테스트(./gradlew build)를 클라우드에서 돌린다. 비밀값은 필요 없다(테스트는 H2 + AI 키 비움).
 on:
   push:
-    branches: [develop]
   workflow_dispatch:
 
 # 같은 브랜치에서 실행이 쌓이면 이전 실행은 취소한다.
