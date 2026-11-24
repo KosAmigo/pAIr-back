@@ -3,10 +3,12 @@ package com.pair.domain.exam.service;
 import com.pair.global.security.InviteTokenService;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.pair.domain.exam.dto.RelayIdentityDto;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 
 @Component
@@ -31,5 +33,13 @@ public class DbRelayAuthService implements RelayAuthService {
                 .map(p -> p.getSession().isProctoring() && p.getSession().getCanceledAt() == null
                         && !clock.instant().isAfter(p.getSession().getEndsAt().plus(LATE_GRACE)))
                 .orElse(false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<RelayIdentityDto> identify(String inviteToken) {
+        if (!InviteTokenService.looksValid(inviteToken)) return Optional.empty();
+        return participants.findByInviteTokenHash(InviteTokenService.hash(inviteToken))
+                .map(p -> new RelayIdentityDto(p.getSession().getId(), p.getId()));
     }
 }

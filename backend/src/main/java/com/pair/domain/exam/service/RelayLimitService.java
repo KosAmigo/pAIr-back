@@ -4,6 +4,15 @@ package com.pair.domain.exam.service;
 public final class RelayLimitService {
     public static final int MAX_FRAME_BYTES = 100_000;
     public static final int MAX_TEXT_BYTES = 4_096;
+    /** 영상 시그널링(view-rtc)을 주고받는 PC·감독관 연결의 텍스트 메시지 상한. sdp 32,000자 + 여유 */
+    public static final int MAX_SIGNAL_TEXT_BYTES = 40_000;
+    /** 응시자 1명을 동시에 볼 수 있는 감독관 수 (프론트 watchRoom.ts 의 MAX_VIEWERS_PER_PARTICIPANT 와 같은 값). 응시자 PC 가 감독관마다 영상을 따로 인코딩한다 */
+    public static final int MAX_VIEWERS_PER_PARTICIPANT = 2;
+    /** PC·감독관 연결 하나가 1초에 보낼 수 있는 시그널링 수 (넘는 것은 버리고, 심하면 끊는다) */
+    public static final int MAX_SIGNALS_PER_SEC = 60;
+    public static final int MAX_SIGNAL_EXCESS_PER_SEC = 300;
+    /** 감독관 연결이 watch 를 다시 보낼 수 있는 최소 간격 (권한 확인이 DB 를 읽으므로 연타를 막는다) */
+    public static final long MIN_WATCH_INTERVAL_MS = 500;
     /** 휴대폰이 이 시간 동안 아무 신호가 없으면 응답 없음(stale)으로 본다. 생존 신호는 5초마다 온다 */
     public static final long PHONE_STALE_MS = 15_000;
     /** PC 와 휴대폰 모두 없는 짝은 이 시간 뒤에 지운다 (PC 새로고침 동안은 같은 짝 코드를 유지) */

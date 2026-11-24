@@ -72,6 +72,7 @@ class EnvNoticeIntegrationTest {
     @Autowired ExamSessionService sessions;
     @Autowired ExamEntryService entry;
     @Autowired EnvCheckService envCheck;
+    @Autowired com.pair.domain.exam.service.ViewerAccessService viewerAccess;
     @Autowired NoticeService notices;
     @Autowired ExamParticipantRepository participants;
     @Autowired ObjectMapper json;
@@ -88,6 +89,97 @@ class EnvNoticeIntegrationTest {
         clock.set(T0);
         when(mail.createMimeMessage()).thenAnswer(inv -> new MimeMessage((jakarta.mail.Session) null));
         com.pair.domain.task.TestTasks.seed(taskRecords, taskFiles, taskQuestions);
+    }
+
+    // ── 감독관 영상 열기 권한 (ViewerAccessService). 컨텍스트를 늘리지 않으려고 같은 설정의 이 클래스에 둔다 ──
+
+    /** 개발용 헤더 모드(examtest)의 로그인 정보. 키는 소문자다 */
+    private static java.util.Map<String, String> login(String role, Long company) {
+        return company == null
+                ? java.util.Map.of("x-pair-user-id", "7", "x-pair-role", role)
+                : java.util.Map.of("x-pair-user-id", "7", "x-pair-role", role, "x-pair-company-id", String.valueOf(company));
+    }
+
+    private com.pair.domain.exam.dto.ViewerAccessDto.State viewState(java.util.Map<String, String> auth, Long sessionId, Long participantId) {
+        return viewerAccess.check(auth, sessionId, participantId).state();
+    }
+
+    @Test
+    @DisplayName("영상 열기: 진행 중인 회차에 입장한 응시자는 같은 회사 감독관·관리자가 열 수 있다")
+    void viewerAllowed() {
+        SessionSummaryResponse s = createSession(401L, true);
+        String token = invite(s.id(), "view-ok@test.dev");
+        entry.enter(token);
+        clock.set(s.startsAt());
+        Long pid = pid(s.id(), "view-ok@test.dev");
+
+        var r = viewerAccess.check(login("PROCTOR", 401L), s.id(), pid);
+        assertThat(r.state()).isEqualTo(com.pair.domain.exam.dto.ViewerAccessDto.State.ALLOWED);
+        assertThat(r.userId()).isEqualTo(7L);
+        assertThat(viewState(login("ADMIN", null), s.id(), pid)).isEqualTo(com.pair.domain.exam.dto.ViewerAccessDto.State.ALLOWED); // 관리자는 모든 회사
+    }
+
+    @Test
+    @DisplayName("영상 열기: 로그인 정보가 없거나 틀리거나, 응시자 계정이거나 다른 회사 감독관이면 거절한다")
+    void viewerDenied() {
+        SessionSummaryResponse s = createSession(402L, true);
+        entry.enter(invite(s.id(), "view-no@test.dev"));
+        clock.set(s.startsAt());
+        Long pid = pid(s.id(), "view-no@test.dev");
+        var denied = com.pair.domain.exam.dto.ViewerAccessDto.State.DENIED;
+
+        assertThat(viewState(java.util.Map.of(), s.id(), pid)).isEqualTo(denied);
+        assertThat(viewState(java.util.Map.of("x-pair-user-id", "abc", "x-pair-role", "PROCTOR"), s.id(), pid)).isEqualTo(denied);
+        assertThat(viewState(java.util.Map.of("x-pair-user-id", "7", "x-pair-role", "NOBODY"), s.id(), pid)).isEqualTo(denied);
+        assertThat(viewState(login("USER", null), s.id(), pid)).isEqualTo(denied);
+        assertThat(viewState(login("PROCTOR", 999L), s.id(), pid)).isEqualTo(denied); // 다른 회사는 있는지도 알리지 않는다
+    }
+
+    @Test
+    @DisplayName("영상 열기: 다른 회차의 응시자 번호나 없는 응시자는 거절한다")
+    void viewerMismatchedParticipant() {
+        SessionSummaryResponse a = createSession(403L, true);
+        SessionSummaryResponse b = createSession(403L, true);
+        entry.enter(invite(a.id(), "view-a@test.dev"));
+        entry.enter(invite(b.id(), "view-b@test.dev"));
+        clock.set(a.startsAt());
+        var denied = com.pair.domain.exam.dto.ViewerAccessDto.State.DENIED;
+
+        assertThat(viewState(login("PROCTOR", 403L), a.id(), pid(b.id(), "view-b@test.dev"))).isEqualTo(denied);
+        assertThat(viewState(login("PROCTOR", 403L), a.id(), 999_999L)).isEqualTo(denied);
+    }
+
+    @Test
+    @DisplayName("영상 열기: 시작 전이거나 아직 입장하지 않은 응시자는 offline(곧 가능)으로 돌려준다")
+    void viewerOfflineBeforeStartOrEntry() {
+        SessionSummaryResponse s = createSession(404L, true);
+        entry.enter(invite(s.id(), "view-early@test.dev"));
+        invite(s.id(), "view-late@test.dev"); // 입장하지 않는다
+        Long early = pid(s.id(), "view-early@test.dev");
+        Long late = pid(s.id(), "view-late@test.dev");
+        var offline = com.pair.domain.exam.dto.ViewerAccessDto.State.OFFLINE;
+
+        assertThat(viewState(login("PROCTOR", 404L), s.id(), early)).isEqualTo(offline); // 시작 전
+        clock.set(s.startsAt());
+        assertThat(viewState(login("PROCTOR", 404L), s.id(), early)).isEqualTo(com.pair.domain.exam.dto.ViewerAccessDto.State.ALLOWED);
+        assertThat(viewState(login("PROCTOR", 404L), s.id(), late)).isEqualTo(offline); // 입장 전
+    }
+
+    @Test
+    @DisplayName("영상 열기: 끝난 회차와 감독을 쓰지 않는 회차는 열 수 없다")
+    void viewerErrorWhenEndedOrNotProctored() {
+        SessionSummaryResponse s = createSession(405L, true);
+        SessionSummaryResponse plain = createSession(405L, false);
+        entry.enter(invite(s.id(), "view-end@test.dev"));
+        entry.enter(invite(plain.id(), "view-plain@test.dev"));
+        var error = com.pair.domain.exam.dto.ViewerAccessDto.State.ERROR;
+
+        clock.set(s.endsAt());
+        assertThat(viewState(login("PROCTOR", 405L), s.id(), pid(s.id(), "view-end@test.dev"))).isEqualTo(error);
+        clock.set(plain.startsAt());
+        var r = viewerAccess.check(login("PROCTOR", 405L), plain.id(), pid(plain.id(), "view-plain@test.dev"));
+        assertThat(r.state()).isEqualTo(error);
+        assertThat(r.message()).contains("감독을 쓰지 않는");
     }
 
     @Test
