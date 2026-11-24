@@ -1,6 +1,7 @@
 package com.pair.global.config;
 
 import com.pair.global.security.AttemptOwnerInterceptor;
+import com.pair.global.security.CompanyAccountAccessInterceptor;
 import com.pair.global.security.CurrentUserArgumentResolver;
 import com.pair.global.security.OnboardingAccessInterceptor;
 import java.util.List;
@@ -16,12 +17,14 @@ public class AuthWebConfig implements WebMvcConfigurer {
     private final CurrentUserArgumentResolver currentUser;
     private final AttemptOwnerInterceptor attemptOwner;
     private final OnboardingAccessInterceptor onboardingAccess;
+    private final CompanyAccountAccessInterceptor companyAccountAccess;
 
     public AuthWebConfig(CurrentUserArgumentResolver currentUser, AttemptOwnerInterceptor attemptOwner,
-            OnboardingAccessInterceptor onboardingAccess) {
+            OnboardingAccessInterceptor onboardingAccess, CompanyAccountAccessInterceptor companyAccountAccess) {
         this.currentUser = currentUser;
         this.attemptOwner = attemptOwner;
         this.onboardingAccess = onboardingAccess;
+        this.companyAccountAccess = companyAccountAccess;
     }
 
     @Override
@@ -33,6 +36,8 @@ public class AuthWebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(onboardingAccess).addPathPatterns("/api/**");
+        // 자가진단 시작·롤백과 크레딧 구매·환불은 기업 계정이 쓸 수 없다 (조회는 허용)
+        registry.addInterceptor(companyAccountAccess).addPathPatterns("/api/attempts", "/api/credits/**", "/api/checkpoints/**");
         registry.addInterceptor(attemptOwner).addPathPatterns("/api/attempts/{id}/**");
     }
 }
