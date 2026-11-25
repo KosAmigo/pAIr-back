@@ -106,11 +106,13 @@ class AttemptOwnerTest extends BearerIntegrationTest {
     }
 
     @Test
-    void 실전_응시는_로그인_없이_초대_토큰으로_들어오므로_이_검사를_하지_않는다() throws Exception {
+    void 실전_응시는_번호만_알아서는_열_수_없다() throws Exception {
         Instant now = Instant.now();
         String live = registry.save(Attempt.live(1L, 3L, "test", now)).getId().toString();
         store.create(new AttemptStateDto(live, TestTasks.SELF_DEV, "openai", "test", now, null, null, null,
                 AttemptStateDto.Status.SOLVING, List.of(), null, null), Map.of());
-        mvc.perform(get("/api/attempts/{id}", live)).andExpect(status().isOk());
+        // 초대 토큰으로 여는 경우는 LiveAttemptAccessTest 에서 확인한다
+        mvc.perform(get("/api/attempts/{id}", live)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/attempts/{id}", live).header("Authorization", "Bearer " + owner.token())).andExpect(status().isForbidden());
     }
 }
