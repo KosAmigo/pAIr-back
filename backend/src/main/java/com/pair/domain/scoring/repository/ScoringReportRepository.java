@@ -2,6 +2,7 @@ package com.pair.domain.scoring.repository;
 
 import com.pair.domain.scoring.service.ScoringService;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -73,20 +74,15 @@ public class ScoringReportRepository {
                 .collect(Collectors.groupingBy(JudgeVerdict::getResultId));
         Map<Long, JudgeCall> callById = cs.stream().collect(Collectors.toMap(JudgeCall::getId, c -> c));
 
-        // 항목별 체크 결과 (체크 id 순 = 기준표 순서)
-        Map<String, List<CheckResult>> byItem = new HashMap<>();
-        rs.stream().sorted(Comparator.comparing(CheckResult::getCheckId)).forEach(r ->
-                byItem.computeIfAbsent(checkById.get(r.getCheckId()).getItemKey(), k -> new ArrayList<>()).add(r));
+        Map<String, List<CheckResult>> byItem = byItem(rs, checkById);
 
         ObjectNode report = stored != null && stored.isObject() ? ((ObjectNode) stored).deepCopy() : json.createObjectNode();
         ArrayNode itemArr = json.createArrayNode();
         int total = 0;
         int max = 0;
-        List<RubricItem> itemRows = items.findAll().stream().sorted(Comparator.comparing(RubricItem::getSortOrder)).toList();
-        for (RubricItem it : itemRows) {
+        for (RubricItem it : sortedItems()) {
             List<CheckResult> list = byItem.getOrDefault(it.getKey(), List.of());
-            int deducted = list.stream().mapToInt(CheckResult::getDeducted).sum();
-            int score = Math.max(0, it.getMaxScore() - deducted);
+            int score = itemScore(it, list);
             total += score;
             max += it.getMaxScore();
             ObjectNode itemNode = json.createObjectNode();
@@ -116,6 +112,63 @@ public class ScoringReportRepository {
             n.put("cached", c.getCachedTokens());
         }
         return report;
+    }
+
+    /**
+     * 응시 목록·복기 트리용: 여러 응시의 점수만(version, total, max, items[key, name, max, score]) 한꺼번에 읽는다. overlay 를 응시마다 부르면
+     * 쿼리가 응시 수만큼 늘어서, 응시 수와 상관없이 4번으로 읽는다. 점수 규칙은 overlay 와 같다.
+     * 끝난 채점이 채점 표에 없는 응시는 결과에 없다.
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, ObjectNode> scores(Collection<Long> attemptIds) {
+        if (attemptIds.isEmpty()) return Map.of();
+        // 다시 채점한 응시는 가장 최근에 끝난 채점을 쓴다
+        Map<Long, Scoring> latest = scorings.findByAttemptIdInAndStatus(attemptIds, "DONE").stream()
+                .collect(Collectors.toMap(Scoring::getAttemptId, s -> s, (a, b) -> a.getId() > b.getId() ? a : b));
+        if (latest.isEmpty()) return Map.of();
+        Map<Long, List<CheckResult>> byScoring = results
+                .findByScoringIdIn(latest.values().stream().map(Scoring::getId).toList()).stream()
+                .collect(Collectors.groupingBy(CheckResult::getScoringId));
+        Map<Long, RubricCheck> checkById = checks
+                .findAllById(byScoring.values().stream().flatMap(List::stream).map(CheckResult::getCheckId).distinct().toList())
+                .stream().collect(Collectors.toMap(RubricCheck::getId, c -> c));
+        List<RubricItem> itemRows = sortedItems();
+
+        Map<Long, ObjectNode> out = new HashMap<>();
+        latest.forEach((attemptId, scoring) -> {
+            Map<String, List<CheckResult>> byItem = byItem(byScoring.getOrDefault(scoring.getId(), List.of()), checkById);
+            ObjectNode report = json.createObjectNode();
+            report.put("version", 2);
+            ArrayNode itemArr = report.putArray("items");
+            int total = 0;
+            int max = 0;
+            for (RubricItem it : itemRows) {
+                int score = itemScore(it, byItem.getOrDefault(it.getKey(), List.of()));
+                total += score;
+                max += it.getMaxScore();
+                itemArr.addObject().put("key", it.getKey()).put("name", it.getName()).put("max", it.getMaxScore()).put("score", score);
+            }
+            report.put("total", total);
+            report.put("max", max);
+            out.put(attemptId, report);
+        });
+        return out;
+    }
+
+    private List<RubricItem> sortedItems() {
+        return items.findAll().stream().sorted(Comparator.comparing(RubricItem::getSortOrder)).toList();
+    }
+
+    /** 항목별 체크 결과 (체크 id 순 = 기준표 순서) */
+    private static Map<String, List<CheckResult>> byItem(List<CheckResult> rs, Map<Long, RubricCheck> checkById) {
+        Map<String, List<CheckResult>> out = new HashMap<>();
+        rs.stream().sorted(Comparator.comparing(CheckResult::getCheckId)).forEach(r ->
+                out.computeIfAbsent(checkById.get(r.getCheckId()).getItemKey(), k -> new ArrayList<>()).add(r));
+        return out;
+    }
+
+    private static int itemScore(RubricItem item, List<CheckResult> list) {
+        return Math.max(0, item.getMaxScore() - list.stream().mapToInt(CheckResult::getDeducted).sum());
     }
 
     private ObjectNode checkNode(CheckResult r, RubricCheck c, List<JudgeVerdict> vs,

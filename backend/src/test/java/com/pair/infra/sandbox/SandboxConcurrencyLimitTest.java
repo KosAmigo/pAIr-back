@@ -13,22 +13,27 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
 import com.pair.global.config.PairProperties;
 
 /** 동시 실행 상한과 대기열: 상한을 넘기지 않고, 줄이 너무 길면 거절한다. */
+@Tag("slow") // 실제 Docker 컨테이너를 여러 개 띄워 수십 초 걸린다
 @EnabledIf("com.pair.infra.sandbox.SandboxRunnerTest#dockerReady")
 class SandboxConcurrencyLimitTest {
 
+    /** 병렬로 도는 다른 Docker 테스트(SandboxRunnerTest 등)의 pair-run-* 컨테이너를 세지 않게 이 테스트만의 이름을 쓴다 */
+    private static final String PREFIX = "pair-limit-test-";
+
     private static SandboxRunner runner(int timeout, int max, int queueWait) {
         return new SandboxRunner(new PairProperties(null, null, null, null,
-                new PairProperties.Run(timeout, null, null, max, queueWait), null, null));
+                new PairProperties.Run(timeout, null, null, max, queueWait), null, null), PREFIX);
     }
 
     private static int runningContainers() throws Exception {
-        Process p = new ProcessBuilder("docker", "ps", "-q", "--filter", "name=pair-run-").start();
+        Process p = new ProcessBuilder("docker", "ps", "-q", "--filter", "name=" + PREFIX).start();
         String out = new String(p.getInputStream().readAllBytes()).trim();
         p.waitFor();
         return out.isEmpty() ? 0 : out.split("\\s+").length;

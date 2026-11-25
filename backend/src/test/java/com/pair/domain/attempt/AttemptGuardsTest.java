@@ -1,5 +1,7 @@
 package com.pair.domain.attempt;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.AttemptService;
 import com.pair.domain.attempt.service.EditProposalService;
@@ -11,21 +13,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
@@ -40,18 +33,8 @@ import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
 /** 응시 쪽 방어: 읽기 전용 파일은 저장·AI 적용 모두 막고, 실행 대기열이 꽉 차면 503 */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class AttemptGuardsTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class AttemptGuardsTest extends BearerIntegrationTest {
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
@@ -60,9 +43,6 @@ class AttemptGuardsTest {
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
     @Autowired MockMvc mvc;
-    @MockitoBean JavaMailSender mail;
-    @MockitoBean AssistantClient assistant;
-    @MockitoBean CodeRunner runner;
 
     String token;
     String devId;
@@ -125,6 +105,24 @@ class AttemptGuardsTest {
                 .hasMessageContaining("읽기 전용");
         assertThat(store.readFiles(devId).get("logs/app.log")).isEqualTo(before);
         assertThat(store.events(devId)).noneMatch(e -> "aiEdit".equals(e.path("type").asText()));
+    }
+
+    @Test
+    void 빌드와_실행을_너무_자주_누르면_429이고_다른_응시자는_영향이_없다() throws Exception {
+        when(runner.build(any())).thenReturn(new CodeRunner.BuildResult(true, List.of(), List.of(), 1));
+        // 빌드와 실행을 합쳐 1분에 10번(기본값)까지
+        for (int i = 0; i < 10; i++) {
+            mvc.perform(post("/api/attempts/{id}/build", devId).header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+        }
+        mvc.perform(post("/api/attempts/{id}/build", devId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isTooManyRequests());
+        mvc.perform(post("/api/attempts/{id}/run", devId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isTooManyRequests());
+        // 다른 회원은 자기 횟수가 따로다
+        var other = AuthTestSupport.signup(auth, mail, "다른 응시자", UUID.randomUUID() + "@pair.test");
+        String otherAttempt = attempts.startSelf(TestTasks.SELF_DEV, other.user().id()).id();
+        mvc.perform(post("/api/attempts/{id}/build", otherAttempt).header("Authorization", "Bearer " + other.token()))
+                .andExpect(status().isOk());
     }
 
     @Test

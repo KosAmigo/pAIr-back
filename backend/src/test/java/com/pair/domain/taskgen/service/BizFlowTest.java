@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
@@ -63,6 +65,7 @@ import com.pair.global.security.HeaderCurrentUserResolver;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("examtest")
+@Tag("slow")
 class BizFlowTest {
 
     @TempDir
@@ -77,10 +80,20 @@ class BizFlowTest {
     static class ScriptedAi implements TaskGenAiService {
         final Deque<Object> script = new ArrayDeque<>();
         final List<String> users = new ArrayList<>();
+        /** "AI 답을 그대로 내면 함정에 걸림" 검사 호출(SoloBizAnswerDto)은 따로 모은다. 준비된 답이 없으면 호출 실패(warn) */
+        final Deque<Object> soloScript = new ArrayDeque<>();
+        final List<String> soloUsers = new ArrayList<>();
 
         @Override
         @SuppressWarnings("unchecked")
         public synchronized <T> Output<T> generate(String model, String system, String user, Class<T> type) {
+            if (type == com.pair.domain.taskgen.dto.SoloBizAnswerDto.class) {
+                soloUsers.add(user);
+                Object s = soloScript.poll();
+                if (s instanceof RuntimeException e) throw e;
+                if (s == null) throw new AiUnavailableException("준비된 풀이가 없습니다.");
+                return new Output<>((T) s, 600, 40);
+            }
             users.add(user);
             Object next = script.poll();
             if (next instanceof RuntimeException e) throw e;
@@ -127,6 +140,8 @@ class BizFlowTest {
     void reset() {
         ai.script.clear();
         ai.users.clear();
+        ai.soloScript.clear();
+        ai.soloUsers.clear();
         steps.clear();
         solver.error = null;
         solver.reply = "{\"answers\": [\"1\", \"2\", \"21080\", \"2000\"]}";
@@ -162,7 +177,7 @@ class BizFlowTest {
 
         assertThat(o.passed()).isTrue();
         assertThat(o.attempts()).isEqualTo(1);
-        assertThat(o.checks()).hasSize(7);
+        assertThat(o.checks()).hasSize(13);
         assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
 
@@ -224,7 +239,7 @@ class BizFlowTest {
 
         // report.json: 함정, 검사 7개
         var report = json.readTree(writer.report("biz-pass"));
-        assertThat(report.get("checks")).hasSize(7);
+        assertThat(report.get("checks")).hasSize(13);
         assertThat(report.get("details").get("trap").get("evidence").asText()).isEqualTo(BizFixtures.EVIDENCE);
         assertThat(report.get("details").get("solverModel").asText()).isEqualTo("claude-sonnet-5-5");
         assertThat(report.get("form").get("track").asText()).isEqualTo("BIZ");
@@ -309,6 +324,46 @@ class BizFlowTest {
         assertThat(records.count()).isEqualTo(before);
     }
 
+    @Test
+    @DisplayName("LIVE 에서 AI 가 함정 문항을 모두 맞히면 AI 답과 다시 설계 지시를 붙여 1번 다시 만들고, 이번엔 틀리면 통과해 저장한다 (M5)")
+    void soloSolvedRegeneratesForLive() throws Exception {
+        ai.script.add(BizFixtures.good("biz-live-1"));
+        ai.script.add(BizFixtures.good("biz-live-2"));
+        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
+        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "23560", "2000")));
+        var live = new com.pair.domain.taskgen.dto.TaskGenRequest("BIZ", "저가 요금제 출시 여부", "설문 의향을 실제 전환율로 보정하지 않음", "LIVE", 60);
+        var o = generator.generate(live, 1L, steps::add);
+
+        assertThat(o.passed()).isTrue();
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(o.taskCode()).isEqualTo("biz-live-2");
+        assertThat(ai.soloUsers).hasSize(2);
+        assertThat(ai.users.get(1)).contains(BizSoloSolveService.NAME, "그대로 내도 통과", "AI 답 21080", "다시 설계 지시");
+        assertThat(steps).containsExactly("생성 중", "확인 중", "다시 생성 중", "확인 중", "저장 중");
+        var report = json.readTree(writer.report("biz-live-2"));
+        assertThat(report.get("details").get("soloAnswers").get(2).asText()).isEqualTo("23560");
+        assertThat(report.get("details").get("soloTokens").get("input").asLong()).isEqualTo(600);
+        assertThat(records.findByCode("biz-live-1")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("SELF 에서도 그대로 내도 통과하면 fail 이라 1회 다시 만들고, 다시 만들어도 풀리면 실패 표시와 함께 저장한다")
+    void soloSolvedFailsForSelf() {
+        ai.script.add(BizFixtures.good("biz-self-1"));
+        ai.script.add(BizFixtures.good("biz-self-2"));
+        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
+        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
+        var o = generate();
+
+        assertThat(o.passed()).isFalse();
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(ai.users.get(1)).contains(BizSoloSolveService.NAME, "다시 설계 지시");
+        assertThat(o.checks()).filteredOn(c -> c.name().equals(BizSoloSolveService.NAME)).singleElement().satisfies(c -> {
+            assertThat(c.ok()).isFalse();
+            assertThat(c.level()).isEqualTo(GenCheckResultDto.FAIL);
+        });
+    }
+
     // ── API ─────────────────────────────────
 
     private static MockHttpServletRequestBuilder admin(MockHttpServletRequestBuilder b) {
@@ -333,7 +388,7 @@ class BizFlowTest {
         var j = json.readTree(done);
         assertThat(j.get("status").asText()).as(done).isEqualTo("DONE");
         assertThat(j.get("taskCode").asText()).isEqualTo("biz-api");
-        assertThat(j.get("checks")).hasSize(7);
+        assertThat(j.get("checks")).hasSize(13);
         assertThat(records.findByCode("biz-api").orElseThrow().getTrack()).isEqualTo("BIZ");
         assertThat(pdfFilesOnDisk()).isPositive();
     }

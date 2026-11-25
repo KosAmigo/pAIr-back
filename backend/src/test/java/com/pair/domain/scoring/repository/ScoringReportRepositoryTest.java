@@ -1,9 +1,10 @@
 package com.pair.domain.scoring.repository;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.scoring.service.TestPromptVersions;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -11,12 +12,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pair.domain.attempt.entity.Attempt;
@@ -31,17 +27,7 @@ import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.task.TestTasks;
 
 /** 리포트를 읽을 때 점수와 판정이 채점 테이블 기준으로 나오는지 (H2) */
-@SpringBootTest
-@ActiveProfiles("examtest")
-class ScoringReportRepositoryTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+class ScoringReportRepositoryTest extends ExamIntegrationTest {
 
     @Autowired ScoringResultRepository records;
     @Autowired AttemptStateRepository store;
@@ -104,6 +90,45 @@ class ScoringReportRepositoryTest {
         assertThat(delivery.path("checks").get(0).path("code").asText()).isEqualTo("D1");
         assertThat(rep.path("judgeCalls")).hasSize(3);
         assertThat(rep.path("judgeCalls").get(0).path("cached").asInt()).isEqualTo(50);
+    }
+
+    @Test
+    void 목록용_일괄_점수는_리포트와_같고_마지막으로_끝난_채점을_쓴다() {
+        String scored = String.valueOf(attemptId);
+        long rescored = registry.save(Attempt.self(1L, 1L, "gpt-test", now)).getId();
+        String jsonOnly = String.valueOf(registry.save(Attempt.self(1L, 1L, "gpt-test", now)).getId());
+        String empty = String.valueOf(registry.save(Attempt.self(1L, 1L, "gpt-test", now)).getId());
+        store.writeReport(scored, Map.of("version", 2, "total", 999, "items", List.of()));
+        finish(attemptId, 4);
+        finish(rescored, 4);
+        finish(rescored, 9);
+        records.fail(records.start(rescored, version), "실패");
+        store.writeReport(jsonOnly, Map.of("version", 1, "total", 50, "items", List.of(Map.of("key", "usage", "score", 5))));
+
+        Map<String, JsonNode> all = store.readScores(List.of(scored, String.valueOf(rescored), jsonOnly, empty));
+
+        assertThat(all).containsOnlyKeys(scored, String.valueOf(rescored), jsonOnly);
+        for (String id : all.keySet()) {
+            JsonNode full = store.readReport(id);
+            assertThat(all.get(id).path("version")).isEqualTo(full.path("version"));
+            assertThat(all.get(id).path("total")).isEqualTo(full.path("total"));
+            assertThat(all.get(id).path("max")).isEqualTo(full.path("max"));
+            assertThat(keyScores(all.get(id))).isEqualTo(keyScores(full));
+        }
+        assertThat(all.get(String.valueOf(rescored)).path("total").asInt()).isEqualTo(91);
+    }
+
+    private void finish(long attempt, int deducted) {
+        CheckOutcome u1 = new CheckOutcome("U1", "라벨", "JUDGE", 4, deducted, "DEDUCTED", List.of(), "이유");
+        records.finish(records.start(attempt, version), true,
+                List.of(new ItemResult("usage", "AI 활용력", 20, 20 - deducted, List.of(u1))), List.of());
+    }
+
+    private static List<String> keyScores(JsonNode report) {
+        List<String> out = new java.util.ArrayList<>();
+        report.path("items").forEach(it -> out.add(it.path("key").asText() + "/" + it.path("name").asText() + "="
+                + it.path("score").asInt() + "/" + it.path("max").asInt()));
+        return out;
     }
 
     @Test

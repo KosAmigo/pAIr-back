@@ -29,8 +29,8 @@ class TaskGenTimeTest {
     @Test
     @DisplayName("개발 과제 프롬프트에 시간별 깊이가 들어간다")
     void devDepth() {
-        DevTaskGeneratorService g = new DevTaskGeneratorService(null, null, null, null);
-        assertThat(g.system(form("DEV", 20))).contains("20분", "파일 2~3개", "버그 1개", "숨은 테스트 1~2개").contains("difficulty");
+        DevTaskGeneratorService g = new DevTaskGeneratorService(null, null, null, null, null);
+        assertThat(g.system(form("DEV", 20))).contains("20분", "파일 2~3개", "버그 1개", "숨은 테스트 1~2개").doesNotContain("difficulty");
         assertThat(g.system(form("DEV", 40))).contains("파일 3~5개");
         assertThat(g.system(form("DEV", 60))).contains("파일 4~6개");
         assertThat(g.user(form("DEV", 20), List.of())).contains("제한 시간: 20분", "주제: 주제", "함정: 함정").doesNotContain("직군", "난이도");
@@ -39,11 +39,11 @@ class TaskGenTimeTest {
     @Test
     @DisplayName("비개발 과제 프롬프트에 시간별 깊이가 들어간다")
     void bizDepth() {
-        BizTaskGeneratorService g = new BizTaskGeneratorService(null, null, null, null, null);
+        BizTaskGeneratorService g = new BizTaskGeneratorService(null, null, null, null, null, null);
         assertThat(g.system(form("BIZ", 20))).contains("CSV 1개 + 문서 2개", "각 1~2쪽", "문항 3개", "객관식 2개, 단답형 1개");
         assertThat(g.system(form("BIZ", 40))).contains("CSV 1~2개 + 문서 2개", "문항 4개");
         assertThat(g.system(form("BIZ", 60))).contains("문서 2~3개");
-        assertThat(g.system(form("BIZ", 60))).contains("difficulty");
+        assertThat(g.system(form("BIZ", 60))).doesNotContain("difficulty");
     }
 
     @Test
@@ -55,11 +55,10 @@ class TaskGenTimeTest {
     }
 
     @Test
-    @DisplayName("AI 가 준 난이도는 초급·중급·고급만 쓰고, 이상하면 중급")
-    void difficultyFallback() {
-        assertThat(GeneratedTaskRepository.difficultyOf("초급")).isEqualTo("초급");
-        assertThat(GeneratedTaskRepository.difficultyOf(" 고급 ")).isEqualTo("고급");
-        assertThat(GeneratedTaskRepository.difficultyOf("최상급")).isEqualTo("중급");
-        assertThat(GeneratedTaskRepository.difficultyOf(null)).isEqualTo("중급");
+    @DisplayName("난이도는 제한 시간으로 정한다: 20분=쉬움, 40분=보통, 60분=어려움")
+    void difficultyByMinutes() {
+        assertThat(TaskGenRequest.difficultyOf(20)).isEqualTo("쉬움");
+        assertThat(TaskGenRequest.difficultyOf(40)).isEqualTo("보통");
+        assertThat(TaskGenRequest.difficultyOf(60)).isEqualTo("어려움");
     }
 }

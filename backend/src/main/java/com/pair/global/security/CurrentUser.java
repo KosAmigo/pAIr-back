@@ -19,6 +19,11 @@ public record CurrentUser(Long userId, Role role, Long companyId, boolean emailV
         }
     }
 
+    /** 회사에 소속된 기업 계정인지 (매니저·감독관). 관리자는 아니다 */
+    public boolean isCompanyMember() {
+        return role == Role.MANAGER || role == Role.PROCTOR;
+    }
+
     public boolean isAdmin() {
         return role == Role.ADMIN;
     }

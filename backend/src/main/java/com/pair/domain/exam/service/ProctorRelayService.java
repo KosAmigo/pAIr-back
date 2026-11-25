@@ -10,6 +10,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.HashMap;
 import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
@@ -27,6 +29,8 @@ import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorato
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.pair.domain.exam.dto.RelayIdentityDto;
+import com.pair.domain.exam.dto.ViewerAccessDto;
 import com.pair.global.config.ExamProperties;
 
 import jakarta.annotation.PreDestroy;
@@ -43,6 +47,12 @@ import jakarta.annotation.PreDestroy;
  *  휴대폰 → hello-phone {pairCode}         서버 → phone-joined
  *  휴대폰 → heartbeat (5초마다 생존 신호), phone-status {status} (숫자·참거짓·짧은 문자열만 PC 로 전달), binary JPEG (PC 로 전달)
  *  오류: {type:error, message} 후 연결을 닫는다
+ *
+ * 감독관 실시간 보기 (영상은 응시자 PC → 감독관 브라우저로 직접 가고 이 서버를 지나지 않는다. 서버는 시그널링만 넘긴다):
+ *  감독관 → watch {sessionId, participantId, auth}   서버 → watch-state {state: watching|offline|denied|full|error, message?}
+ *  서버 → 응시자 PC viewer-request {viewer, channel}, viewer-gone {viewer}
+ *  감독관·응시자 PC ↔ view-rtc {channel, signal[, viewer]}  (형식 검사 뒤 반대편으로 그대로 전달, 서버가 viewer 를 정한다)
+ *  감독관 → unwatch (연결이 끊겨도 같다). 응시자 1명당 동시에 MAX_VIEWERS_PER_PARTICIPANT 명까지.
  */
 @Component
 public class ProctorRelayService extends AbstractWebSocketHandler {
@@ -59,6 +69,17 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
     private static final String LIMITER = "relay.limiter";
     private static final String PHONE_ROLE = "phone";
     private static final String PC_ROLE = "pc";
+    private static final String VIEWER_ROLE = "viewer";
+    private static final String WATCH_PAIR = "relay.watchPair";
+    private static final String VIEWER_ID = "relay.viewerId";
+    private static final String WATCH_USER = "relay.watchUser";
+    private static final String WATCH_SINCE = "relay.watchSince";
+    private static final String LAST_WATCH = "relay.lastWatch";
+    private static final String SIGNAL_LIMITER = "relay.signalLimiter";
+    /** watch 의 auth 에서 받는 로그인 헤더 이름 (그 밖의 키는 버린다) */
+    private static final java.util.Set<String> AUTH_HEADERS = java.util.Set.of("authorization", "x-pair-user-id", "x-pair-role", "x-pair-company-id");
+    private static final int MAX_AUTH_VALUE = 4_096;
+    private static final java.util.Set<String> QUALITY_MODES = java.util.Set.of("watch", "scan");
     private static final String BUSY = "지금은 연결이 많아 잠시 뒤 다시 시도해 주세요.";
 
     enum PhoneState { CONNECTED, DISCONNECTED, STALE;
@@ -76,6 +97,13 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
         volatile PhoneState phoneState = PhoneState.DISCONNECTED;
         volatile long lastPhoneSeen;
         volatile long emptySince;
+        /** PC 가 정한 휴대폰 화질 모드: watch(평소, 낮은 화질) | scan(책상 스캔, 높은 화질) */
+        volatile String quality = "watch";
+        /** 이 짝의 응시자(입장 토큰이 가리키는 회차·대상자). 연습 짝은 없다. 감독관이 (회차, 대상자) 로 이 짝을 찾는다 */
+        volatile Long sessionId;
+        volatile Long participantId;
+        /** 지금 이 응시자를 보고 있는 감독관 연결 (viewer 번호 → 연결) */
+        final Map<String, WebSocketSession> viewers = new ConcurrentHashMap<>();
         /** 맵에서 지워진 짝. 지워진 뒤에 붙으려는 연결은 새 짝을 만든다 */
         boolean removed;
 
@@ -87,20 +115,28 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
     }
 
     private final RelayAuthService authorizer;
+    private final ViewerAccessService viewerAccess;
+    private final ViewSignalService signals;
     private final ExamProperties props;
     private final ObjectMapper json;
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Pair> byInvite = new ConcurrentHashMap<>();
     private final Map<String, Pair> byCode = new ConcurrentHashMap<>();
+    /** 응시자(대상자 번호) → 짝. 감독관이 응시자 PC 연결을 찾는다 */
+    private final Map<Long, Pair> byParticipant = new ConcurrentHashMap<>();
+    private final AtomicLong viewerSeq = new AtomicLong();
     private final AtomicInteger connections = new AtomicInteger();
     private final AtomicInteger phones = new AtomicInteger();
     /** 아직 hello 를 보내지 않은 연결과 연결 시각 (제한 시간 안에 안 보내면 닫는다) */
     private final Map<WebSocketSession, Long> unauthenticated = new ConcurrentHashMap<>();
     private final ExecutorService sender = Executors.newVirtualThreadPerTaskExecutor();
 
-    public ProctorRelayService(RelayAuthService authorizer, ExamProperties props, ObjectMapper json, Clock clock) {
+    public ProctorRelayService(RelayAuthService authorizer, ViewerAccessService viewerAccess, ViewSignalService signals,
+            ExamProperties props, ObjectMapper json, Clock clock) {
         this.authorizer = authorizer;
+        this.viewerAccess = viewerAccess;
+        this.signals = signals;
         this.props = props;
         this.json = json;
         this.clock = clock;
@@ -129,7 +165,10 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
 
     @Override
     protected void handleTextMessage(WebSocketSession raw, TextMessage message) {
-        if (message.getPayloadLength() > RelayLimitService.MAX_TEXT_BYTES) return;
+        // 영상 시그널링(sdp)을 주고받는 PC·감독관 연결만 더 큰 텍스트를 받는다
+        Object currentRole = raw.getAttributes().get(ROLE);
+        boolean signalRole = PC_ROLE.equals(currentRole) || VIEWER_ROLE.equals(currentRole);
+        if (message.getPayloadLength() > (signalRole ? RelayLimitService.MAX_SIGNAL_TEXT_BYTES : RelayLimitService.MAX_TEXT_BYTES)) return;
         JsonNode msg;
         try {
             msg = json.readTree(message.getPayload());
@@ -143,6 +182,17 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
             case "hello-pc" -> { if (!greeted) helloPc(raw, session, msg); } // 소켓당 hello 는 한 번만
             case "hello-phone" -> { if (!greeted) helloPhone(raw, session, msg); }
             case "heartbeat" -> touchPhone(raw);
+            case "watch" -> { if (!greeted || VIEWER_ROLE.equals(currentRole)) watch(raw, session, msg); } // 감독관은 hello 없이 watch 로 붙는다
+            case "unwatch" -> { if (VIEWER_ROLE.equals(currentRole)) stopWatching(raw); }
+            case "view-rtc" -> viewRtc(raw, msg);
+            case "quality" -> {
+                // PC 가 정한 화질 모드(평소 watch, 책상 스캔 때만 scan)를 휴대폰으로 전달한다. 휴대폰 발·모르는 값은 무시
+                Pair pair = PC_ROLE.equals(raw.getAttributes().get(ROLE)) ? (Pair) raw.getAttributes().get(PAIR) : null;
+                String mode = msg.path("mode").asText("");
+                if (pair == null || !QUALITY_MODES.contains(mode)) return;
+                pair.quality = mode;
+                sendJson(pair.phone, json.createObjectNode().put("type", "quality").put("mode", mode));
+            }
             case "phone-status" -> {
                 Pair pair = phonePair(raw);
                 if (pair == null) return;
@@ -224,9 +274,13 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
         unauthenticated.remove(raw);
         raw.getAttributes().put(ROLE, PC_ROLE);
         raw.getAttributes().put(PAIR, pair);
+        raw.getAttributes().put(SIGNAL_LIMITER, newSignalLimiter());
+        allowSignalBuffers(raw);
+        if (!practice) bindIdentity(pair, invite);
         sendJson(session, json.createObjectNode().put("type", "paired").put("pairCode", pair.code)
                 .put("phoneUrl", props.entryBaseUrl().replaceAll("/+$", "") + "/proctor/phone?p=" + pair.code));
         sendPeer(pair);
+        welcomeViewers(pair); // PC 가 새로 붙었으니 이미 열어 둔 감독관에게 영상을 다시 보내도록 요청한다
         log.info("중계: PC 연결 (짝 {})", mask(pair.code));
     }
 
@@ -272,6 +326,7 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
         raw.getAttributes().put(LIMITER, new FrameRateLimitService(RelayLimitService.MAX_FRAMES_PER_SEC, RelayLimitService.MAX_EXCESS_PER_SEC));
         allowFrameBuffers(raw);
         sendJson(session, json.createObjectNode().put("type", "phone-joined"));
+        sendJson(session, json.createObjectNode().put("type", "quality").put("mode", pair.quality)); // 새로 붙은 휴대폰이 지금 화질 모드를 알게 한다
         setPhoneState(pair, PhoneState.CONNECTED);
         log.info("중계: 휴대폰 연결 (짝 {})", mask(pair.code));
     }
@@ -280,22 +335,26 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession raw, CloseStatus status) {
         unauthenticated.remove(raw);
         if (raw.getAttributes().remove(COUNTED) != null) connections.decrementAndGet();
+        if (VIEWER_ROLE.equals(raw.getAttributes().get(ROLE))) stopWatching(raw);
         Pair pair = (Pair) raw.getAttributes().get(PAIR);
         if (pair == null) return;
         WebSocketSession mine = decorated(raw);
         String role = (String) raw.getAttributes().get(ROLE);
         boolean phoneLeft = false;
+        boolean pcLeft = false;
         synchronized (pair) {
             if (PHONE_ROLE.equals(role) && pair.phone == mine) {
                 pair.phone = null;
                 phoneLeft = true;
             } else if (PC_ROLE.equals(role) && pair.pc == mine) {
                 pair.pc = null;
+                pcLeft = true;
             }
             if (pair.pc == null && pair.phone == null) pair.emptySince = clock.millis();
         }
         if (PHONE_ROLE.equals(role)) phones.decrementAndGet(); // 교체된 이전 연결은 새 연결이 대신 세므로 여기서 한 번만 뺀다
         if (phoneLeft) setPhoneState(pair, PhoneState.DISCONNECTED);
+        if (pcLeft) notifyViewers(pair, "offline"); // 응시자 PC 가 끊겼다. 다시 붙으면 welcomeViewers 가 이어 준다
     }
 
     /** 휴대폰이 감시 중인데 신호가 끊기면 PC 에 알린다. hello 를 안 보낸 연결을 닫고, 둘 다 없는 짝은 일정 시간 뒤 지운다 */
@@ -316,10 +375,191 @@ public class ProctorRelayService extends AbstractWebSocketHandler {
                         pair.removed = true;
                         byInvite.remove(pair.invite, pair);
                         byCode.remove(pair.code, pair);
+                        if (pair.participantId != null) byParticipant.remove(pair.participantId, pair);
                     }
                 }
             }
         }
+    }
+
+    // ── 감독관 실시간 보기 ──
+
+    /** 이 짝이 어느 응시자의 것인지 입장 토큰으로 알아 둔다 (감독관이 (회차, 대상자) 로 찾을 수 있게) */
+    private void bindIdentity(Pair pair, String invite) {
+        authorizer.identify(invite).ifPresent((RelayIdentityDto id) -> {
+            pair.sessionId = id.sessionId();
+            pair.participantId = id.participantId();
+            byParticipant.put(id.participantId(), pair);
+        });
+    }
+
+    /**
+     * 감독관이 응시자 한 명을 연다. 권한·회차 상태는 ViewerAccessService 가 확인하고, 통과하면 응시자 PC 에 채널마다 영상 제안을 요청한다.
+     * 한 연결은 한 번에 한 명만 본다 (watch 를 다시 보내면 이전 대상은 닫는다).
+     */
+    private void watch(WebSocketSession raw, WebSocketSession session, JsonNode msg) {
+        long now = clock.millis();
+        Object last = raw.getAttributes().get(LAST_WATCH);
+        if (last instanceof Long at && now - at < RelayLimitService.MIN_WATCH_INTERVAL_MS) return; // 권한 확인이 DB 를 읽으므로 연타는 무시한다
+        raw.getAttributes().put(LAST_WATCH, now);
+        stopWatching(raw);
+        markViewer(raw);
+        if (!props.liveViewEnabled()) {
+            sendWatchState(session, "error", "실시간 영상 보기는 지금 사용하지 않습니다. 이벤트 기록과 사진으로 확인해 주세요.");
+            return;
+        }
+        JsonNode sessionIdNode = msg.get("sessionId");
+        JsonNode participantIdNode = msg.get("participantId");
+        if (sessionIdNode == null || participantIdNode == null || !sessionIdNode.isIntegralNumber() || !participantIdNode.isIntegralNumber()) {
+            sendWatchState(session, "error", "시청 대상이 올바르지 않습니다.");
+            return;
+        }
+        long participantId = participantIdNode.asLong();
+        ViewerAccessDto access = viewerAccess.check(authOf(msg.get("auth")), sessionIdNode.asLong(), participantId);
+        switch (access.state()) {
+            case DENIED -> { sendWatchState(session, "denied", access.message()); return; }
+            case ERROR -> { sendWatchState(session, "error", access.message()); return; }
+            case OFFLINE -> { sendWatchState(session, "offline", null); return; }
+            case ALLOWED -> { /* 아래에서 연다 */ }
+        }
+        Pair pair = byParticipant.get(participantId);
+        if (pair == null) { // 응시자 PC 가 아직 중계에 붙은 적이 없다. 감독관 화면이 다시 열어 본다
+            sendWatchState(session, "offline", null);
+            return;
+        }
+        String viewerId = "v" + viewerSeq.incrementAndGet();
+        boolean full;
+        synchronized (pair) {
+            full = pair.viewers.size() >= RelayLimitService.MAX_VIEWERS_PER_PARTICIPANT;
+            if (!full) pair.viewers.put(viewerId, session);
+        }
+        if (full) {
+            sendWatchState(session, "full", "이 응시자는 이미 감독관 " + RelayLimitService.MAX_VIEWERS_PER_PARTICIPANT
+                    + "명이 보고 있습니다. 잠시 뒤 다시 시도해 주세요.");
+            return;
+        }
+        raw.getAttributes().put(WATCH_PAIR, pair);
+        raw.getAttributes().put(VIEWER_ID, viewerId);
+        raw.getAttributes().put(WATCH_USER, access.userId());
+        raw.getAttributes().put(WATCH_SINCE, now);
+        // 열람 기록: 누가 누구를 언제부터 봤는지 로그로 남긴다 (영상은 서버에 저장하지 않는다)
+        log.info("감독관 영상 열기: 감독관 {} 회차 {} 응시자 {} 시청 {}", access.userId(), pair.sessionId, participantId, viewerId);
+        if (!raw.isOpen()) { // 확인하는 사이 닫혔다
+            stopWatching(raw);
+            return;
+        }
+        if (pcIsUp(pair)) {
+            sendWatchState(session, "watching", null);
+            requestViewerVideo(pair, viewerId);
+        } else {
+            sendWatchState(session, "offline", null);
+        }
+    }
+
+    /** 이 감독관 연결이 보고 있던 응시자를 닫는다 (응시자 PC 에 viewer-gone). 보고 있지 않았으면 아무것도 하지 않는다 */
+    private void stopWatching(WebSocketSession raw) {
+        Pair pair = (Pair) raw.getAttributes().remove(WATCH_PAIR);
+        String viewerId = (String) raw.getAttributes().remove(VIEWER_ID);
+        Object user = raw.getAttributes().remove(WATCH_USER);
+        Object since = raw.getAttributes().remove(WATCH_SINCE);
+        if (pair == null || viewerId == null) return;
+        pair.viewers.remove(viewerId);
+        sendJson(pair.pc, json.createObjectNode().put("type", "viewer-gone").put("viewer", viewerId));
+        long seconds = since instanceof Long at ? Math.max(0, (clock.millis() - at) / 1000) : 0;
+        log.info("감독관 영상 닫기: 감독관 {} 회차 {} 응시자 {} 시청 {} ({}초)", user, pair.sessionId, pair.participantId, viewerId, seconds);
+    }
+
+    /** 감독관 ↔ 응시자 PC 영상 시그널링을 반대편으로 그대로 넘긴다 (형식 검사 뒤, 알려진 필드만) */
+    private void viewRtc(WebSocketSession raw, JsonNode msg) {
+        FrameRateLimitService limiter = (FrameRateLimitService) raw.getAttributes().get(SIGNAL_LIMITER);
+        if (limiter != null && !limiter.allow(clock.millis())) {
+            if (limiter.abusive()) closeQuietly(raw);
+            return;
+        }
+        String channel = msg.path("channel").asText("");
+        if (!signals.isChannel(channel)) return;
+        Object role = raw.getAttributes().get(ROLE);
+        if (VIEWER_ROLE.equals(role)) {
+            Pair pair = (Pair) raw.getAttributes().get(WATCH_PAIR);
+            String viewerId = (String) raw.getAttributes().get(VIEWER_ID);
+            ObjectNode signal = signals.sanitize(msg.get("signal"), ViewSignalService.Direction.VIEWER_TO_PC);
+            if (pair == null || viewerId == null || signal == null) return;
+            ObjectNode out = json.createObjectNode().put("type", "view-rtc").put("channel", channel).put("viewer", viewerId);
+            out.set("signal", signal);
+            sendJson(pair.pc, out);
+        } else if (PC_ROLE.equals(role)) {
+            Pair pair = (Pair) raw.getAttributes().get(PAIR);
+            ObjectNode signal = signals.sanitize(msg.get("signal"), ViewSignalService.Direction.PC_TO_VIEWER);
+            if (pair == null || signal == null) return;
+            WebSocketSession target = pair.viewers.get(msg.path("viewer").asText("")); // 이 짝을 보는 감독관에게만 간다 (다른 응시자로 새지 않는다)
+            if (target == null) return;
+            ObjectNode out = json.createObjectNode().put("type", "view-rtc").put("channel", channel);
+            out.set("signal", signal);
+            sendJson(target, out);
+        }
+    }
+
+    /** 응시자 PC 가 (다시) 붙었다: 열어 둔 감독관에게 보고 있다고 알리고 영상 제안을 요청한다 */
+    private void welcomeViewers(Pair pair) {
+        for (Map.Entry<String, WebSocketSession> e : pair.viewers.entrySet()) {
+            sendWatchState(e.getValue(), "watching", null);
+            requestViewerVideo(pair, e.getKey());
+        }
+    }
+
+    private void notifyViewers(Pair pair, String state) {
+        for (WebSocketSession viewer : pair.viewers.values()) sendWatchState(viewer, state, null);
+    }
+
+    /** 감독관 viewer 에게 응시자 PC 가 채널마다 영상을 보내도록 요청한다 */
+    private void requestViewerVideo(Pair pair, String viewerId) {
+        for (String channel : ViewSignalService.CHANNELS.stream().sorted().toList()) {
+            sendJson(pair.pc, json.createObjectNode().put("type", "viewer-request").put("viewer", viewerId).put("channel", channel));
+        }
+    }
+
+    private void sendWatchState(WebSocketSession to, String state, String message) {
+        ObjectNode body = json.createObjectNode().put("type", "watch-state").put("state", state);
+        if (message != null) body.put("message", message);
+        sendJson(to, body);
+    }
+
+    private static boolean pcIsUp(Pair pair) {
+        WebSocketSession pc = pair.pc;
+        return pc != null && pc.isOpen();
+    }
+
+    /** 이 연결을 감독관 연결로 정한다 (hello 를 보낸 것으로 본다). 시그널링용 큰 텍스트와 초당 상한을 쓰게 한다 */
+    private void markViewer(WebSocketSession raw) {
+        unauthenticated.remove(raw);
+        if (raw.getAttributes().putIfAbsent(ROLE, VIEWER_ROLE) == null) {
+            raw.getAttributes().put(SIGNAL_LIMITER, newSignalLimiter());
+            allowSignalBuffers(raw);
+        }
+    }
+
+    private static FrameRateLimitService newSignalLimiter() {
+        return new FrameRateLimitService(RelayLimitService.MAX_SIGNALS_PER_SEC, RelayLimitService.MAX_SIGNAL_EXCESS_PER_SEC);
+    }
+
+    /** 컨테이너 기본(8KB)보다 큰 sdp 를 받을 수 있게 인증된 PC·감독관 연결의 텍스트 버퍼를 키운다 */
+    private void allowSignalBuffers(WebSocketSession raw) {
+        if (raw instanceof NativeWebSocketSession nativeSession) {
+            jakarta.websocket.Session s = nativeSession.getNativeSession(jakarta.websocket.Session.class);
+            if (s != null) s.setMaxTextMessageBufferSize(RelayLimitService.MAX_SIGNAL_TEXT_BYTES + 1024);
+        }
+    }
+
+    /** watch 가 싣고 온 로그인 헤더 중 허용한 것만 소문자 키로 모은다 (값은 문자열·길이 제한) */
+    private static Map<String, String> authOf(JsonNode auth) {
+        Map<String, String> out = new HashMap<>();
+        if (auth == null || !auth.isObject()) return out;
+        auth.fields().forEachRemaining(e -> {
+            String key = e.getKey().toLowerCase();
+            JsonNode v = e.getValue();
+            if (AUTH_HEADERS.contains(key) && v.isTextual() && v.asText().length() <= MAX_AUTH_VALUE) out.put(key, v.asText());
+        });
+        return out;
     }
 
     private void touchPhone(WebSocketSession raw) {

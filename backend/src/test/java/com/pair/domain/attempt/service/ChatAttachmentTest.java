@@ -1,5 +1,7 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
@@ -14,7 +16,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,16 +24,8 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
@@ -53,22 +46,13 @@ import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
+// 팀원 munhee777 테스트(ChatAttachmentContextLimitTest)를 합침: 별도 프로퍼티로 한도를 줄이던 것을, 기본 한도를 넘는 큰 파일로 같은 검증을 하도록 바꿈
 /** 채팅 첨부: 검증, AI 요청 조립(같은 파일은 최신 하나), 저장, 크레딧(10 + 5/파일), 롤백 복사 (H2 메모리 DB) */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class ChatAttachmentTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class ChatAttachmentTest extends BearerIntegrationTest {
 
     static final String PDF = "자료/요금 안내.pdf";
     static final String HIDDEN_PDF = "자료/정답근거.pdf";
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
@@ -84,8 +68,6 @@ class ChatAttachmentTest {
     @Autowired TaskQuestionRepository taskQuestions;
     @Autowired DocumentPageRepository pages;
     @Autowired MockMvc mvc;
-    @MockitoBean AssistantClient assistant;
-    @MockitoBean JavaMailSender mail;
 
     Long userId;
     String token;
@@ -316,5 +298,20 @@ class ChatAttachmentTest {
                 .andExpect(jsonPath("$.report.transcript[1].attachments").doesNotExist());
         // 저장된 리포트 자체는 바뀌지 않는다
         assertThat(store.readReport(devId).get("transcript").get(0).has("attachments")).isFalse();
+    }
+
+    /** 응시 전체의 첨부 본문 합계가 한도(기본 100000자)를 넘으면 오래된 첨부부터 한 줄 표지로 줄이고, 이번 첨부는 항상 본문으로 간다 (옛 ChatAttachmentContextLimitTest) */
+    @Test
+    void 한도를_넘으면_오래된_첨부는_표지로_줄고_이번_첨부는_항상_본문으로_간다() {
+        // 파일 하나당 29000자(파일당 상한 30000 안쪽)로 4개 = 116000자 > 100000자
+        List<String> names = new ArrayList<>(store.readFiles(devId).keySet()).subList(0, 4);
+        String[] fills = {"가", "나", "다", "라"};
+        for (int i = 0; i < names.size(); i++) store.writeWorkspaceFile(devId, names.get(i), fills[i].repeat(29000));
+
+        for (int i = 0; i < names.size(); i++) attempts.chat(devId, "질문 " + i, List.of(file(names.get(i))), null);
+
+        var msgs = lastRequest().messages();
+        assertThat(msgs.get(0).content()).contains("[첨부: " + names.get(0) + " - 자료가 쌓여 용량 한도를 넘어 생략함]").doesNotContain("가가가");
+        assertThat(msgs.get(msgs.size() - 1).content()).contains("라".repeat(29000));
     }
 }

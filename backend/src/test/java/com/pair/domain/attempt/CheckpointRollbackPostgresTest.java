@@ -1,5 +1,7 @@
 package com.pair.domain.attempt;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
@@ -49,6 +51,7 @@ import com.pair.domain.credit.repository.CreditLedgerRepository;
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "PAIR_PG_TEST_URL", matches = ".+")
+@Tag("slow")
 class CheckpointRollbackPostgresTest {
 
     @TempDir

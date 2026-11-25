@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
@@ -15,10 +16,15 @@ import com.pair.global.config.PairProperties;
  * 나쁜 응시자 코드를 SandboxRunner 로 돌려 격리가 막아 내는지 확인한다.
  * 막혔을 때 테스트가 통과(passed=1)하도록 짠 코드는 "막히지 않으면 AssertionError" 로 실패한다.
  */
+@Tag("slow") // 실제 Docker 로 악성 코드 시나리오를 돌려 수십 초 걸린다
 @EnabledIf("com.pair.infra.sandbox.SandboxRunnerTest#dockerReady")
 class SandboxIsolationTest {
 
-    private final SandboxRunner runner = new SandboxRunner(new PairProperties(null, null, null, null, new PairProperties.Run(5), null, null));
+    /** 병렬로 도는 다른 Docker 테스트의 pair-run-* 컨테이너를 "남은 것"으로 세지 않게 이 테스트만의 이름을 쓴다 */
+    private static final String PREFIX = "pair-isolation-test-";
+
+    private final SandboxRunner runner = new SandboxRunner(
+            new PairProperties(null, null, null, null, new PairProperties.Run(5), null, null), PREFIX);
 
     private static Map<String, String> candidate(String body) {
         return Map.of("src/bad/BadTest.java", """
@@ -35,7 +41,7 @@ class SandboxIsolationTest {
 
     @AfterEach
     void noContainerLeft() throws Exception {
-        Process p = new ProcessBuilder("docker", "ps", "-a", "-q", "--filter", "name=pair-run-").start();
+        Process p = new ProcessBuilder("docker", "ps", "-a", "-q", "--filter", "name=" + PREFIX).start();
         String left = new String(p.getInputStream().readAllBytes()).trim();
         p.waitFor();
         assertEquals("", left, "실행이 끝난 뒤에도 컨테이너가 남아 있다");

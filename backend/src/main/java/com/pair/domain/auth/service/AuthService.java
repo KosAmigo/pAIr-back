@@ -8,8 +8,11 @@ import com.pair.domain.auth.dto.UserResponse;
 import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.domain.auth.entity.RefreshSession;
+import com.pair.domain.auth.exception.EmailVerificationException;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.repository.RefreshSessionRepository;
+import com.pair.domain.company.entity.Company;
+import com.pair.domain.company.repository.CompanyRepository;
 import com.pair.global.error.ConflictException;
 import com.pair.global.error.ForbiddenException;
 import com.pair.global.error.UnauthorizedException;
@@ -25,6 +28,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.global.security.InviteTokenService;
 import com.pair.domain.credit.service.CreditService;
@@ -43,10 +47,13 @@ public class AuthService {
     private final EmailVerificationService emailVerification;
     private final ExamSessionRepository examSessions;
     private final WithdrawnEmailHashService withdrawnEmailHasher;
+    private final CompanyRepository companies;
+    private final TransactionTemplate tx;
 
     public AuthService(AuthAccountRepository accounts, RefreshSessionRepository sessions, JwtTokens tokens,
             CreditService credits, EmailVerificationService emailVerification, ExamSessionRepository examSessions,
-            WithdrawnEmailHashService withdrawnEmailHasher) {
+            WithdrawnEmailHashService withdrawnEmailHasher, CompanyRepository companies, TransactionTemplate tx) {
+        this.tx = tx;
         this.accounts = accounts;
         this.sessions = sessions;
         this.tokens = tokens;
@@ -54,6 +61,7 @@ public class AuthService {
         this.emailVerification = emailVerification;
         this.examSessions = examSessions;
         this.withdrawnEmailHasher = withdrawnEmailHasher;
+        this.companies = companies;
     }
 
     public void requestEmailVerification(String email) {
@@ -62,33 +70,37 @@ public class AuthService {
         emailVerification.sendCode(normalizedEmail);
     }
 
-    @Transactional
+    /** 계정 확인만 짧은 트랜잭션으로 하고, 메일 발송은 트랜잭션 밖에서 한다. */
     public void requestOnboardingEmailVerification(String accessToken) {
-        AuthAccount account = lockCurrentAccount(requireAccess(accessToken));
-        if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
-        emailVerification.sendOnboardingCode(account.getEmail());
+        JwtTokens.VerifiedToken jwt = requireAccess(accessToken);
+        String email = tx.execute(status -> {
+            AuthAccount account = lockCurrentAccount(jwt);
+            if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
+            return account.getEmail();
+        });
+        emailVerification.sendOnboardingCode(email);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = EmailVerificationException.class)
     public void verifyOnboardingEmail(String accessToken, String code) {
         AuthAccount account = lockCurrentAccount(requireAccess(accessToken));
         if (account.isEmailVerified()) throw new ConflictException("이메일 인증이 이미 완료되었습니다.");
         EmailVerificationService.ConsumeResult verification = emailVerification.consume(account.getEmail(), code);
         if (verification != EmailVerificationService.ConsumeResult.CONSUMED) {
-            throw new IllegalArgumentException(verification.message());
+            throw new EmailVerificationException(verification.message());
         }
         account.markEmailVerified();
     }
 
     /** 인증된 이메일로 일반 회원을 생성하고 로그인 상태로 사용할 세션 토큰을 발급한다. */
-    @Transactional
+    @Transactional(noRollbackFor = EmailVerificationException.class)
     public AuthResponse signup(SignupRequest request) {
         requireBcryptLength(request.password());
         String email = normalizeEmail(request.email());
         if (accounts.existsByEmailIgnoreCase(email)) throw new ConflictException("이미 가입된 이메일입니다.");
         EmailVerificationService.ConsumeResult verification = emailVerification.consume(email, request.code());
         if (verification != EmailVerificationService.ConsumeResult.CONSUMED) {
-            throw new IllegalArgumentException(verification.message());
+            throw new EmailVerificationException(verification.message());
         }
 
         AuthAccount account = accounts.findByEmailIgnoreCase(withdrawnEmailHasher.hash(email)).orElse(null);
@@ -122,12 +134,17 @@ public class AuthService {
         return createSession(account);
     }
 
-    /** Access Token을 검증하고 현재 회원 상태와 권한을 DB에서 확인한다. */
+    /** Access Token을 검증하고 현재 회원 상태와 권한, 토큰이 속한 로그인 세션이 살아 있는지를 DB에서 확인한다. */
     @Transactional(readOnly = true)
     public Optional<AuthAccount> findAccount(String token) {
         return tokens.verify(token, "access")
                 .flatMap(jwt -> accounts.findById(jwt.userId())
-                        .filter(a -> a.isActive() && a.getTokenVersion() == jwt.tokenVersion()));
+                        .filter(a -> isCurrent(a, jwt)));
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<UserResponse> findUser(String token) {
+        return findAccount(token).map(this::userResponse);
     }
 
     /** Refresh Token을 원자적으로 교체한다. */
@@ -142,10 +159,10 @@ public class AuthService {
         int updated = sessions.rotate(jwt.sessionId(), account.getId(), InviteTokenService.hash(refreshToken),
                 InviteTokenService.hash(replacement), now, now.plus(JwtTokens.REFRESH_LIFETIME));
         if (updated != 1) throw new UnauthorizedException("유효하지 않은 리프레시 토큰입니다.");
-        return response(account, replacement, now);
+        return response(account, jwt.sessionId(), replacement, now);
     }
 
-    /** 현재 Refresh Token을 폐기한다. 발급된 Access Token은 만료까지 유효하다. */
+    /** 현재 Refresh Token과 로그인 세션을 폐기한다. 그 세션의 Access Token도 바로 쓸 수 없고, 다른 기기의 세션은 그대로다. */
     @Transactional
     public void logout(String refreshToken) {
         JwtTokens.VerifiedToken jwt = tokens.verify(refreshToken, "refresh")
@@ -161,6 +178,10 @@ public class AuthService {
         AuthAccount account = lockCurrentAccount(jwt);
         requirePassword(account, request.currentPassword());
         requireBcryptLength(request.newPassword());
+        // 현재 비밀번호는 위에서 확인했으므로 문자열 비교로 충분하다. 메일로 받은 임시 비밀번호를 그대로 쓰면 변경 의무를 피하게 된다
+        if (request.newPassword().equals(request.currentPassword())) {
+            throw new IllegalArgumentException("새 비밀번호는 현재 비밀번호와 달라야 합니다.");
+        }
         account.changePassword(PASSWORD_ENCODER.encode(request.newPassword()));
         sessions.revokeAll(account.getId());
     }
@@ -183,6 +204,10 @@ public class AuthService {
             throw new ForbiddenException("매니저는 먼저 위임하거나 관리자에게 교체를 요청해야 합니다.");
         }
         String anonymousEmail = withdrawnEmailHasher.hash(normalizeEmail(account.getEmail()));
+        // 탈퇴 해시 행이 이미 따로 있는 계정(중복 생성된 기존 데이터)은 무작위 주소로 익명화한다
+        if (accounts.existsByEmailIgnoreCase(anonymousEmail)) {
+            anonymousEmail = "withdrawn+" + InviteTokenService.next() + "@invalid.local";
+        }
         emailVerification.removeForEmail(account.getEmail());
         account.withdraw(anonymousEmail, PASSWORD_ENCODER.encode(InviteTokenService.next()), now);
         sessions.revokeAll(account.getId());
@@ -195,8 +220,14 @@ public class AuthService {
 
     private AuthAccount lockCurrentAccount(JwtTokens.VerifiedToken jwt) {
         return accounts.lockById(jwt.userId())
-                .filter(a -> a.isActive() && a.getTokenVersion() == jwt.tokenVersion())
+                .filter(a -> isCurrent(a, jwt))
                 .orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
+    }
+
+    /** 활성 계정이고, 토큰 버전이 같고, 토큰의 로그인 세션이 폐기·만료되지 않았는지 */
+    private boolean isCurrent(AuthAccount account, JwtTokens.VerifiedToken jwt) {
+        return account.isActive() && account.getTokenVersion() == jwt.tokenVersion()
+                && sessions.existsBySessionIdAndUserIdAndExpiresAtAfter(jwt.sessionId(), account.getId(), Instant.now());
     }
 
     private void requirePassword(AuthAccount account, String password) {
@@ -213,12 +244,19 @@ public class AuthService {
         String refreshToken = tokens.refresh(account.getId(), sessionId, now);
         sessions.save(new RefreshSession(sessionId, account.getId(), InviteTokenService.hash(refreshToken),
                 now, now.plus(JwtTokens.REFRESH_LIFETIME)));
-        return response(account, refreshToken, now);
+        return response(account, sessionId, refreshToken, now);
     }
 
-    private AuthResponse response(AuthAccount account, String refreshToken, Instant now) {
-        return new AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), now), refreshToken,
-                JwtTokens.ACCESS_LIFETIME.toSeconds(), UserResponse.from(account));
+    private AuthResponse response(AuthAccount account, String sessionId, String refreshToken, Instant now) {
+        return new AuthResponse(tokens.access(account.getId(), account.getTokenVersion(), sessionId, now), refreshToken,
+                JwtTokens.ACCESS_LIFETIME.toSeconds(), userResponse(account));
+    }
+
+    private UserResponse userResponse(AuthAccount account) {
+        String companyName = account.getCompanyId() == null ? null : companies.findById(account.getCompanyId())
+                .map(Company::getName)
+                .orElseThrow(() -> new IllegalStateException("회원의 회사를 찾을 수 없습니다: " + account.getCompanyId()));
+        return UserResponse.from(account, companyName);
     }
 
     private static String normalizeEmail(String email) {

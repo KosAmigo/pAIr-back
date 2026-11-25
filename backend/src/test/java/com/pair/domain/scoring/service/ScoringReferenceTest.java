@@ -1,5 +1,7 @@
 package com.pair.domain.scoring.service;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.when;
@@ -13,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,6 +46,7 @@ import com.pair.domain.task.TestTasks;
 /** 비개발 채점의 제공 자료: 과제 원본(PDF 포함)에서 가져오고, auto 로 full(캐시 앞부분)/rag(뒷부분)를 고른다. AI·임베딩은 가짜. */
 @SpringBootTest
 @ActiveProfiles("examtest")
+@Tag("slow")
 class ScoringReferenceTest {
 
     @TempDir
@@ -111,6 +115,19 @@ class ScoringReferenceTest {
             for (String t : texts) v.add(t.contains("가격") ? new float[]{1, 0} : new float[]{0, 1});
             return new EmbeddingClient.Result(v, texts.size());
         });
+    }
+
+    /**
+     * 큰 자료 과제(60번)는 자가진단·공개 과제라 남겨 두면, 같은 JVM 에서 이어서 도는 과제 목록 테스트(TaskListApiTest)가
+     * "과제 2개"를 기대하다 실패한다. 테스트 DB 는 JVM 안에서 모든 컨텍스트가 같이 쓴다.
+     */
+    @AfterEach
+    void removeBigTask() {
+        sourceRecords.deleteAll();
+        pages.deleteAll();
+        taskQuestions.deleteAll(taskQuestions.findAll().stream().filter(q -> q.getTaskId() == 60L).toList());
+        taskFiles.deleteAll(taskFiles.findAll().stream().filter(f -> f.getTaskId() == 60L).toList());
+        taskRecords.deleteById(60L);
     }
 
     private TaskFile pdf(long taskId, String path) {

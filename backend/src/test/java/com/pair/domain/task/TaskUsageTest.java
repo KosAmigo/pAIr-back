@@ -1,12 +1,13 @@
 package com.pair.domain.task;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -14,16 +15,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -37,21 +30,9 @@ import com.pair.domain.task.repository.TaskRepository;
 import com.pair.global.security.HeaderCurrentUserResolver;
 
 /** 검수 전 과제 용도 바꾸기와, 목록 응답의 탭·배지용 필드 */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class TaskUsageTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+class TaskUsageTest extends ExamIntegrationTest {
 
     @Autowired MockMvc mvc;
-    @MockitoBean JavaMailSender mail;
     @Autowired TaskRepository records;
     @Autowired TaskFileRepository files;
     @Autowired TaskQuestionRepository questions;
@@ -73,7 +54,7 @@ class TaskUsageTest {
 
     private void row(long id, String code, Task.Status status, Long parent) {
         Task t = new Task(id, code, "제목 " + code, "DEV", 60, Task.Usage.SELF, status, parent, 1L, AT);
-        t.setCard("소개 " + code, "장애 분석", "중급");
+        t.setCard("소개 " + code, "장애 분석", "보통");
         records.save(t);
     }
 
@@ -127,7 +108,7 @@ class TaskUsageTest {
 
         JsonNode hidden = byId.get("usage-hidden");
         assertThat(hidden.get("track").asText()).isEqualTo("DEV");
-        assertThat(hidden.get("difficulty").asText()).isEqualTo("중급");
+        assertThat(hidden.get("difficulty").asText()).isEqualTo("보통");
         assertThat(hidden.get("category").asText()).isEqualTo("장애 분석");
         assertThat(hidden.get("summary").asText()).isEqualTo("소개 usage-hidden");
         assertThat(hidden.get("createdAt").asText()).startsWith("2026-11-20");

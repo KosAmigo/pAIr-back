@@ -42,6 +42,10 @@ public class AttemptOwnerInterceptor implements HandlerInterceptor {
         if (record.getUserId() != null) {
             CurrentUser user = currentUser.resolve(request).orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
             if (!record.getUserId().equals(user.userId())) throw new ForbiddenException("다른 회원의 응시입니다.");
+            // 기업 계정이 예전에 남긴 자가진단 응시는 보기만 한다
+            if (user.isCompanyMember() && !CompanyAccountAccessInterceptor.isRead(request.getMethod())) {
+                throw new ForbiddenException(CompanyAccountAccessInterceptor.DENIED_MESSAGE);
+            }
         }
         return true;
     }

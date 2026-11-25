@@ -1,11 +1,14 @@
 package com.pair.domain.taskgen.service;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -85,11 +88,22 @@ public class PdfService {
         }
     }
 
+    /**
+     * 글꼴 파일(약 2.6MB)은 한 번만 읽어 둔다. PDFBox 글꼴 객체(PDType0Font)는 문서에 묶여 있어
+     * 문서마다 새로 load 해야 하므로, 재사용하는 것은 파일 바이트뿐이다.
+     */
+    private static final Map<String, byte[]> FONT_BYTES = new ConcurrentHashMap<>();
+
     private static PDFont font(PDDocument doc, String weight) throws IOException {
-        try (InputStream in = PdfService.class.getResourceAsStream("/fonts/Pretendard-" + weight + ".ttf")) {
-            if (in == null) throw new IllegalStateException("글꼴 파일을 찾지 못했습니다: Pretendard-" + weight + ".ttf");
-            return PDType0Font.load(doc, in);
+        byte[] bytes = FONT_BYTES.get(weight);
+        if (bytes == null) {
+            try (InputStream in = PdfService.class.getResourceAsStream("/fonts/Pretendard-" + weight + ".ttf")) {
+                if (in == null) throw new IllegalStateException("글꼴 파일을 찾지 못했습니다: Pretendard-" + weight + ".ttf");
+                bytes = in.readAllBytes();
+            }
+            FONT_BYTES.put(weight, bytes);
         }
+        return PDType0Font.load(doc, new ByteArrayInputStream(bytes));
     }
 
     /** 줄바꿈 기호를 맞추고 탭을 공백으로, 나머지 제어 문자는 뺀다 */

@@ -13,7 +13,7 @@ public record ProctorEventResponse(Long id, Long participantId, ProctorEvent.Typ
     public static ProctorEventResponse from(ProctorEvent e) {
         String snap = e.getSnapshotKey() == null ? null : e.getSnapshotDeletedAt() != null ? "deleted" : "ok";
         String missing = null;
-        if (e.getSnapshotKey() == null && e.getSource() != ProctorEvent.Source.BROWSER) {
+        if (e.getSnapshotKey() == null && e.getSource().isCamera()) {
             missing = e.getSnapshotSkipReason() != null ? e.getSnapshotSkipReason().name() : "UPLOAD_FAILED";
         }
         return new ProctorEventResponse(e.getId(), e.getParticipantId(), e.getType(), e.getSource(), e.getStartedAt(), e.getDurationMs(),

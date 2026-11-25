@@ -1,10 +1,14 @@
 package com.pair.domain.credit;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.credit.entity.CreditPurchase;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
+import com.pair.domain.credit.dto.ProductResponse;
 import com.pair.domain.credit.service.CreditPurchaseService;
 import com.pair.domain.credit.service.CreditService;
 import com.pair.domain.credit.exception.InsufficientCreditException;
+import com.pair.infra.payment.PaymentRejectedException;
 import com.pair.infra.payment.PaymentUnavailableException;
 import com.pair.infra.payment.TossPaymentClient;
 import static org.assertj.core.api.Assertions.*;
@@ -19,26 +23,19 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 import com.pair.global.error.ConflictException;
 
-@SpringBootTest
-@ActiveProfiles("examtest")
-class CreditPurchaseIntegrationTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(ExamIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
     @Autowired AuthService auth;
     @Autowired CreditPurchaseService purchases;
     @Autowired CreditService credits;
     @Autowired CreditLedgerRepository ledger;
     @Autowired TransactionTemplate transactions;
-    @MockitoBean TossPaymentClient toss;
-    @MockitoBean JavaMailSender mail;
 
     @BeforeEach
     void setUp() {
@@ -59,8 +56,8 @@ class CreditPurchaseIntegrationTest {
     void pricesAreServerControlledAndPaymentIsCreditedOnce() {
         long user = user();
         assertThat(purchases.products()).containsExactly(
-                new CreditPurchaseService.Product(1000, 4990), new CreditPurchaseService.Product(2200, 9990),
-                new CreditPurchaseService.Product(4600, 19990), new CreditPurchaseService.Product(15000, 49990));
+                new ProductResponse(1000, 4990), new ProductResponse(2200, 9990),
+                new ProductResponse(4600, 19990), new ProductResponse(15000, 49990));
         String id = purchases.create(user, 1000).orderId();
         String key = "pay-" + id;
         assertThatThrownBy(() -> purchases.confirm(user, id, key, 1)).isInstanceOf(IllegalArgumentException.class);
@@ -124,6 +121,30 @@ class CreditPurchaseIntegrationTest {
         when(toss.find(key)).thenReturn(new TossPaymentClient.Payment(key, id, 4990, "DONE"));
         assertThat(purchases.confirm(user, id, key, 4990).status()).isEqualTo(CreditPurchase.Status.PAID);
         assertThat(credits.balance(user)).isEqualTo(1200);
+    }
+
+    @Test
+    void expiredTossPaymentFailsOrderWithoutCredit() {
+        long user = user();
+        String id = purchases.create(user, 1000).orderId();
+        String key = "pay-" + id;
+        when(toss.confirm(anyString(), anyString(), anyInt(), anyString()))
+                .thenThrow(new PaymentUnavailableException("unknown"));
+        when(toss.find(key)).thenReturn(new TossPaymentClient.Payment(key, id, 4990, "EXPIRED"));
+        assertThatThrownBy(() -> purchases.confirm(user, id, key, 4990)).isInstanceOf(PaymentRejectedException.class);
+        assertThat(purchases.history(user, 0, 20).getContent().get(0).status()).isEqualTo(CreditPurchase.Status.FAILED);
+        assertThat(credits.balance(user)).isEqualTo(200);
+    }
+
+    @Test
+    void endedPaymentOfAnotherOrderDoesNotFailThisOrder() {
+        long user = user();
+        String id = purchases.create(user, 1000).orderId();
+        String key = "pay-" + id;
+        when(toss.confirm(anyString(), anyString(), anyInt(), anyString()))
+                .thenReturn(new TossPaymentClient.Payment(key, "other-order", 4990, "EXPIRED"));
+        assertThatThrownBy(() -> purchases.confirm(user, id, key, 4990)).isInstanceOf(PaymentUnavailableException.class);
+        assertThat(purchases.history(user, 0, 20).getContent().get(0).status()).isEqualTo(CreditPurchase.Status.CONFIRMING);
     }
 
     @Test

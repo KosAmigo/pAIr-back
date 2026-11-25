@@ -1,0 +1,7 @@
+# 샌드박스 서버(SandboxServerConfig) 전용. 앱 서버에는 적용되지 않는다.
+server:
+  port: ${PAIR_SANDBOX_PORT:8282}
+pair:
+  run:
+    # 앱 서버가 보낸 코드를 이 서버에서는 반드시 격리 컨테이너로만 돌린다 (local 은 격리가 없다)
+    mode: docker

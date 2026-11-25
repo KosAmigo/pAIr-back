@@ -1,5 +1,7 @@
 package com.pair.domain.exam;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,7 +51,6 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.service.AttemptSubmitService;
-import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.AutoSubmitService;
 import com.pair.domain.exam.service.ExamEntryService;
 import com.pair.domain.exam.exception.LinkExpiredException;
@@ -77,6 +78,7 @@ import com.pair.domain.exam.dto.SessionSummaryResponse;
 @SpringBootTest
 @ActiveProfiles("examtest")
 @RecordApplicationEvents
+@Tag("slow")
 class ExamFlowIntegrationTest {
 
     static final Instant T0 = Instant.parse("2026-12-01T00:00:00Z");
@@ -108,7 +110,6 @@ class ExamFlowIntegrationTest {
     @Autowired ExamEntryService entry;
     @Autowired AutoSubmitService autoSubmit;
     @Autowired ProctorService proctor;
-    @Autowired EnvScanService envScan;
     @Autowired com.pair.domain.exam.repository.ProctorEventRepository eventRepo;
     @Autowired com.pair.domain.exam.service.ConnectionGraceService grace;
     @Autowired SessionResultService results;
@@ -797,9 +798,106 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("삭제");
     }
 
+    @Test
+    @DisplayName("종료된 회차만 보관을 연장할 수 있다 (진행 중·시작 전·취소는 거절)")
+    void retentionOnlyForEndedSessions() {
+        Long sid = sessionWithPhoto();
+        Instant end = sessions.detail(sid).session().endsAt();
+        clock.set(end.minusSeconds(60)); // 아직 진행 중
+        assertThatThrownBy(() -> retention.extend(sid, 9L)).hasMessageContaining("종료된 회차만 보관을 연장할 수 있습니다.");
+
+        SessionSummaryResponse notStarted = createSession(141L, true);
+        clock.set(notStarted.startsAt().minusSeconds(60));
+        assertThatThrownBy(() -> retention.extend(notStarted.id(), 9L)).hasMessageContaining("종료된 회차만 보관을 연장할 수 있습니다.");
+        sessions.cancel(notStarted.id());
+        clock.set(notStarted.endsAt().plus(Duration.ofDays(6)));
+        assertThatThrownBy(() -> retention.extend(notStarted.id(), 9L)).hasMessageContaining("종료된 회차만 보관을 연장할 수 있습니다.");
+    }
+
     // ── 증거 구간 (이벤트 앞 8초·뒤 4초, 최대 24장) ──
 
     @Autowired com.pair.domain.exam.service.EvidenceClipService clips;
+
+    private static String jpegB64Sized(int bytes) {
+        byte[] b = new byte[bytes];
+        b[0] = (byte) 0xFF;
+        b[1] = (byte) 0xD8;
+        b[2] = (byte) 0xFF;
+        return "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(b);
+    }
+
+    @Test
+    @DisplayName("화면 공유 이벤트: 종류와 시각만 저장하고 사진·증거 구간은 받지 않는다. 사진 없음을 누락으로 표시하지 않는다")
+    void screenShareEventsHaveNoImages() {
+        SessionSummaryResponse s = createSession(154L, true);
+        String token = startWithConsent(s, "screen@test.dev");
+        var at = s.startsAt().plusSeconds(20);
+
+        for (var type : List.of(ProctorEvent.Type.SCREEN_STOPPED, ProctorEvent.Type.SCREEN_PARTIAL, ProctorEvent.Type.SCREEN_RESTARTED)) {
+            var view = proctor.record(token, new ProctorEventRequest(type, ProctorEvent.Source.SCREEN, at, 0, null, null, null,
+                    "scr-" + type.name().toLowerCase().replace('_', '-') + "-1"));
+            assertThat(view.source()).isEqualTo(ProctorEvent.Source.SCREEN);
+            assertThat(view.snapshot()).isNull();
+            assertThat(view.snapshotMissing()).isNull(); // 카메라 이벤트와 달리 사진이 없어도 "업로드 실패"가 아니다
+        }
+
+        var request = new ProctorEventRequest(ProctorEvent.Type.SCREEN_STOPPED, ProctorEvent.Source.SCREEN, at, 0, null, null, jpegB64(),
+                "scr-with-photo");
+        assertThatThrownBy(() -> proctor.record(token, request)).hasMessageContaining("사진을 붙이지 않습니다");
+
+        assertThatThrownBy(() -> clips.upload(token, "scr-screen-stopped-1", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, 0))))).hasMessageContaining("카메라 이벤트");
+    }
+
+    @Test
+    @DisplayName("증거 구간: 웹캠 사진만 최대 12장, 같은 채널은 1초 이상 간격, 사진 한 장은 100KB 이하, 휴대폰 사진은 거절")
+    void clipChannelRules() {
+        SessionSummaryResponse s = createSession(153L, true);
+        String token = startWithConsent(s, "clip4@test.dev");
+        proctor.record(token, eventWithId(s, "clip-evt-0004"));
+
+        List<com.pair.domain.exam.dto.ClipFrameRequest> thirteen = new java.util.ArrayList<>();
+        for (int i = 0; i < 13; i++) thirteen.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 1000));
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(thirteen)))
+                .hasMessageContaining("12");
+
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, 0), frame(ProctorEvent.Source.PC_CAM, 500))))).hasMessageContaining("1초");
+
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PC_CAM, 0, jpegB64Sized(100_001))))))
+                .hasMessageContaining("100KB");
+
+        // 이미 저장된 사진과 1초보다 가까운 새 사진도 거절한다
+        clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(List.of(frame(ProctorEvent.Source.PC_CAM, 0))));
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PC_CAM, 500))))).hasMessageContaining("1초");
+
+        // 웹캠 12장은 받는다 (이미 저장된 0ms 사진은 건너뛴다)
+        List<com.pair.domain.exam.dto.ClipFrameRequest> full = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) full.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 1000));
+        clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(full));
+        assertThat(clips.countsOfSession(s.id()).values()).containsExactly(12L);
+
+        // 휴대폰 사진은 받지 않는다 (웹캠 사진만)
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0004", new com.pair.domain.exam.dto.ClipUploadRequest(
+                List.of(frame(ProctorEvent.Source.PHONE_CAM, -500))))).hasMessageContaining("PC_CAM");
+    }
+
+    @Test
+    @DisplayName("증거 구간 업로드 본문은 2MB 를 넘으면 거절한다")
+    void clipBodyLimit() {
+        SessionSummaryResponse s = createSession(154L, true);
+        String token = startWithConsent(s, "clip5@test.dev");
+        proctor.record(token, eventWithId(s, "clip-evt-0005"));
+        // 사진을 사진당 한도보다 크게 보내 합이 2MB 를 넘는 요청은 받지 않는다 (12장 x 200KB = 약 3.2MB base64)
+        List<com.pair.domain.exam.dto.ClipFrameRequest> frames = new java.util.ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            frames.add(new com.pair.domain.exam.dto.ClipFrameRequest(ProctorEvent.Source.PC_CAM, -8000 + i * 1000, jpegB64Sized(200_000)));
+        }
+        assertThatThrownBy(() -> clips.upload(token, "clip-evt-0005", new com.pair.domain.exam.dto.ClipUploadRequest(frames)))
+                .hasMessageContaining("2MB");
+    }
 
     private com.pair.domain.exam.dto.ClipFrameRequest frame(ProctorEvent.Source src, int offsetMs) {
         return new com.pair.domain.exam.dto.ClipFrameRequest(src, offsetMs, jpegB64());
@@ -818,7 +916,7 @@ class ExamFlowIntegrationTest {
         var ev = proctor.record(token, eventWithId(s, "clip-evt-0001"));
 
         var req = new com.pair.domain.exam.dto.ClipUploadRequest(List.of(
-                frame(ProctorEvent.Source.PC_CAM, 3000), frame(ProctorEvent.Source.PHONE_CAM, -8000), frame(ProctorEvent.Source.PC_CAM, -500)));
+                frame(ProctorEvent.Source.PC_CAM, 3000), frame(ProctorEvent.Source.PC_CAM, -8000), frame(ProctorEvent.Source.PC_CAM, -500)));
         clips.upload(token, "clip-evt-0001", req);
         clips.upload(token, "clip-evt-0001", req); // 재전송
 
@@ -840,7 +938,7 @@ class ExamFlowIntegrationTest {
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(
                 List.of(frame(ProctorEvent.Source.PC_CAM, -9000))))).hasMessageContaining("구간");
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(
-                List.of(frame(ProctorEvent.Source.BROWSER, 0))))).hasMessageContaining("카메라");
+                List.of(frame(ProctorEvent.Source.BROWSER, 0))))).hasMessageContaining("PC_CAM");
         List<com.pair.domain.exam.dto.ClipFrameRequest> many = new java.util.ArrayList<>();
         for (int i = 0; i < 25; i++) many.add(frame(ProctorEvent.Source.PC_CAM, -8000 + i * 100));
         assertThatThrownBy(() -> clips.upload(token, "clip-evt-0002", new com.pair.domain.exam.dto.ClipUploadRequest(many)))
@@ -874,71 +972,6 @@ class ExamFlowIntegrationTest {
 
     private static String jpegB64() {
         return "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(JPEG);
-    }
-
-    @Test
-    @DisplayName("환경 점검 사진: 시작 전에도 방향과 함께 올리고, 콘솔에서 목록과 사진을 볼 수 있다")
-    void envScanUploadAndView() {
-        SessionSummaryResponse s = createSession(126L, true);
-        String token = invite(s.id(), "scan@test.dev");
-
-        var room = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
-                com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 45, List.of("person", "cell phone"), jpegB64()));
-        var desk = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
-                com.pair.domain.exam.entity.EnvScanPhoto.Stage.DESK, null, List.of(), jpegB64()));
-
-        assertThat(room.angle()).isEqualTo(45);
-        assertThat(room.phoneSuspect()).isTrue(); // 휴대폰으로 감지된 장면은 감독관이 먼저 볼 수 있게 표시
-        assertThat(desk.phoneSuspect()).isFalse();
-        Long pid = participant(s.id(), "scan@test.dev").getId();
-        assertThat(envScan.photosOf(s.id(), pid)).extracting(v -> v.id()).containsExactly(room.id(), desk.id());
-        assertThat(envScan.image(s.id(), room.id())).isEqualTo(JPEG);
-    }
-
-    @Test
-    @DisplayName("환경 점검 사진 검증: 잘못된 링크, 감독 안 쓰는 회차, JPEG 아님, 끝난 회차, 장수 한도는 거절")
-    void envScanRejects() {
-        SessionSummaryResponse s = createSession(127L, true);
-        String token = invite(s.id(), "scan2@test.dev");
-        var jpeg = new com.pair.domain.exam.dto.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(), jpegB64());
-
-        assertThatThrownBy(() -> envScan.upload("x".repeat(43), jpeg)).isInstanceOf(java.util.NoSuchElementException.class);
-        var png = new com.pair.domain.exam.dto.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(),
-                Base64.getEncoder().encodeToString(new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2}));
-        assertThatThrownBy(() -> envScan.upload(token, png)).hasMessageContaining("JPEG");
-
-        SessionSummaryResponse plain = createSession(128L, false);
-        String plainToken = invite(plain.id(), "plain@test.dev");
-        assertThatThrownBy(() -> envScan.upload(plainToken, jpeg)).hasMessageContaining("감독");
-
-        for (int i = 0; i < EnvScanService.MAX_PHOTOS; i++) envScan.upload(token, jpeg);
-        assertThatThrownBy(() -> envScan.upload(token, jpeg)).hasMessageContaining("너무 많");
-
-        clock.set(s.endsAt().plus(Duration.ofHours(2)));
-        String late = invite(createSession(129L, true).id(), "late2@test.dev");
-        clock.set(clock.instant().plus(Duration.ofDays(3)));
-        assertThatThrownBy(() -> envScan.upload(late, jpeg)).hasMessageContaining("끝난");
-    }
-
-    @Test
-    @DisplayName("환경 점검 사진: 다른 회차 번호로는 볼 수 없고, 회차 종료 7일 뒤 사진만 지운다")
-    void envScanScopeAndPurge() {
-        SessionSummaryResponse s = createSession(130L, true);
-        SessionSummaryResponse other = createSession(131L, true);
-        String token = invite(s.id(), "scan3@test.dev");
-        var photo = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
-                com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 90, List.of(), jpegB64()));
-        Long pid = participant(s.id(), "scan3@test.dev").getId();
-
-        assertThatThrownBy(() -> envScan.image(other.id(), photo.id())).isInstanceOf(java.util.NoSuchElementException.class);
-        assertThatThrownBy(() -> envScan.photosOf(other.id(), pid)).isInstanceOf(java.util.NoSuchElementException.class);
-
-        clock.set(s.endsAt().plus(Duration.ofDays(6)));
-        assertThat(envScan.purgeExpired()).isZero();
-        clock.set(s.endsAt().plus(Duration.ofDays(7)).plusSeconds(1));
-        assertThat(envScan.purgeExpired()).isEqualTo(1);
-        assertThatThrownBy(() -> envScan.image(s.id(), photo.id())).hasMessageContaining("삭제된 사진");
-        assertThat(envScan.photosOf(s.id(), pid)).singleElement().extracting(v -> v.deleted()).isEqualTo(true);
     }
 
     @Test
@@ -1065,6 +1098,23 @@ class ExamFlowIntegrationTest {
                 .hasMessageContaining("판정한 사람");
         assertThatThrownBy(() -> proctor.review(s.id() + 999, ev.id(), ProctorEvent.Review.OK, null, 7L))
                 .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    @DisplayName("브라우저 이벤트는 판정할 수 없고(이력만), 회차 목록의 미확인 수에도 세지 않는다")
+    void browserEventsAreNotReviewable() {
+        SessionSummaryResponse s = createSession(125L, true);
+        String token = startWithConsent(s, "browser-review@test.dev");
+        var browser = proctor.record(token, new ProctorEventRequest(ProctorEvent.Type.TAB_HIDDEN, ProctorEvent.Source.BROWSER,
+                s.startsAt().plusSeconds(30), 2000, null, null, null, "brw-evt-0001"));
+        assertThatThrownBy(() -> proctor.review(s.id(), browser.id(), ProctorEvent.Review.SUSPECT, null, 7L))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("판정하지 않고");
+
+        var open = eventRepo.countUnreviewedBySessionIds(List.of(s.id()));
+        assertThat(open).isEmpty(); // 브라우저 이벤트만 있으면 미확인 0건
+
+        proctor.record(token, camEvent(s.startsAt().plusSeconds(60), null));
+        assertThat(eventRepo.countUnreviewedBySessionIds(List.of(s.id()))).singleElement().extracting(o -> o.getOpen()).isEqualTo(1L);
     }
 
     @Test

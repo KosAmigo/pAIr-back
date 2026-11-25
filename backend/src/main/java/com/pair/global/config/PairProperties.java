@@ -67,14 +67,30 @@ public record PairProperties(
         }
     }
 
-    /** docker 로 시작하는 값은 pair.run.mode=docker 일 때만 쓴다. maxConcurrent 는 동시에 돌 컨테이너 수 상한, 넘으면 queueWaitSeconds 까지 줄을 선다. */
-    public record Run(int timeoutSeconds, String dockerBin, String dockerImage, int maxConcurrent, int queueWaitSeconds) {
+    /**
+     * docker 로 시작하는 값은 pair.run.mode=docker 일 때만 쓴다. maxConcurrent 는 동시에 돌 컨테이너 수 상한, 넘으면 queueWaitSeconds 까지 줄을 선다.
+     * remoteUrl·remoteToken 은 앱 서버가 pair.run.mode=remote 로 샌드박스 서버(실행 전용 API)를 부를 때의 주소와 공유 토큰이고,
+     * 샌드박스 서버 쪽도 같은 토큰으로 요청을 검사한다.
+     * rateLimitPerMinute 는 응시자 1명(실전은 응시 1건)이 1분에 누를 수 있는 빌드·실행 횟수다(0 이하이면 10).
+     */
+    public record Run(int timeoutSeconds, String dockerBin, String dockerImage, int maxConcurrent, int queueWaitSeconds,
+                      String remoteUrl, String remoteToken, int rateLimitPerMinute) {
         @ConstructorBinding
         public Run {
             if (dockerBin == null || dockerBin.isBlank()) dockerBin = "docker";
             if (dockerImage == null || dockerImage.isBlank()) dockerImage = "pair-sandbox";
             if (maxConcurrent <= 0) maxConcurrent = 4;
             if (queueWaitSeconds <= 0) queueWaitSeconds = 60;
+            if (rateLimitPerMinute <= 0) rateLimitPerMinute = 10;
+        }
+
+        public Run(int timeoutSeconds, String dockerBin, String dockerImage, int maxConcurrent, int queueWaitSeconds,
+                   String remoteUrl, String remoteToken) {
+            this(timeoutSeconds, dockerBin, dockerImage, maxConcurrent, queueWaitSeconds, remoteUrl, remoteToken, 0);
+        }
+
+        public Run(int timeoutSeconds, String dockerBin, String dockerImage, int maxConcurrent, int queueWaitSeconds) {
+            this(timeoutSeconds, dockerBin, dockerImage, maxConcurrent, queueWaitSeconds, null, null, 0);
         }
 
         public Run(int timeoutSeconds) {

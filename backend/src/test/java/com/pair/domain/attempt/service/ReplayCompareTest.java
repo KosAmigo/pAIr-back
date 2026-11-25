@@ -1,5 +1,7 @@
 package com.pair.domain.attempt.service;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.auth.dto.AuthResponse;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
@@ -18,11 +20,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.domain.task.repository.TaskFileRepository;
@@ -33,14 +30,11 @@ import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
 /** 두 풀이의 감점 근거 비교: 어느 체크가 감점에서 통과로 바뀌었는지 항목·체크별로 맞춘다 */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class ReplayCompareTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class ReplayCompareTest extends BearerIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired AuthService auth;
-    @MockitoBean JavaMailSender mail;
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
     @Autowired ReplayCompareService compare;

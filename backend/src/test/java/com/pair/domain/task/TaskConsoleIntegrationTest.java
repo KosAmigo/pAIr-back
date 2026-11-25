@@ -1,5 +1,7 @@
 package com.pair.domain.task;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -7,42 +9,22 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.time.Instant;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.pair.global.security.HeaderCurrentUserResolver;
 
 /** 과제 공개 상태: 관리자만 공개·숨김, 매니저는 공개 과제만 보고, 숨긴 과제는 회차에 못 건다 */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class TaskConsoleIntegrationTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(ExamIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class TaskConsoleIntegrationTest extends ExamIntegrationTest {
 
     @Autowired MockMvc mvc;
-    @MockitoBean JavaMailSender mail;
     @Autowired com.pair.domain.task.repository.TaskRepository taskRecords;
     @Autowired com.pair.domain.task.repository.TaskFileRepository taskFiles;
     @Autowired com.pair.domain.task.repository.TaskQuestionRepository taskQuestions;
@@ -84,6 +66,16 @@ class TaskConsoleIntegrationTest {
         mvc.perform(manager(get("/api/console/tasks"))).andExpect(jsonPath("$[*].id", hasItem("pricing-plan-live")));
         mvc.perform(manager(post("/api/console/sessions")).contentType(MediaType.APPLICATION_JSON).content(session("pricing-plan-live")))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("과제 목록·상세에 competencies 가 있고, 손으로 만든 과제는 빈 배열이다")
+    void competenciesField() throws Exception {
+        mvc.perform(admin(get("/api/console/tasks"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].competencies").isArray())
+                .andExpect(jsonPath("$[0].competencies").isEmpty());
+        mvc.perform(admin(get("/api/console/tasks/pricing-plan-live")))
+                .andExpect(jsonPath("$.summary.competencies").isArray());
     }
 
     @Test

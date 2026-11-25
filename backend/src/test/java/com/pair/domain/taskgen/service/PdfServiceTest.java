@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import org.junit.jupiter.api.Tag;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.List;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /** 만든 PDF 를 PDFBox 로 다시 읽어 쪽 수와 한글 글이 맞는지 */
+@Tag("slow")
 class PdfServiceTest {
 
     private final PdfService maker = new PdfService();

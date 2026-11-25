@@ -5,12 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 
 import com.pair.global.config.PairProperties;
 
 /** Docker 와 pair-sandbox 이미지가 있을 때만 돈다 (이미지: sh docker/sandbox/build.sh). */
+@Tag("slow") // 실제 Docker 컨테이너로 빌드·실행을 반복해 수십 초 걸린다
 @EnabledIf("dockerReady")
 class SandboxRunnerTest extends CodeRunnerContractTest {
 

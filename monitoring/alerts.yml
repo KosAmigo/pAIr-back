@@ -1,0 +1,20 @@
+# 경고 규칙 3개. 알림 전송(Slack·메일)은 아직 연결하지 않았다. http://localhost:9090/alerts 에서 상태를 본다.
+groups:
+  - name: pair
+    rules:
+      - alert: HighServerErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001) > 0.05
+        for: 5m
+        annotations:
+          summary: "5xx 오류 비율이 5분 넘게 5%를 넘었습니다"
+      - alert: GradingBacklog
+        expr: pair_grading_pending > 20
+        for: 10m
+        annotations:
+          summary: "채점 대기 응시가 10분 넘게 20건을 넘었습니다"
+      - alert: SandboxRejecting
+        expr: increase(pair_sandbox_busy_total[5m]) >= 5
+        annotations:
+          summary: "코드 실행 서버가 5분 동안 5건 이상 거절했습니다 (동시 실행 한도 초과)"

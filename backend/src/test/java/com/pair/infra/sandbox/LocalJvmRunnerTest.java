@@ -1,7 +1,10 @@
 package com.pair.infra.sandbox;
 
+import org.junit.jupiter.api.Tag;
+
 import com.pair.global.config.PairProperties;
 
+@Tag("slow")
 class LocalJvmRunnerTest extends CodeRunnerContractTest {
     @Override
     CodeRunner createRunner() {

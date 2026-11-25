@@ -59,6 +59,8 @@ public class SnapshotRetentionService {
         List<SnapshotRetentionExtension> history = extensions.findBySessionIdOrderBySeqAsc(sessionId);
         if (history.size() >= MAX_EXTENSIONS) throw new IllegalStateException("보관 연장은 최대 " + MAX_EXTENSIONS + "번까지입니다.");
         Instant now = clock.instant();
+        // 종료된 회차만 연장한다 (시작 전·진행 중·취소된 회차는 거절)
+        if (s.getCanceledAt() != null || now.isBefore(s.getEndsAt())) throw new IllegalStateException("종료된 회차만 보관을 연장할 수 있습니다.");
         Instant expiresAt = expiryOf(s.getEndsAt(), history.size());
         if (!now.isBefore(expiresAt)) throw new IllegalStateException("이미 삭제 예정 시각이 지나 연장할 수 없습니다.");
         if (now.isBefore(expiresAt.minus(EXTEND_WINDOW))) throw new IllegalStateException("삭제 예정 2일 전부터 연장할 수 있습니다.");

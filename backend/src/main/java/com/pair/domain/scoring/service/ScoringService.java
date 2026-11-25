@@ -18,6 +18,7 @@ import java.util.concurrent.Future;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import com.pair.infra.ai.AiUnavailableException;
@@ -48,7 +49,17 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class ScoringService {
 
     private static final Logger log = LoggerFactory.getLogger(ScoringService.class);
-    static final int D5_LATE_MINUTES = 30;
+    /** 과제 제한시간을 읽지 못할 때(0 이하) 쓰는 기본값 */
+    static final int D5_DEFAULT_LIMIT_MINUTES = 60;
+
+    static int effectiveTimeLimit(int minutes) {
+        return minutes > 0 ? minutes : D5_DEFAULT_LIMIT_MINUTES;
+    }
+
+    /** 제한시간 이내(같으면 이내)면 0, 넘기거나 도달 못 하면 배점 전체 */
+    static int d5Penalty(Double firstValidMin, int timeLimitMin, int points) {
+        return firstValidMin == null || firstValidMin > timeLimitMin ? points : 0;
+    }
 
     private final AttemptStateRepository store;
     private final TaskDefRepository tasks;
@@ -61,6 +72,8 @@ public class ScoringService {
     private final com.pair.domain.question.service.QuestionService questions;
     /** 채점 작업(실제 응시 채점, 채점 툴 실험 채점). 여러 건을 동시에 채점한다. */
     private final ExecutorService executor;
+    /** 채점 큐(Redis). pair.scoring-queue.enabled=true 일 때만 있다. */
+    private final ObjectProvider<ScoringQueueService> queues;
     /** 두 채점 모델을 동시에 부를 때 쓴다. */
     private final ExecutorService judgePool = Executors.newFixedThreadPool(8, r -> {
         Thread t = new Thread(r, "judge");
@@ -71,7 +84,9 @@ public class ScoringService {
     public ScoringService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           ClaudeJudgeClient claudeJudge, OpenAiJudgeClient openAiJudge, PairProperties props,
                           PromptVersionStateRepository prompts, ReferenceDocService referenceDocs, ScoringResultRepository records,
-                          com.pair.domain.question.service.QuestionService questions) {
+                          com.pair.domain.question.service.QuestionService questions,
+                          ObjectProvider<ScoringQueueService> queues) {
+        this.queues = queues;
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -112,15 +127,38 @@ public class ScoringService {
         return executor.submit(task);
     }
 
+    /**
+     * 채점을 시작한다. 채점 큐가 켜져 있으면 큐에 넣고(이미 대기 중이면 그대로 둔다), 꺼져 있거나 큐에 넣지 못하면
+     * 서버 안의 스레드 풀에서 바로 채점한다. 그래서 Redis 가 잠시 죽어도 제출은 막히지 않는다.
+     */
     public void scoreAsync(String attemptId) {
+        ScoringQueueService queue = queues.getIfAvailable();
+        if (queue != null) {
+            try {
+                if (!queue.enqueue(attemptId)) log.info("이미 채점 대기 중인 응시입니다: {}", attemptId);
+                return;
+            } catch (RuntimeException e) {
+                log.warn("채점 큐에 넣지 못해 서버에서 바로 채점합니다: {} ({})", attemptId, e.getClass().getSimpleName());
+            }
+        }
         executor.submit(() -> {
             try {
                 score(attemptId);
             } catch (Exception e) {
                 log.error("채점 실패: {}", attemptId, e);
-                store.save(store.load(attemptId).withError(e.getMessage() == null ? e.toString() : e.getMessage()));
+                markFailed(attemptId, e);
             }
         });
+    }
+
+    /** 응시의 채점이 이미 끝났는지. 같은 작업이 두 번 전달돼도 다시 채점하지 않으려고 쓴다. */
+    public boolean isScored(String attemptId) {
+        return store.load(attemptId).status() == AttemptStateDto.Status.DONE;
+    }
+
+    /** 채점을 끝내 포기한 응시를 ERROR 로 둔다. 다시 채점(rescore)하면 풀린다. */
+    public void markFailed(String attemptId, Throwable e) {
+        store.save(store.load(attemptId).withError(e.getMessage() == null ? e.toString() : e.getMessage()));
     }
 
     // ── 채점 모델 응답 형식 ──────────────
@@ -281,10 +319,15 @@ public class ScoringService {
         Double firstValidMin = firstValidAt == null ? null
                 : Duration.between(a.startedAt(), firstValidAt).toSeconds() / 60.0;
         int d5Points = check(checks, "D5").points();
-        int d5 = firstValidMin == null ? d5Points : firstValidMin > D5_LATE_MINUTES ? d5Points / 2 : 0;
+        int timeLimitMin = effectiveTimeLimit(task.minutes());
+        if (timeLimitMin != task.minutes()) {
+            log.warn("과제 {} 제한시간을 읽지 못해 {}분으로 D5를 채점합니다 (minutes={})", task.id(), timeLimitMin, task.minutes());
+        }
+        int d5 = d5Penalty(firstValidMin, timeLimitMin, d5Points);
         results.put("D5", auto(checks, "D5", d5, firstValidMin == null
                 ? "첫 유효 결과에 도달하지 못함"
-                : String.format("첫 유효 결과까지 %.1f분 (%s)", firstValidMin,
+                : String.format("첫 유효 결과까지 %.1f분 (제한 %d분 %s) - %s", firstValidMin, timeLimitMin,
+                        d5 > 0 ? "초과" : "이내",
                         dev ? "src 코드를 고친 뒤 테스트가 전부 통과한 첫 실행" : "필수 제목을 모두 채운 첫 저장")));
 
         // ── 판정: 채점 모델 ─────────
@@ -402,6 +445,7 @@ public class ScoringService {
         report.put("durationSec", a.submittedAt() == null ? null : Duration.between(a.startedAt(), a.submittedAt()).toSeconds());
         report.put("chatTurns", turns.size());
         report.put("firstValidMinutes", firstValidMin == null ? null : round1(firstValidMin));
+        report.put("timeLimitMinutes", timeLimitMin);
         report.put("total", total);
         report.put("max", RubricService.total());
         report.put("items", items);

@@ -1,5 +1,7 @@
 package com.pair.domain.task;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
@@ -14,9 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.domain.task.repository.TaskFileRepository;
@@ -25,10 +24,8 @@ import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskRepository;
 
 /** 응시자용 과제 목록과 상세: 자가진단(SELF)이고 숨김(HIDDEN)이 아닌 과제만 보인다 */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class TaskListApiTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(ExamIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class TaskListApiTest extends ExamIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired TaskRepository records;

@@ -1,25 +1,18 @@
 package com.pair.domain.exam;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.time.Instant;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
@@ -28,22 +21,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.global.security.HeaderCurrentUserResolver;
 
 /** 콘솔 API 회사 분리: 로그인 없음 401, 역할 없음 403, 다른 회사 회차 404 */
-@SpringBootTest
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class ConsoleAuthIntegrationTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(ExamIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class ConsoleAuthIntegrationTest extends ExamIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
-    @MockitoBean JavaMailSender mail;
     @Autowired com.pair.domain.task.repository.TaskRepository taskRecords;
     @Autowired com.pair.domain.task.repository.TaskFileRepository taskFiles;
     @Autowired com.pair.domain.task.repository.TaskQuestionRepository taskQuestions;
@@ -133,11 +115,9 @@ class ConsoleAuthIntegrationTest {
     }
 
     @Test
-    @DisplayName("관리자는 회차를 만들 때 회사를 넣어야 한다")
-    void adminMustChooseCompany() throws Exception {
-        mvc.perform(as(post("/api/console/sessions"), 1, "ADMIN", null).contentType(MediaType.APPLICATION_JSON).content(sessionBody(null)))
-                .andExpect(status().isBadRequest());
+    @DisplayName("관리자는 회차를 생성할 수 없다")
+    void adminCannotCreateSession() throws Exception {
         mvc.perform(as(post("/api/console/sessions"), 1, "ADMIN", null).contentType(MediaType.APPLICATION_JSON).content(sessionBody(503L)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isForbidden());
     }
 }

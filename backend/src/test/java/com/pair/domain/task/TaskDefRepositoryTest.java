@@ -1,5 +1,7 @@
 package com.pair.domain.task;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.entity.TaskQuestion;
 import com.pair.domain.task.entity.Task;
@@ -13,32 +15,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /** 과제 내용을 DB 에서 읽는지: 옛 폴더(task-fixtures)와 같은 결과, 실전 복사본 처리, 재시작 없이 새 과제 읽기 (H2 메모리 DB) */
-@SpringBootTest
-@ActiveProfiles("examtest")
-class TaskDefRepositoryTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+class TaskDefRepositoryTest extends ExamIntegrationTest {
 
     @Autowired TaskDefRepository tasks;
     @Autowired TaskCatalogService catalog;
@@ -48,6 +34,10 @@ class TaskDefRepositoryTest {
 
     @BeforeEach
     void seed() {
+        // 컨텍스트를 다른 테스트와 같이 쓰므로, 목록이 정확히 맞아야 하는 이 테스트는 과제를 비우고 시작한다
+        taskQuestions.deleteAll();
+        taskFiles.deleteAll();
+        taskRecords.deleteAll();
         TestTasks.seed(taskRecords, taskFiles, taskQuestions);
     }
 

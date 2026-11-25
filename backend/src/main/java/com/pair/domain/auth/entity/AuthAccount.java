@@ -76,6 +76,11 @@ public class AuthAccount {
 
     public AuthAccount(String email, String name, String passwordHash, CurrentUser.Role role, Long companyId) {
         this(email, name, passwordHash);
+        startCompanyOnboarding(role, companyId);
+    }
+
+    /** 기업 계정으로 배정하고 이메일 인증과 비밀번호 변경을 요구한다. */
+    public void startCompanyOnboarding(CurrentUser.Role role, Long companyId) {
         if (role != CurrentUser.Role.MANAGER && role != CurrentUser.Role.PROCTOR) {
             throw new IllegalArgumentException("기업 계정 역할이 올바르지 않습니다.");
         }
@@ -124,6 +129,11 @@ public class AuthAccount {
 
     public void markOnboardingMail(String status) {
         this.onboardingMailStatus = status;
+    }
+
+    /** 온보딩 메일로 보낼 임시 비밀번호. 발급할 때 이미 세션과 토큰을 무효화했으므로 tokenVersion 은 그대로 둔다. */
+    public void setTemporaryPassword(String passwordHash) {
+        this.passwordHash = passwordHash;
     }
 
     public void changeRole(CurrentUser.Role role) {

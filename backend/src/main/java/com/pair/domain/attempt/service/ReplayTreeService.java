@@ -5,6 +5,7 @@ import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -61,8 +62,9 @@ public class ReplayTreeService {
             root = records.findById(parent.getAttemptId()).orElseThrow();
         }
 
-        List<Node> out = new ArrayList<>();
-        out.add(new Node(String.valueOf(root.getId()), null, null, null, root.getStatus(), root.getStartedAt(), scoreOf(root)));
+        // 응시를 먼저 다 모은 뒤 점수를 한 번에 읽는다 (갈래마다 리포트를 읽으면 갈래 수만큼 느려진다)
+        List<Attempt> found = new ArrayList<>(List.of(root));
+        Map<Long, Checkpoint> forkedFrom = new HashMap<>(); // 갈래 응시 id → 출발한 체크포인트
         List<Long> level = List.of(root.getId());
         while (!level.isEmpty()) {
             Map<Long, Checkpoint> cps = checkpoints.findByAttemptIdIn(level).stream()
@@ -70,18 +72,22 @@ public class ReplayTreeService {
             if (cps.isEmpty()) break;
             List<Attempt> children = records.findByForkedFromCheckpointIdIn(cps.keySet());
             for (Attempt c : children) {
-                Checkpoint cp = cps.get(c.getForkedFromCheckpointId());
-                out.add(new Node(String.valueOf(c.getId()), String.valueOf(cp.getAttemptId()), cp.getTurnNo(), cp.getId(),
-                        c.getStatus(), c.getStartedAt(), scoreOf(c)));
+                found.add(c);
+                forkedFrom.put(c.getId(), cps.get(c.getForkedFromCheckpointId()));
             }
             level = children.stream().map(Attempt::getId).toList();
         }
-        return out;
+        Map<Long, JsonNode> scores = reports.scores(found);
+        return found.stream().map(r -> {
+            Checkpoint cp = forkedFrom.get(r.getId());
+            return new Node(String.valueOf(r.getId()), cp == null ? null : String.valueOf(cp.getAttemptId()),
+                    cp == null ? null : cp.getTurnNo(), cp == null ? null : cp.getId(),
+                    r.getStatus(), r.getStartedAt(), score(scores.get(r.getId())));
+        }).toList();
     }
 
     /** 트리 노드의 점수(팀원 2 의 리포트: total, max, items[key,name,max,score]). 읽을 수 있는 리포트가 없어도 트리는 보여 준다 */
-    private Score scoreOf(Attempt r) {
-        JsonNode rep = reports.scored(r).orElse(null);
+    private static Score score(JsonNode rep) {
         if (rep == null) return null;
         List<ItemScore> items = new ArrayList<>();
         for (JsonNode it : rep.path("items")) {

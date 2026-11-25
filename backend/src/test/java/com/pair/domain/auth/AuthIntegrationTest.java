@@ -1,5 +1,7 @@
 package com.pair.domain.auth;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.auth.dto.EmailVerificationRequest;
 import com.pair.domain.auth.dto.LoginRequest;
 import com.pair.domain.auth.dto.PasswordChangeRequest;
@@ -8,6 +10,8 @@ import com.pair.domain.auth.dto.SignupRequest;
 import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.domain.auth.repository.AuthAccountRepository;
 import com.pair.domain.auth.service.AuthService;
+import com.pair.domain.company.entity.Company;
+import com.pair.domain.company.repository.CompanyRepository;
 import com.pair.global.error.ConflictException;
 import com.pair.global.error.UnauthorizedException;
 import com.pair.global.security.HeaderCurrentUserResolver;
@@ -21,24 +25,25 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
+import javax.sql.DataSource;
+
+import com.zaxxer.hikari.HikariDataSource;
 import jakarta.mail.internet.MimeMessage;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -50,10 +55,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.infra.mail.MailLayout;
 
 /** 가입·로그인·로그아웃과 토큰 기반 권한 확인 흐름을 H2 DB로 검증한다. */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class AuthIntegrationTest {
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(BearerIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class AuthIntegrationTest extends BearerIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
@@ -61,8 +64,9 @@ class AuthIntegrationTest {
     @Autowired JwtTokens tokens;
     @Autowired JdbcTemplate jdbc;
     @Autowired AuthAccountRepository accounts;
+    @Autowired CompanyRepository companies;
     @Autowired PlatformTransactionManager transactions;
-    @MockitoBean JavaMailSender mail;
+    @Autowired DataSource dataSource;
 
     @Test
     void signupLoginMeAndLogout() throws Exception {
@@ -73,6 +77,8 @@ class AuthIntegrationTest {
                 .andExpect(jsonPath("$.user.role").value("USER"))
                 .andReturn();
         JsonNode signupBody = json.readTree(signup.getResponse().getContentAsString());
+        assertThat(signupBody.path("user").has("companyName")).isTrue();
+        assertThat(signupBody.path("user").path("companyName").isNull()).isTrue();
         String signupToken = signupBody.path("token").asText();
         String refreshToken = signupBody.path("refreshToken").asText();
         assertThat(signupBody.path("expiresIn").asLong()).isEqualTo(900);
@@ -80,7 +86,8 @@ class AuthIntegrationTest {
 
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(signupBody.path("user").path("id").asLong()));
+                .andExpect(jsonPath("$.id").value(signupBody.path("user").path("id").asLong()))
+                .andExpect(jsonPath("$.companyName").doesNotExist());
 
         mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -104,8 +111,73 @@ class AuthIntegrationTest {
         mvc.perform(tokenRequest("/api/auth/logout", newRefresh))
                 .andExpect(status().isNoContent());
         mvc.perform(tokenRequest("/api/auth/refresh", newRefresh)).andExpect(status().isUnauthorized());
+        // 로그아웃하면 그 세션의 액세스 토큰(가입 때 것, 재발급 때 것 모두)도 바로 쓸 수 없다
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + signupToken))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + refreshedBody.path("token").asText()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void logoutEndsOnlyThatDevicesAccessToken() throws Exception {
+        String email = "logout-device@example.com";
+        JsonNode phone = signupAccount(email);
+        JsonNode laptop = login(email, "secure-pass-123");
+
+        mvc.perform(tokenRequest("/api/auth/logout", phone.path("refreshToken").asText())).andExpect(status().isNoContent());
+
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + phone.path("token").asText()))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + laptop.path("token").asText()))
                 .andExpect(status().isOk());
+        mvc.perform(tokenRequest("/api/auth/refresh", laptop.path("refreshToken").asText())).andExpect(status().isOk());
+    }
+
+    @Test
+    void accessTokenStopsWorkingWhenItsSessionExpiredOrIsMissing() throws Exception {
+        JsonNode session = signupAccount("session-expired@example.com");
+        long userId = session.path("user").path("id").asLong();
+        String token = session.path("token").asText();
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+
+        jdbc.update("update auth_refresh_sessions set expires_at = ? where user_id = ?", Instant.now().minusSeconds(1), userId);
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+
+        String unknownSession = tokens.access(userId, 0, com.pair.global.security.InviteTokenService.next(), Instant.now());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + unknownSession)).andExpect(status().isUnauthorized());
+        String withoutSession = tokens.access(userId, 0, null, Instant.now());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + withoutSession)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void companyNameIsReturnedForCompanyMembersAndReflectsChanges() throws Exception {
+        Company company = companies.saveAndFlush(new Company("테스트 기업", null, null, Instant.now()));
+        for (String role : new String[] { "MANAGER", "PROCTOR" }) {
+            String email = role.toLowerCase() + "-profile@example.com";
+            JsonNode signup = signupAccount(email);
+            long userId = signup.path("user").path("id").asLong();
+            jdbc.update("update users set role = ?, company_id = ? where user_id = ?", role, company.getId(), userId);
+
+            JsonNode loggedIn = login(email, "secure-pass-123");
+            assertThat(loggedIn.path("user").path("companyId").asLong()).isEqualTo(company.getId());
+            assertThat(loggedIn.path("user").path("companyName").asText()).isEqualTo("테스트 기업");
+            mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + loggedIn.path("token").asText()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.role").value(role))
+                    .andExpect(jsonPath("$.companyName").value("테스트 기업"));
+            mvc.perform(tokenRequest("/api/auth/refresh", loggedIn.path("refreshToken").asText()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.user.companyName").value("테스트 기업"));
+        }
+
+        JsonNode member = login("manager-profile@example.com", "secure-pass-123");
+        jdbc.update("update companies set name = ? where company_id = ?", "변경된 기업", company.getId());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + member.path("token").asText()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companyName").value("변경된 기업"));
+        mvc.perform(tokenRequest("/api/auth/refresh", member.path("refreshToken").asText()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.companyName").value("변경된 기업"));
     }
 
     @Test
@@ -177,6 +249,71 @@ class AuthIntegrationTest {
     }
 
     @Test
+    @DisplayName("가입 때 틀린 코드의 실패 횟수가 남고, 5회를 넘기면 맞는 코드도 거절한다")
+    void wrongSignupCodesAreCountedAndLocked() throws Exception {
+        String email = "signup-locked@example.com";
+        String code = requestVerificationCode(email);
+        String wrong = "000000".equals(code) ? "000001" : "000000";
+        for (int i = 1; i <= 5; i++) {
+            mvc.perform(signup("사용자", email, "secure-pass-123", wrong)).andExpect(status().isBadRequest());
+            assertThat(jdbc.queryForObject("select failed_attempts from email_verifications where email = ?",
+                    Integer.class, email)).isEqualTo(i);
+        }
+        mvc.perform(signup("사용자", email, "secure-pass-123", code)).andExpect(status().isBadRequest());
+        assertThat(accounts.existsByEmailIgnoreCase(email)).isFalse();
+    }
+
+    @Test
+    @DisplayName("남은 DB 커넥션이 1개여도 가입할 수 있다")
+    void signupNeedsOnlyOneConnection() throws Exception {
+        String email = "one-connection@example.com";
+        String code = requestVerificationCode(email);
+        HikariDataSource pool = dataSource.unwrap(HikariDataSource.class);
+        List<Connection> held = new ArrayList<>();
+        try {
+            for (int i = 1; i < pool.getMaximumPoolSize(); i++) held.add(pool.getConnection());
+            mvc.perform(signup("사용자", email, "secure-pass-123", code)).andExpect(status().isCreated());
+        } finally {
+            for (Connection connection : held) connection.close();
+        }
+    }
+
+    @Test
+    @DisplayName("인증 메일을 보내는 동안 DB 커넥션을 쥐지 않는다")
+    void verificationMailIsSentWithoutHoldingConnection() throws Exception {
+        HikariDataSource pool = dataSource.unwrap(HikariDataSource.class);
+        int[] activeWhileSending = { -1 };
+        AuthTestSupport.prepareMail(mail);
+        org.mockito.Mockito.doAnswer(inv -> {
+            activeWhileSending[0] = pool.getHikariPoolMXBean().getActiveConnections();
+            return null;
+        }).when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest("no-conn@example.com"))))
+                .andExpect(status().isAccepted());
+        assertThat(activeWhileSending[0]).isZero();
+    }
+
+    @Test
+    @DisplayName("인증 메일 발송이 실패하면 코드를 지워 바로 다시 요청할 수 있다")
+    void failedVerificationMailDiscardsCodeAndAllowsImmediateRetry() throws Exception {
+        String email = "mail-fail@example.com";
+        AuthTestSupport.prepareMail(mail);
+        org.mockito.Mockito.doThrow(new org.springframework.mail.MailSendException("smtp down"))
+                .when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest(email))))
+                .andExpect(status().is5xxServerError());
+        assertThat(jdbc.queryForObject("select count(*) from email_verifications where email = ?",
+                Integer.class, email)).isZero();
+
+        org.mockito.Mockito.doNothing().when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest(email))))
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
     void rejectsExpiredTamperedWrongTypeAndLegacyTokens() throws Exception {
         String code = requestVerificationCode("jwt-check@example.com");
         MvcResult result = mvc.perform(signup("테스트 사용자", "jwt-check@example.com", "secure-pass-123", code))
@@ -184,7 +321,8 @@ class AuthIntegrationTest {
         JsonNode body = json.readTree(result.getResponse().getContentAsString());
         long userId = body.path("user").path("id").asLong();
         String access = body.path("token").asText();
-        String expiredAccess = tokens.access(userId, 0, Instant.now().minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1));
+        String expiredAccess = tokens.access(userId, 0, com.pair.global.security.InviteTokenService.next(),
+                Instant.now().minus(JwtTokens.ACCESS_LIFETIME).minusSeconds(1));
         String expiredRefresh = tokens.refresh(userId, com.pair.global.security.InviteTokenService.next(),
                 Instant.now().minus(JwtTokens.REFRESH_LIFETIME).minusSeconds(1));
         String[] parts = access.split("\\.");
@@ -238,6 +376,12 @@ class AuthIntegrationTest {
                 .andExpect(status().isUnauthorized());
         mvc.perform(passwordChange(first.path("token").asText(), "secure-pass-123", "가".repeat(25)))
                 .andExpect(status().isBadRequest());
+        // 현재 비밀번호와 같은 새 비밀번호는 거부한다 (실패해도 세션은 그대로)
+        mvc.perform(passwordChange(first.path("token").asText(), "secure-pass-123", "secure-pass-123"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("새 비밀번호는 현재 비밀번호와 달라야 합니다."));
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + first.path("token").asText()))
+                .andExpect(status().isOk());
         mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + second.path("token").asText()))
                 .andExpect(status().isOk());
 

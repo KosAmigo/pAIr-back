@@ -30,7 +30,9 @@ public class ProctorEvent {
         HAND_MISSING(Source.PHONE_CAM), HAND_MOVED(Source.PHONE_CAM), ARM_MOVE(Source.PHONE_CAM), PHONE(Source.PHONE_CAM),
         EXTRA_SCREEN(Source.PHONE_CAM), BOOK(Source.PHONE_CAM), PHONE_DISCONNECTED(Source.PHONE_CAM),
         /** 서버가 직접 남기는 기록 (연결 끊김·링크 만료·담당자의 링크 복구). 응시자 화면이 보내는 이벤트로는 받지 않는다 */
-        CONNECTION_LOST(Source.BROWSER), LINK_EXPIRED(Source.BROWSER), LINK_RESTORED(Source.BROWSER);
+        CONNECTION_LOST(Source.BROWSER), LINK_EXPIRED(Source.BROWSER), LINK_RESTORED(Source.BROWSER),
+        /** PC 화면 공유 이벤트. 응시자 PC 가 보내며 사진 없이 종류와 시각만 남긴다 */
+        SCREEN_STOPPED(Source.SCREEN), SCREEN_PARTIAL(Source.SCREEN), SCREEN_RESTARTED(Source.SCREEN);
 
         private final Source source;
 
@@ -41,9 +43,21 @@ public class ProctorEvent {
         public Source source() {
             return source;
         }
+
+        /** 담당자가 판정(확정·기각)하는 카메라 이벤트 종류. 브라우저·화면 공유 이벤트는 이력만 남긴다 */
+        public static java.util.List<Type> cameraTypes() {
+            return java.util.Arrays.stream(values()).filter(t -> t.source.isCamera()).toList();
+        }
     }
 
-    public enum Source { BROWSER, PC_CAM, PHONE_CAM }
+    public enum Source {
+        BROWSER, PC_CAM, PHONE_CAM, SCREEN;
+
+        /** 사진(대표 사진·증거 구간)을 붙일 수 있는 출처. 브라우저·화면 공유 이벤트는 사진을 받지 않는다 */
+        public boolean isCamera() {
+            return this == PC_CAM || this == PHONE_CAM;
+        }
+    }
 
     /** 담당자 판정. 감독 이벤트는 자동 탈락이 아니라 사람이 확인하는 기록이다 */
     public enum Review { OK, SUSPECT }

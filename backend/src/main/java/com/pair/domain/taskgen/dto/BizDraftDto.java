@@ -20,19 +20,46 @@ public record BizDraftDto(
         String checklist,
         Trap trap,
         List<QuestionDraft> questions,
-        String difficulty) {
+        String difficulty,
+        List<String> competencies,
+        List<String> trapKeywords) {
+
+    /** 함정 핵심어 없이 만든다(테스트·옛 코드용) */
+    public BizDraftDto(String title, String summary, String code, String category, List<String> description,
+            List<String> requirements, List<String> followUps, List<DocDraft> documents,
+            List<DevDraftDto.FileDraft> csvFiles, String checklist, Trap trap, List<QuestionDraft> questions,
+            String difficulty, List<String> competencies) {
+        this(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, difficulty, competencies, null);
+    }
+
+    /** 역량 없이 만든다(테스트·옛 코드용) */
+    public BizDraftDto(String title, String summary, String code, String category, List<String> description,
+            List<String> requirements, List<String> followUps, List<DocDraft> documents,
+            List<DevDraftDto.FileDraft> csvFiles, String checklist, Trap trap, List<QuestionDraft> questions,
+            String difficulty) {
+        this(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, difficulty, null);
+    }
 
     /** 난이도 없이 만든다(테스트·옛 코드용) */
     public BizDraftDto(String title, String summary, String code, String category, List<String> description,
             List<String> requirements, List<String> followUps, List<DocDraft> documents,
             List<DevDraftDto.FileDraft> csvFiles, String checklist, Trap trap, List<QuestionDraft> questions) {
-        this(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, null);
+        this(title, summary, code, category, description, requirements, followUps, documents, csvFiles, checklist, trap, questions, null, null);
     }
 
     /** path: 자료/이름.pdf, pages: 쪽별 글 */
     public record DocDraft(String path, List<String> pages) {}
 
-    public record Trap(String description, String evidence) {}
+    /**
+     * correctConclusion: 정답 결론, wrongConclusion: 함정에 빠졌을 때의 결론(추천안·통과 여부). 옛 형식에는 없다
+     */
+    public record Trap(String description, String evidence, String correctConclusion, String wrongConclusion) {
+
+        /** 결론 없이 만든다(테스트·옛 코드용) */
+        public Trap(String description, String evidence) {
+            this(description, evidence, null, null);
+        }
+    }
 
     public enum Type { SINGLE, SHORT }
 
@@ -41,6 +68,17 @@ public record BizDraftDto(
     /** path: 근거 문서 경로, pages: 쪽 번호(예: "1,2") */
     public record Source(String path, String pages) {}
 
+    /** AI 가 흔히 낼 법한 틀린 값(숫자)과 그 이유 */
+    public record WrongAnswer(String value, String reason) {}
+
+    /** commonWrongAnswers: 단답형만 1~2개(객관식은 빈 목록) */
     public record QuestionDraft(Type type, String content, List<Choice> choices, List<String> accepted, String calc,
-            List<Source> sources) {}
+            List<Source> sources, List<WrongAnswer> commonWrongAnswers) {
+
+        /** 흔한 오답 없이 만든다(테스트·옛 코드용) */
+        public QuestionDraft(Type type, String content, List<Choice> choices, List<String> accepted, String calc,
+                List<Source> sources) {
+            this(type, content, choices, accepted, calc, sources, null);
+        }
+    }
 }

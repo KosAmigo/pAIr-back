@@ -115,13 +115,14 @@ public class CompanyMemberService {
                 newManager.getId(), oldManager == null ? "no active former manager" :
                         "formerManagerUserId=" + oldManager.getId(), Instant.now()));
         return new ManagerReplacementResponse(companyId, newManager.getId(),
-                "새 매니저 계정을 생성하고 인증 안내 메일을 발송했습니다.");
+                "새 매니저 계정을 생성했습니다. 인증 안내 메일을 곧 발송합니다.");
     }
 
     @Transactional
     public AuthAccount reissue(Long userId, CurrentUser admin) {
         requireAdmin(admin);
-        AuthAccount account = accounts.findById(userId)
+        // 잠그기 전 값으로 판단하면 그 사이 탈퇴·교체된 계정을 재발급할 수 있다
+        AuthAccount account = accounts.lockById(userId)
                 .orElseThrow(() -> new NoSuchElementException("회원을 찾을 수 없습니다."));
         if (account.getCompanyId() == null) throw new IllegalArgumentException("기업 계정이 아닙니다.");
         AuthAccount updated = corporateAccounts.reissue(userId);

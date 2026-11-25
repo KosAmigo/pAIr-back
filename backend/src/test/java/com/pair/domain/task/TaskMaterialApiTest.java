@@ -1,5 +1,7 @@
 package com.pair.domain.task;
 
+import com.pair.global.config.BearerIntegrationTest;
+
 import com.pair.domain.auth.dto.AuthResponse;
 import com.pair.domain.task.repository.DocumentPageRepository;
 import com.pair.domain.task.repository.TaskFileRepository;
@@ -11,21 +13,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
@@ -38,19 +31,7 @@ import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
 
 /** 응시자 PDF 자료 API (목록·파일·쪽 글). 로컬 저장소(임시 폴더)를 쓰고 AI 호출은 없다 */
-@SpringBootTest(properties = "pair.auth.mode=bearer")
-@AutoConfigureMockMvc
-@ActiveProfiles("examtest")
-class TaskMaterialApiTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-        r.add("pair.taskgen.file-storage", () -> "local");
-    }
+class TaskMaterialApiTest extends BearerIntegrationTest {
 
     @Autowired MockMvc mvc;
     @Autowired AuthService auth;
@@ -60,7 +41,6 @@ class TaskMaterialApiTest {
     @Autowired TaskFileRepository files;
     @Autowired DocumentPageRepository pages;
     @Autowired TaskFileStorage storage;
-    @MockitoBean JavaMailSender mail;
 
     AuthResponse owner;
     AuthResponse other;

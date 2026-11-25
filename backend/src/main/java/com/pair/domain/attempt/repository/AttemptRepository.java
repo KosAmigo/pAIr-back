@@ -15,6 +15,9 @@ public interface AttemptRepository extends JpaRepository<Attempt, Long> {
 
     List<Attempt> findByParticipantIdOrderByIdAsc(Long participantId);
 
+    /** 상태별 응시 수 (모니터링: 채점 대기 건수) */
+    long countByStatus(com.pair.domain.attempt.dto.AttemptStateDto.Status status);
+
     /** 여러 대상자의 응시를 한 번에 (목록 화면에서 대상자마다 따로 읽지 않도록) */
     List<Attempt> findByParticipantIdIn(Collection<Long> participantIds);
 

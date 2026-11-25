@@ -1,5 +1,7 @@
 package com.pair.domain.attempt.repository;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.service.AttemptRegistryService;
@@ -7,7 +9,6 @@ import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -16,12 +17,7 @@ import java.util.NoSuchElementException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,17 +27,7 @@ import com.pair.domain.task.repository.TaskQuestionRepository;
 import com.pair.domain.task.TestTasks;
 
 /** 응시 기록이 DB 에 저장되고 그대로 다시 읽히는지 (H2 메모리 DB) */
-@SpringBootTest
-@ActiveProfiles("examtest")
-class DbAttemptStateRepositoryTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
+class DbAttemptStateRepositoryTest extends ExamIntegrationTest {
 
     @Autowired AttemptStateRepository store;
     @Autowired AttemptRegistryService registry;

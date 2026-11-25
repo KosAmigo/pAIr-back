@@ -1,5 +1,7 @@
 package com.pair.domain.attempt;
 
+import com.pair.global.config.ExamIntegrationTest;
+
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.dto.AttemptStateDto;
@@ -13,7 +15,6 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -22,14 +23,8 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.pair.domain.attempt.repository.CheckpointRepository;
 import com.pair.infra.sandbox.CodeRunner;
@@ -40,27 +35,14 @@ import com.pair.domain.task.repository.TaskDefRepository;
 import com.pair.domain.task.TestTasks;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
-import org.springframework.mail.javamail.JavaMailSender;
 
 /**
  * 롤백으로 갈라진 응시를 실행하면, 실행기(CodeRunner)가 복원된 파일을 받는지 확인한다.
  * 실행기는 응시 파일을 DB 에서 읽어 매번 넘겨 받으므로(LocalJvmRunner·SandboxRunner 모두 상태 없음),
  * 롤백이 attempt_files 를 맞춰 두면 컨테이너 쪽에 따로 할 일이 없다.
  */
-@SpringBootTest
-@ActiveProfiles("examtest")
-class RollbackRunTest {
-
-    @TempDir
-    static Path dataDir;
-
-    @DynamicPropertySource
-    static void props(DynamicPropertyRegistry r) {
-        r.add("pair.data-dir", () -> dataDir.toString());
-    }
-
-    @MockitoBean CodeRunner runner;
-    @MockitoBean JavaMailSender mail;
+// 테스트 속도: 컨텍스트를 같이 쓰려고 공통 설정(ExamIntegrationTest)을 상속하도록 바꿈. 설정만 옮겼고 테스트 내용은 그대로
+class RollbackRunTest extends ExamIntegrationTest {
 
     @Autowired AttemptService attempts;
     @Autowired AttemptStateRepository store;
