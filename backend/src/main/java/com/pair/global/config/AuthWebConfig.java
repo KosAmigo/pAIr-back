@@ -4,6 +4,7 @@ import com.pair.global.security.AdminAccessInterceptor;
 import com.pair.global.security.AttemptOwnerInterceptor;
 import com.pair.global.security.CompanyAccountAccessInterceptor;
 import com.pair.global.security.CurrentUserArgumentResolver;
+import com.pair.global.security.IpRateLimitInterceptor;
 import com.pair.global.security.OnboardingAccessInterceptor;
 import java.util.List;
 
@@ -20,15 +21,17 @@ public class AuthWebConfig implements WebMvcConfigurer {
     private final OnboardingAccessInterceptor onboardingAccess;
     private final CompanyAccountAccessInterceptor companyAccountAccess;
     private final AdminAccessInterceptor adminAccess;
+    private final IpRateLimitInterceptor ipRateLimit;
 
     public AuthWebConfig(CurrentUserArgumentResolver currentUser, AttemptOwnerInterceptor attemptOwner,
             OnboardingAccessInterceptor onboardingAccess, CompanyAccountAccessInterceptor companyAccountAccess,
-            AdminAccessInterceptor adminAccess) {
+            AdminAccessInterceptor adminAccess, IpRateLimitInterceptor ipRateLimit) {
         this.currentUser = currentUser;
         this.attemptOwner = attemptOwner;
         this.onboardingAccess = onboardingAccess;
         this.companyAccountAccess = companyAccountAccess;
         this.adminAccess = adminAccess;
+        this.ipRateLimit = ipRateLimit;
     }
 
     @Override
@@ -39,6 +42,8 @@ public class AuthWebConfig implements WebMvcConfigurer {
     /** 응시 하나를 다루는 모든 요청(/api/attempts/{id}/**)은 그 응시의 주인만 */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // 로그인 없이 부를 수 있는 인증 메일·가입·기업 문의는 IP별로 횟수를 제한한다
+        registry.addInterceptor(ipRateLimit).addPathPatterns(ipRateLimit.paths());
         registry.addInterceptor(onboardingAccess).addPathPatterns("/api/**");
         // 채점 툴은 관리자만 (응시 기록 조회, 채점 프롬프트 변경, AI 비용이 드는 실험 채점)
         registry.addInterceptor(adminAccess).addPathPatterns("/api/grader/**");

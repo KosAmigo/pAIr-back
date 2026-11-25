@@ -132,6 +132,12 @@ pair:
       per-email: 20         # 여러 IP 에서 한 계정
       per-ip: 50            # 한 곳에서 여러 계정 (학원·회사처럼 IP 를 같이 쓰는 곳을 고려)
       trusted-proxy-hops: ${PAIR_TRUSTED_PROXY_HOPS:1} # 앞단 프록시 수. nginx 앞에 HTTPS 프록시를 더 두면 2
+  # 로그인 없이 부를 수 있는 API 의 IP별 요청 수 제한. 넘으면 429 (학원·회사처럼 IP 를 같이 쓰는 곳을 고려)
+  ip-limit:
+    window: 1h
+    mail: 40     # 인증 메일 요청
+    signup: 60   # 가입, 초대 가입
+    inquiry: 10  # 기업 도입 문의
   company:
     login-url: ${PAIR_COMPANY_LOGIN_URL:https://localhost:5173/login}
     invite-url: ${PAIR_COMPANY_INVITE_URL:https://localhost:5173/company-invite}
