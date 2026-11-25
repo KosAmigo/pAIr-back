@@ -13,13 +13,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.ExamEntryService;
 import com.pair.domain.exam.service.ProctorService;
 import com.pair.domain.exam.dto.ConsentRequest;
 import com.pair.domain.exam.dto.EntryInfoResponse;
-import com.pair.domain.exam.dto.EnvScanPhotoResponse;
-import com.pair.domain.exam.dto.EnvScanRequest;
 import com.pair.domain.exam.dto.ProctorEventRequest;
 import com.pair.domain.exam.dto.ProctorEventResponse;
 import com.pair.domain.exam.dto.ServerTimeResponse;
@@ -35,13 +32,12 @@ public class ExamEntryController {
 
     private final ExamEntryService entry;
     private final ProctorService proctor;
-    private final EnvScanService envScan;
     private final com.pair.domain.exam.service.EnvCheckService envCheck;
     private final com.pair.domain.exam.service.NoticeService notices;
     private final Clock clock;
     private final com.pair.domain.exam.service.EvidenceClipService clips;
 
-    public ExamEntryController(ExamEntryService entry, ProctorService proctor, EnvScanService envScan, Clock clock,
+    public ExamEntryController(ExamEntryService entry, ProctorService proctor, Clock clock,
             com.pair.domain.exam.service.EnvCheckService envCheck, com.pair.domain.exam.service.NoticeService notices,
             com.pair.domain.exam.service.EvidenceClipService clips) {
         this.clips = clips;
@@ -49,7 +45,6 @@ public class ExamEntryController {
         this.notices = notices;
         this.entry = entry;
         this.proctor = proctor;
-        this.envScan = envScan;
         this.clock = clock;
     }
 
@@ -95,13 +90,6 @@ public class ExamEntryController {
     @PostMapping("/api/entry/{token}/submit")
     public EntryInfoResponse submit(@PathVariable String token) {
         return entry.submit(token);
-    }
-
-    /** 환경 점검 사진(방 360도의 한 방향, 책상 위) 업로드. 시험 시작 전 입장 단계에서 올린다 */
-    @PostMapping("/api/entry/{token}/env-scan")
-    @ResponseStatus(HttpStatus.CREATED)
-    public EnvScanPhotoResponse envScan(@PathVariable String token, @Valid @RequestBody EnvScanRequest req) {
-        return envScan.upload(token, req);
     }
 
     /** 환경 점검 진행 상태 (콘솔이 실시간으로 본다). 입장 대기 중 점검 화면이 올린다 */

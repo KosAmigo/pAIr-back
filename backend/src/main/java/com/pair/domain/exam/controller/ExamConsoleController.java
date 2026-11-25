@@ -31,14 +31,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.pair.domain.exam.service.AutoSubmitService;
 import com.pair.domain.exam.service.ConnectionGraceService;
-import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.ExamSessionService;
 import com.pair.domain.exam.service.ParticipantWorkbookService;
 import com.pair.domain.exam.service.ProctorService;
 import com.pair.domain.exam.service.SessionResultService;
 import com.pair.domain.exam.dto.AddParticipantsRequest;
 import com.pair.domain.exam.dto.AddParticipantsResponse;
-import com.pair.domain.exam.dto.EnvScanPhotoResponse;
 import com.pair.domain.exam.dto.ParticipantResponse;
 import com.pair.domain.exam.dto.ProctorEventResponse;
 import com.pair.domain.exam.dto.ReviewRequest;
@@ -66,7 +64,6 @@ public class ExamConsoleController {
     private final SessionResultService results;
     private final ProctorService proctor;
     private final AutoSubmitService autoSubmit;
-    private final EnvScanService envScan;
     private final com.pair.domain.exam.service.EnvCheckService envCheck;
     private final com.pair.domain.exam.service.NoticeService notices;
     private final ConnectionGraceService grace;
@@ -75,7 +72,7 @@ public class ExamConsoleController {
     private final com.pair.domain.exam.service.EvidenceClipService clips;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
-            AutoSubmitService autoSubmit, EnvScanService envScan, ConnectionGraceService grace, ConsoleAccessService access,
+            AutoSubmitService autoSubmit, ConnectionGraceService grace, ConsoleAccessService access,
             com.pair.domain.exam.service.EnvCheckService envCheck, com.pair.domain.exam.service.NoticeService notices,
             com.pair.domain.exam.service.SnapshotRetentionService retention, com.pair.domain.exam.service.EvidenceClipService clips) {
         this.retention = retention;
@@ -86,7 +83,6 @@ public class ExamConsoleController {
         this.results = results;
         this.proctor = proctor;
         this.autoSubmit = autoSubmit;
-        this.envScan = envScan;
         this.grace = grace;
         this.access = access;
     }
@@ -257,13 +253,6 @@ public class ExamConsoleController {
         return autoSubmit.rescue(sessionId);
     }
 
-    /** 대상자의 환경 점검 사진 목록 (방 360도 방향별, 책상 위). 감독관도 볼 수 있다 */
-    @GetMapping("/{sessionId}/participants/{participantId}/env-scan")
-    public List<EnvScanPhotoResponse> envScanPhotos(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
-        access.requireSession(user, sessionId);
-        return envScan.photosOf(sessionId, participantId);
-    }
-
     /** 대상자의 환경 점검 결과 (진행 중이면 실시간, 아니면 저장된 결과). 아직 없으면 204. 감독관도 볼 수 있다 */
     @GetMapping("/{sessionId}/participants/{participantId}/env-check")
     public ResponseEntity<EnvCheckResponse> envCheck(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
@@ -293,12 +282,6 @@ public class ExamConsoleController {
     public List<NoticeResponse> noticesOf(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
         return notices.listOf(sessionId, participantId);
-    }
-
-    @GetMapping(value = "/{sessionId}/env-scan/{photoId}/image", produces = MediaType.IMAGE_JPEG_VALUE)
-    public ResponseEntity<byte[]> envScanImage(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long photoId) {
-        access.requireSession(user, sessionId);
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(envScan.image(sessionId, photoId));
     }
 
     @GetMapping("/{sessionId}/results")
