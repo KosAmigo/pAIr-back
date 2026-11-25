@@ -11,7 +11,9 @@ import com.pair.domain.auth.dto.SignupRequest;
 import com.pair.domain.auth.dto.UserResponse;
 import com.pair.domain.auth.dto.WithdrawalRequest;
 import com.pair.domain.auth.service.AuthService;
+import com.pair.domain.auth.service.LoginAttemptService;
 import com.pair.global.error.UnauthorizedException;
+import com.pair.global.security.ClientIpResolver;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 /** 회원가입·로그인·현재 계정 조회·로그아웃 HTTP API를 제공한다. */
@@ -33,9 +36,13 @@ import jakarta.validation.Valid;
 public class AuthController {
 
     private final AuthService auth;
+    private final LoginAttemptService loginAttempts;
+    private final ClientIpResolver clientIp;
 
-    public AuthController(AuthService auth) {
+    public AuthController(AuthService auth, LoginAttemptService loginAttempts, ClientIpResolver clientIp) {
         this.auth = auth;
+        this.loginAttempts = loginAttempts;
+        this.clientIp = clientIp;
     }
 
     /** 가입 이메일로 인증 코드를 발송한다. */
@@ -67,10 +74,11 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(auth.signup(request));
     }
 
-    /** 이메일과 비밀번호를 확인하고 새 로그인 세션을 발급한다. */
+    /** 이메일과 비밀번호를 확인하고 새 로그인 세션을 발급한다. 실패가 너무 많으면 429 */
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(auth.login(request));
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+        AuthResponse response = loginAttempts.guard(request.email(), clientIp.resolve(http), () -> auth.login(request));
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(response);
     }
 
     /** bearer 토큰에 연결된 현재 회원 정보를 반환한다. */

@@ -125,6 +125,13 @@ pair:
       code-lifetime: 10m
       resend-interval: 60s
       max-attempts: 5
+    # 로그인 실패 횟수 제한. 넘으면 window 가 지날 때까지 429
+    login-limit:
+      window: 10m
+      per-email-and-ip: 5   # 한 곳에서 한 계정
+      per-email: 20         # 여러 IP 에서 한 계정
+      per-ip: 50            # 한 곳에서 여러 계정 (학원·회사처럼 IP 를 같이 쓰는 곳을 고려)
+      trusted-proxy-hops: ${PAIR_TRUSTED_PROXY_HOPS:1} # 앞단 프록시 수. nginx 앞에 HTTPS 프록시를 더 두면 2
   company:
     login-url: ${PAIR_COMPANY_LOGIN_URL:https://localhost:5173/login}
     invite-url: ${PAIR_COMPANY_INVITE_URL:https://localhost:5173/company-invite}
