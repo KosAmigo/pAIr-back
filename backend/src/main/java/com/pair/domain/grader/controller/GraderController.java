@@ -21,7 +21,7 @@ import com.pair.domain.scoring.service.RubricService;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-/** 채점 툴 API. 로그인 없이 열려 있으므로 실제 서비스에서는 막아야 한다. */
+/** 채점 툴 API. 관리자만 쓸 수 있다 (AuthWebConfig 가 /api/grader/** 를 AdminAccessInterceptor 로 막는다). */
 @RestController
 @RequestMapping("/api/grader")
 public class GraderController {
