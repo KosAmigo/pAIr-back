@@ -132,7 +132,10 @@ jobs:
           for i in $(seq 1 36); do
             if $SSH 'curl -fsS http://127.0.0.1:8181/actuator/health' 2>/dev/null | grep -q '"status":"UP"'; then
               echo "백엔드가 올라왔습니다"
-              $SSH 'curl -fsS -o /dev/null http://127.0.0.1/' && echo "프론트도 응답합니다"
+              # Caddy 를 거쳐 HTTPS 로 확인한다. 처음 배포에서는 인증서 발급을 기다려야 해서 다시 시도한다
+              $SSH 'curl -fsS -o /dev/null --retry 12 --retry-delay 5 --retry-all-errors --resolve kosamigo.duckdns.org:443:127.0.0.1 https://kosamigo.duckdns.org/' \
+                || { echo "::error::HTTPS 확인에 실패했습니다. 보안 그룹 80·443 과 'docker compose logs caddy' 를 확인하세요"; exit 1; }
+              echo "프론트도 HTTPS 로 응답합니다"
               exit 0
             fi
             RESTARTS=$($SSH "docker inspect -f '{{.RestartCount}}' pair-backend-1" 2>/dev/null || echo 0)
