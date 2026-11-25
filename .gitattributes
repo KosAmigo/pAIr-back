@@ -2,3 +2,8 @@
 *.bat text eol=crlf
 *.jar binary
 *.sql text eol=lf
+# 리눅스 서버·컨테이너에서 쓰는 파일. Windows 에서 받아 그대로 서버에 올려도 실행되게 LF 로 고정한다
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+docker-compose*.yml text eol=lf

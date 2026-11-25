@@ -61,6 +61,28 @@ public class ApiExceptionHandler {
         return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
     }
 
+    /** 한 IP 에서 너무 많이 요청함 */
+    @ExceptionHandler(TooManyRequestsException.class)
+    ResponseEntity<Map<String, String>> tooManyRequests(TooManyRequestsException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(org.springframework.http.HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(Map.of("message", e.getMessage()));
+    }
+
+    /** 로그인 실패가 너무 많음 */
+    @ExceptionHandler(com.pair.domain.auth.exception.TooManyLoginAttemptsException.class)
+    ResponseEntity<Map<String, String>> tooManyLogins(com.pair.domain.auth.exception.TooManyLoginAttemptsException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(org.springframework.http.HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(Map.of("message", e.getMessage()));
+    }
+
+    /** 같은 응시를 너무 많이 채점함 */
+    @ExceptionHandler(com.pair.domain.attempt.exception.TooManyRescoresException.class)
+    ResponseEntity<Map<String, String>> tooManyRescores(RuntimeException e) {
+        return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+    }
+
     /** 빌드·실행을 너무 자주 누름 */
     @ExceptionHandler(com.pair.domain.attempt.exception.TooManyRunsException.class)
     ResponseEntity<Map<String, String>> tooManyRuns(RuntimeException e) {

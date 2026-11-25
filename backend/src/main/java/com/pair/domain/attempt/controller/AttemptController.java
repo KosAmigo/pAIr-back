@@ -30,6 +30,7 @@ import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.service.AttemptService;
+import com.pair.domain.attempt.service.RescoreService;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.service.ChatAttachmentService;
 import com.pair.domain.attempt.dto.ChatTurnStateDto;
@@ -58,12 +59,15 @@ public class AttemptController {
     private final com.pair.domain.attempt.service.ReplayTreeService replayTree;
     private final com.pair.domain.attempt.service.ReplayCompareService replayCompare;
     private final ChatAttachmentService chatAttachments;
+    private final RescoreService rescores;
 
     public AttemptController(TaskDefRepository tasks, AttemptService attempts, AttemptStateRepository store, com.pair.global.config.PairProperties props,
             AttemptRepository records, TaskCatalogService catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
             com.pair.domain.attempt.service.RollbackService rollbacks, com.pair.domain.attempt.service.ReplayTreeService replayTree,
             com.pair.domain.question.service.QuestionService questions, com.pair.domain.attempt.service.ReplayCompareService replayCompare,
-            ChatAttachmentService chatAttachments) {
+            ChatAttachmentService chatAttachments,
+            RescoreService rescores) {
+        this.rescores = rescores;
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
@@ -295,7 +299,7 @@ public class AttemptController {
 
     @PostMapping("/attempts/{id}/rescore")
     public AttemptStateDto rescore(@PathVariable String id) {
-        return attempts.rescore(id);
+        return rescores.rescore(id);
     }
 
     @GetMapping("/attempts/{id}/report")
