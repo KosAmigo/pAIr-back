@@ -91,6 +91,9 @@ public class AttemptController {
         List<Map<String, Object>> out = new java.util.ArrayList<>();
         // 같은 과제를 여러 번 푼 응시가 많아서 과제 정의는 한 번만 만든다 (응시마다 DB 에서 다시 읽지 않는다)
         Map<String, TaskDefDto> definitions = new java.util.HashMap<>();
+        // 점수는 채점이 끝난 응시 것을 한꺼번에 읽는다 (응시마다 리포트를 읽으면 응시 수만큼 느려진다)
+        Map<String, JsonNode> scores = store.readScores(rows.stream()
+                .filter(r -> r.getStatus() == AttemptStateDto.Status.DONE).map(r -> String.valueOf(r.getId())).toList());
         for (Attempt r : rows) {
             String id = String.valueOf(r.getId());
             if (r.getStatus() == AttemptStateDto.Status.SOLVING && isEmpty(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
@@ -103,7 +106,7 @@ public class AttemptController {
             m.put("startedAt", r.getStartedAt());
             m.put("status", r.getStatus());
             if (r.getStatus() == AttemptStateDto.Status.DONE) {
-                JsonNode rep = readReportSafely(id);
+                JsonNode rep = scores.get(id);
                 if (rep != null) {
                     // version 2(감점식)만 총점이 있다. 이전 형식은 다시 채점해야 한다.
                     m.put("total", rep.path("version").asInt() >= 2 ? rep.path("total").asInt() : null);
@@ -117,15 +120,6 @@ public class AttemptController {
             out.add(m);
         }
         return out;
-    }
-
-    /** 리포트 파일이 없거나 깨져도 목록은 보여 준다 */
-    private JsonNode readReportSafely(String id) {
-        try {
-            return store.readReport(id);
-        } catch (RuntimeException e) {
-            return null;
-        }
     }
 
     /** 빈 응시: 풀이 중이고, AI 질문도, 파일 저장, 빌드, 실행도 없는 기록. 파일이 없으면 빈 것으로 본다 */

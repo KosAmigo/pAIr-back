@@ -85,7 +85,7 @@ class ReportQueryCostTest extends BearerIntegrationTest {
     }
 
     @Test
-    void 대시보드가_부르는_목록과_리포트는_응시_수에_비례해_쿼리가_늘어도_응시당_몇_번으로_제한된다() throws Exception {
+    void 목록은_응시_수와_상관없이_쿼리가_일정하고_리포트는_응시당_몇_번으로_제한된다() throws Exception {
         int n = 5;
         var signup = AuthTestSupport.signup(auth, mail, "대시보드", UUID.randomUUID() + "@pair.test");
         String bearer = signup.token();
@@ -106,8 +106,8 @@ class ReportQueryCostTest extends BearerIntegrationTest {
         for (String id : ids) mvc.perform(get("/api/attempts/{id}/report", id).header("Authorization", "Bearer " + bearer)).andExpect(status().isOk());
         long reports = stats.getPrepareStatementCount();
         System.out.println("[dashboard cost] attempts=" + n + ", list statements=" + list + ", report statements(" + n + " calls)=" + reports);
-        // 같은 과제의 정의를 응시마다 다시 읽던 때는 목록만 응시당 6~7번(5개에 33번)이었다. 응시당 4번 이내로 고정한다
-        assertThat(list).as("목록 쿼리 수").isLessThanOrEqualTo(4L * n + 3);
+        // 채점이 끝난 응시의 점수는 한꺼번에 읽는다. 응시마다 리포트를 만들면 원격 DB 에서 응시 수만큼 느려진다
+        assertThat(list).as("채점이 끝난 응시 " + n + "개의 목록 쿼리 수").isLessThanOrEqualTo(10L);
         assertThat(reports).as("리포트 5번 조회의 쿼리 수").isLessThanOrEqualTo(8L * n);
     }
 }

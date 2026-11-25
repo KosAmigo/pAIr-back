@@ -93,6 +93,43 @@ class ScoringReportRepositoryTest extends ExamIntegrationTest {
     }
 
     @Test
+    void 목록용_일괄_점수는_리포트와_같고_마지막으로_끝난_채점을_쓴다() {
+        String scored = String.valueOf(attemptId);
+        long rescored = registry.save(Attempt.self(1L, 1L, "gpt-test", now)).getId();
+        String jsonOnly = String.valueOf(registry.save(Attempt.self(1L, 1L, "gpt-test", now)).getId());
+        String empty = String.valueOf(registry.save(Attempt.self(1L, 1L, "gpt-test", now)).getId());
+        store.writeReport(scored, Map.of("version", 2, "total", 999, "items", List.of()));
+        finish(attemptId, 4);
+        finish(rescored, 4);
+        finish(rescored, 9);
+        records.fail(records.start(rescored, version), "실패");
+        store.writeReport(jsonOnly, Map.of("version", 1, "total", 50, "items", List.of(Map.of("key", "usage", "score", 5))));
+
+        Map<String, JsonNode> all = store.readScores(List.of(scored, String.valueOf(rescored), jsonOnly, empty));
+
+        assertThat(all).containsOnlyKeys(scored, String.valueOf(rescored), jsonOnly);
+        for (String id : all.keySet()) {
+            JsonNode full = store.readReport(id);
+            assertThat(all.get(id).path("version")).isEqualTo(full.path("version"));
+            assertThat(all.get(id).path("total")).isEqualTo(full.path("total"));
+            assertThat(keyScores(all.get(id))).isEqualTo(keyScores(full));
+        }
+        assertThat(all.get(String.valueOf(rescored)).path("total").asInt()).isEqualTo(91);
+    }
+
+    private void finish(long attempt, int deducted) {
+        CheckOutcome u1 = new CheckOutcome("U1", "라벨", "JUDGE", 4, deducted, "DEDUCTED", List.of(), "이유");
+        records.finish(records.start(attempt, version), true,
+                List.of(new ItemResult("usage", "AI 활용력", 20, 20 - deducted, List.of(u1))), List.of());
+    }
+
+    private static List<String> keyScores(JsonNode report) {
+        List<String> out = new java.util.ArrayList<>();
+        report.path("items").forEach(it -> out.add(it.path("key").asText() + "=" + it.path("score").asInt()));
+        return out;
+    }
+
+    @Test
     void 채점_기록이_없으면_JSON_그대로() {
         store.writeReport(String.valueOf(attemptId), Map.of("version", 2, "total", 77));
         JsonNode rep = store.readReport(String.valueOf(attemptId));
