@@ -259,6 +259,10 @@ pair:
   scoring-queue:
     enabled: ${PAIR_SCORING_QUEUE_ENABLED:false}
 
+  # 다시 채점: 응시 하나를 24시간에 채점할 수 있는 횟수(첫 채점과 채점 큐의 자동 재시도 포함). 넘으면 429
+  rescore:
+    max-per-day: 10
+
   # 모델 가격 ($/1M 토큰, 입력/출력). 채점 툴의 예상 비용 계산용
   pricing:
     "[gpt-6-luna]": { input: 0.10, output: 0.50 }
