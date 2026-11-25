@@ -385,16 +385,6 @@ public class AttemptService {
         return next;
     }
 
-    /** 채점 실패(예: API 키 없음) 뒤 다시 채점. */
-    public AttemptStateDto rescore(String id) {
-        AttemptStateDto a = store.load(id);
-        if (a.followupsDoneAt() == null) throw new IllegalStateException("후속 질문까지 끝난 응시만 다시 채점할 수 있습니다.");
-        AttemptStateDto next = a.withStatus(AttemptStateDto.Status.SCORING);
-        store.save(next);
-        scoring.scoreAsync(id);
-        return next;
-    }
-
     private void markFirstValid(AttemptStateDto a) {
         if (a.firstValidAt() != null) return;
         store.save(a.withFirstValid(Instant.now()));

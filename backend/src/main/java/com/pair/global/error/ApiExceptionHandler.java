@@ -69,6 +69,12 @@ public class ApiExceptionHandler {
                 .body(Map.of("message", e.getMessage()));
     }
 
+    /** 같은 응시를 너무 많이 채점함 */
+    @ExceptionHandler(com.pair.domain.attempt.exception.TooManyRescoresException.class)
+    ResponseEntity<Map<String, String>> tooManyRescores(RuntimeException e) {
+        return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+    }
+
     /** 빌드·실행을 너무 자주 누름 */
     @ExceptionHandler(com.pair.domain.attempt.exception.TooManyRunsException.class)
     ResponseEntity<Map<String, String>> tooManyRuns(RuntimeException e) {
