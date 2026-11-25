@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +30,12 @@ import com.pair.domain.attempt.service.AttemptService;
 import com.pair.infra.storage.TaskFileStorage;
 import com.pair.domain.auth.service.AuthService;
 import com.pair.domain.auth.AuthTestSupport;
+import com.pair.domain.exam.entity.ExamParticipant;
+import com.pair.domain.exam.entity.ExamSession;
+import com.pair.domain.exam.repository.ExamParticipantRepository;
+import com.pair.domain.exam.repository.ExamSessionRepository;
+import com.pair.global.security.AttemptOwnerInterceptor;
+import com.pair.global.security.InviteTokenService;
 
 /** 응시자 PDF 자료 API (목록·파일·쪽 글). 로컬 저장소(임시 폴더)를 쓰고 AI 호출은 없다 */
 class TaskMaterialApiTest extends BearerIntegrationTest {
@@ -41,6 +48,8 @@ class TaskMaterialApiTest extends BearerIntegrationTest {
     @Autowired TaskFileRepository files;
     @Autowired DocumentPageRepository pages;
     @Autowired TaskFileStorage storage;
+    @Autowired ExamSessionRepository sessions;
+    @Autowired ExamParticipantRepository participants;
 
     AuthResponse owner;
     AuthResponse other;
@@ -84,13 +93,18 @@ class TaskMaterialApiTest extends BearerIntegrationTest {
 
     @Test
     void 실전_응시는_원본_과제의_자료를_쓴다() throws Exception {
-        // 과제 4(실전 복사본, 원본 2). 실전 응시는 로그인 없이 들어온다
-        Attempt live = attemptRecords.save(Attempt.live(null, 4L, "m", Instant.now()));
-        mvc.perform(get("/api/attempts/{id}/materials", live.getId())).andExpect(status().isOk())
+        // 과제 4(실전 복사본, 원본 2). 실전 응시는 로그인 없이 초대 토큰으로 들어온다
+        Instant now = Instant.now();
+        String invite = InviteTokenService.next();
+        ExamSession session = sessions.save(new ExamSession(41010L, "회차", now.minusSeconds(60), now.plusSeconds(3600), false, List.of(4L), 1L, now));
+        Long participantId = participants.save(new ExamParticipant(session, UUID.randomUUID() + "@example.com", "응시자",
+                InviteTokenService.hash(invite), now)).getId();
+        Attempt live = attemptRecords.save(Attempt.live(participantId, 4L, "m", now));
+        mvc.perform(get("/api/attempts/{id}/materials", live.getId()).header(AttemptOwnerInterceptor.INVITE, invite)).andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)));
-        mvc.perform(get("/api/attempts/{id}/materials/pages", live.getId()).param("path", MaterialFixtures.PDF2_PATH))
+        mvc.perform(get("/api/attempts/{id}/materials/pages", live.getId()).header(AttemptOwnerInterceptor.INVITE, invite).param("path", MaterialFixtures.PDF2_PATH))
                 .andExpect(status().isOk()).andExpect(jsonPath("$[0].text").value("비교 1쪽"));
-        mvc.perform(get("/api/attempts/{id}/materials/file", live.getId()).param("path", MaterialFixtures.PDF_PATH))
+        mvc.perform(get("/api/attempts/{id}/materials/file", live.getId()).header(AttemptOwnerInterceptor.INVITE, invite).param("path", MaterialFixtures.PDF_PATH))
                 .andExpect(status().isOk()).andExpect(content().bytes(MaterialFixtures.BYTES));
     }
 
