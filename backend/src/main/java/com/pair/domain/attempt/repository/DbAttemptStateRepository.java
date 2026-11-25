@@ -7,10 +7,12 @@ import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -173,6 +175,18 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
             n.put("at", e.getCreatedAt().toString());
             out.add(n);
         }
+        return out;
+    }
+
+    /** 대화·작업 기록 내용은 읽지 않고, 있는 응시 ID 만 한 번씩 묻는다 */
+    @Override
+    @Transactional(readOnly = true)
+    public Set<String> activeIds(List<String> ids) {
+        if (ids.isEmpty()) return Set.of();
+        List<Long> keys = ids.stream().map(DbAttemptStateRepository::key).toList();
+        Set<String> out = new HashSet<>();
+        turns.findAttemptIdsWithTurns(keys).forEach(id -> out.add(String.valueOf(id)));
+        events.findAttemptIdsWithEventsOtherThan(keys, dbType("start")).forEach(id -> out.add(String.valueOf(id)));
         return out;
     }
 

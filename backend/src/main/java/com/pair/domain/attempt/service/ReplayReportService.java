@@ -3,6 +3,9 @@ package com.pair.domain.attempt.service;
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.stereotype.Component;
@@ -20,6 +23,17 @@ class ReplayReportService {
 
     ReplayReportService(AttemptStateRepository store) {
         this.store = store;
+    }
+
+    /** 여러 응시의 점수만 한꺼번에(total, max, items). 대상은 scored 와 같고, 대상이 아닌 응시는 결과에 없다 */
+    Map<Long, JsonNode> scores(List<Attempt> rows) {
+        Map<String, JsonNode> read = store.readScores(rows.stream()
+                .filter(r -> r.getStatus() == AttemptStateDto.Status.DONE).map(r -> String.valueOf(r.getId())).toList());
+        Map<Long, JsonNode> out = new HashMap<>();
+        read.forEach((id, rep) -> {
+            if (rep.path("version").asInt() >= 2) out.put(Long.valueOf(id), rep);
+        });
+        return out;
     }
 
     Optional<JsonNode> scored(Attempt r) {

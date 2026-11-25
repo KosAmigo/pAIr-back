@@ -115,7 +115,7 @@ public class ScoringReportRepository {
     }
 
     /**
-     * 응시 목록용: 여러 응시의 점수만(version, total, items[key, score]) 한꺼번에 읽는다. overlay 를 응시마다 부르면
+     * 응시 목록·복기 트리용: 여러 응시의 점수만(version, total, max, items[key, name, max, score]) 한꺼번에 읽는다. overlay 를 응시마다 부르면
      * 쿼리가 응시 수만큼 늘어서, 응시 수와 상관없이 4번으로 읽는다. 점수 규칙은 overlay 와 같다.
      * 끝난 채점이 채점 표에 없는 응시는 결과에 없다.
      */
@@ -141,12 +141,15 @@ public class ScoringReportRepository {
             report.put("version", 2);
             ArrayNode itemArr = report.putArray("items");
             int total = 0;
+            int max = 0;
             for (RubricItem it : itemRows) {
                 int score = itemScore(it, byItem.getOrDefault(it.getKey(), List.of()));
                 total += score;
-                itemArr.addObject().put("key", it.getKey()).put("score", score);
+                max += it.getMaxScore();
+                itemArr.addObject().put("key", it.getKey()).put("name", it.getName()).put("max", it.getMaxScore()).put("score", score);
             }
             report.put("total", total);
+            report.put("max", max);
             out.put(attemptId, report);
         });
         return out;

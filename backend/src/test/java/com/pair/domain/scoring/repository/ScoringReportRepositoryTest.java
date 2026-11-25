@@ -112,6 +112,7 @@ class ScoringReportRepositoryTest extends ExamIntegrationTest {
             JsonNode full = store.readReport(id);
             assertThat(all.get(id).path("version")).isEqualTo(full.path("version"));
             assertThat(all.get(id).path("total")).isEqualTo(full.path("total"));
+            assertThat(all.get(id).path("max")).isEqualTo(full.path("max"));
             assertThat(keyScores(all.get(id))).isEqualTo(keyScores(full));
         }
         assertThat(all.get(String.valueOf(rescored)).path("total").asInt()).isEqualTo(91);
@@ -125,7 +126,8 @@ class ScoringReportRepositoryTest extends ExamIntegrationTest {
 
     private static List<String> keyScores(JsonNode report) {
         List<String> out = new java.util.ArrayList<>();
-        report.path("items").forEach(it -> out.add(it.path("key").asText() + "=" + it.path("score").asInt()));
+        report.path("items").forEach(it -> out.add(it.path("key").asText() + "/" + it.path("name").asText() + "="
+                + it.path("score").asInt() + "/" + it.path("max").asInt()));
         return out;
     }
 
