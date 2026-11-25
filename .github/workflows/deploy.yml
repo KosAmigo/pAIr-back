@@ -1,0 +1,117 @@
+name: Deploy
+
+# 운영 서버(EC2)에 SSH 로 접속해 GHCR 의 이미지를 받아 다시 시작한다. 손으로만 실행한다 (Actions 탭 > Deploy > Run workflow).
+# main 에서만 실행되고, GitHub Environments 의 production 승인 규칙을 거친다 (아래 "필요한 설정" 참고).
+#
+# 하는 일: docker-compose.prod.yml, monitoring/ 설정, application-secret.yml(시크릿 APP_SECRET_YML), .env(Grafana 비밀번호)를 서버에 쓰고,
+#          GHCR 로그인 → pull → up -d → 지표 포트로 상태 확인. 백엔드, 프론트, Prometheus, Grafana 가 함께 뜬다.
+# 이전 버전으로 되돌리려면 backend_tag / frontend_tag 에 이전 sha-xxxxxxx 태그를 넣고 다시 실행한다.
+#
+# 필요한 설정 (저장소 Settings):
+#   Environments > production 을 만들고 Required reviewers(승인자)와 Deployment branches(main 만)를 지정한다.
+#   production 환경의 Secrets 에 아래 값을 넣는다.
+#     EC2_HOST         서버 주소 (탄력적 IP 나 도메인)
+#     EC2_USER         SSH 사용자 (Ubuntu 이미지는 ubuntu)
+#     EC2_SSH_KEY      SSH 개인 키 전체 (-----BEGIN ... 부터 끝까지)
+#     EC2_KNOWN_HOSTS  서버 호스트 키. 내 PC 에서 `ssh-keyscan -t ed25519 <주소>` 를 실행해 나온 한 줄을 확인하고 넣는다
+#     APP_SECRET_YML   서버의 application-secret.yml 전체 내용
+#     GRAFANA_ADMIN_PASSWORD  Grafana 관리자(admin) 비밀번호. 영문·숫자만 쓴다 (.env 에서 $ 나 따옴표가 있으면 값이 바뀐다). 충분히 길게 정한다
+#   GHCR 패키지 접근: 프론트 이미지(pair-front)는 pAIr-front 저장소가 올린 패키지라, 이 저장소의 GITHUB_TOKEN 으로 받으려면
+#   패키지 설정(Package settings > Manage Actions access)에서 pAIr-back 저장소를 Read 로 추가하거나, 패키지를 Public 으로 바꾼다.
+on:
+  workflow_dispatch:
+    inputs:
+      backend_tag:
+        description: '백엔드 이미지 태그 (latest 또는 sha-xxxxxxx)'
+        default: latest
+        required: true
+      frontend_tag:
+        description: '프론트 이미지 태그 (latest 또는 sha-xxxxxxx)'
+        default: latest
+        required: true
+
+# 배포가 겹치지 않게 순서대로 하나씩 돌린다.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Only main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::배포는 main 에서만 실행한다 (현재 ${GITHUB_REF})"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: SSH setup
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload compose and secret
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          APP_SECRET_YML: ${{ secrets.APP_SECRET_YML }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes $EC2_USER@$EC2_HOST"
+          $SSH 'mkdir -p ~/pair/data'
+          scp -i "$HOME/.ssh/deploy_key" -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            docker-compose.prod.yml "$EC2_USER@$EC2_HOST:pair/docker-compose.yml"
+          # 비밀값은 명령줄이 아니라 표준 입력으로 보낸다. 나만 읽을 수 있게 권한을 제한한다
+          printf '%s\n' "$APP_SECRET_YML" | $SSH 'umask 077 && cat > ~/pair/application-secret.yml.new && mv ~/pair/application-secret.yml.new ~/pair/application-secret.yml'
+          # compose 가 같은 폴더의 .env 를 읽는다. 값이 한 줄이 되도록 줄바꿈 없이 쓴다
+          printf 'GRAFANA_ADMIN_PASSWORD=%s\n' "$GRAFANA_ADMIN_PASSWORD" | $SSH 'umask 077 && cat > ~/pair/.env.new && mv ~/pair/.env.new ~/pair/.env'
+          # 모니터링 설정(Prometheus, 경고 규칙, Grafana 대시보드)은 폴더째 바꿔 놓는다. 옛 파일이 남지 않게 지우고 푼다
+          tar -cf - monitoring | $SSH 'cd ~/pair && rm -rf monitoring && tar -xf -'
+
+      - name: Pull and restart
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          BACKEND_TAG: ${{ inputs.backend_tag }}
+          FRONTEND_TAG: ${{ inputs.frontend_tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes $EC2_USER@$EC2_HOST"
+          # 이 실행이 끝나면 만료되는 토큰으로 GHCR 에 로그인한다 (패키지가 비공개여도 받을 수 있다)
+          printf '%s' "$GHCR_TOKEN" | $SSH "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          $SSH "cd ~/pair && export BACKEND_TAG='$BACKEND_TAG' FRONTEND_TAG='$FRONTEND_TAG' && docker compose pull && docker compose up -d --remove-orphans"
+          $SSH 'docker logout ghcr.io; docker image prune -f >/dev/null'
+
+      - name: Health check
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes $EC2_USER@$EC2_HOST"
+          # 백엔드는 시작하면서 DB 마이그레이션을 적용하므로 올라오기까지 시간이 걸린다 (최대 약 3분)
+          for i in $(seq 1 36); do
+            if $SSH 'curl -fsS http://127.0.0.1:8181/actuator/health' | grep -q '"status":"UP"'; then
+              echo "백엔드가 올라왔습니다"
+              $SSH 'curl -fsS -o /dev/null http://127.0.0.1/' && echo "프론트도 응답합니다"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::백엔드가 3분 안에 올라오지 않았습니다. 서버에서 'cd ~/pair && docker compose logs --tail 100 backend' 로 확인하세요"
+          $SSH 'cd ~/pair && docker compose ps && docker compose logs --tail 50 backend' || true
+          exit 1
