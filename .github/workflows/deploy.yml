@@ -137,7 +137,8 @@ jobs:
           # 백엔드는 시작하면서 DB 마이그레이션을 확인하므로 올라오기까지 시간이 걸린다 (최대 약 3분)
           # 컨테이너가 죽었다 살아나기를 반복하면(시작 오류) 끝까지 기다리지 않고 바로 실패로 끝낸다
           for i in $(seq 1 36); do
-            if $SSH 'curl -fsS http://127.0.0.1:8181/actuator/health' 2>/dev/null | grep -q '"status":"UP"'; then
+            # Redis(채점 큐)를 뺀 핵심 상태만 본다(core 그룹). Redis 가 잠깐 없어도 백엔드는 서버 안에서 채점한다
+            if $SSH 'curl -fsS http://127.0.0.1:8181/actuator/health/core' 2>/dev/null | grep -q '"status":"UP"'; then
               echo "백엔드가 올라왔습니다"
               # Caddy 를 거쳐 HTTPS 로 확인한다. 처음 배포에서는 인증서 발급을 기다려야 해서 다시 시도한다
               $SSH 'curl -fsS -o /dev/null --retry 12 --retry-delay 5 --retry-all-errors --resolve kosamigo.duckdns.org:443:127.0.0.1 https://kosamigo.duckdns.org/' \

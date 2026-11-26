@@ -51,13 +51,13 @@ public class CompanyInquiryService {
     @Transactional
     public InquiryResponse submit(String companyName, String businessNo, String contactName,
             String contactEmail, String message, byte[] csv) {
-        if (csv == null || csv.length == 0) throw new IllegalArgumentException("회원 명단 CSV 파일을 올려 주세요.");
+        if (csv == null || csv.length == 0) throw new IllegalArgumentException("회원 명단 파일(엑셀 또는 CSV)을 올려 주세요.");
         String company = required(companyName, 100, "회사명");
         String business = required(businessNo, 20, "사업자 번호");
         String contact = required(contactName, 50, "담당자 이름");
         String email = normalizeEmail(contactEmail);
         if (!EMAIL.matcher(email).matches()) throw new IllegalArgumentException("담당자 이메일 형식이 올바르지 않습니다.");
-        List<InquiryMemberInputDto> roster = parseCsv(csv);
+        List<InquiryMemberInputDto> roster = parseRoster(csv);
         validateRoster(roster);
 
         CompanyInquiry inquiry = inquiries.saveAndFlush(new CompanyInquiry(company, business, contact, email,
@@ -114,7 +114,7 @@ public class CompanyInquiryService {
         CompanyInquiry inquiry = inquiries.lockById(inquiryId)
                 .orElseThrow(() -> new java.util.NoSuchElementException("기업 문의를 찾을 수 없습니다."));
         if (inquiry.getStatus() != CompanyInquiry.Status.PENDING) throw new IllegalStateException("처리 전 문의만 명단을 바꿀 수 있습니다.");
-        List<InquiryMemberInputDto> roster = parseCsv(csv);
+        List<InquiryMemberInputDto> roster = parseRoster(csv);
         validateRoster(roster);
         List<String> registered = accounts.findRegisteredEmails(
                 roster.stream().map(m -> normalizeEmail(m.email())).toList());
@@ -151,6 +151,11 @@ public class CompanyInquiryService {
             if (member.role() == CurrentUser.Role.MANAGER) managers++;
         }
         if (managers != 1) throw new IllegalArgumentException("회원 명단에는 MANAGER가 정확히 1명 있어야 합니다.");
+    }
+
+    /** 회원 명단: 엑셀(양식) 또는 CSV. 엑셀인지는 파일 내용(ZIP 머리)으로 가린다 */
+    static List<InquiryMemberInputDto> parseRoster(byte[] content) {
+        return CompanyMemberWorkbookService.isXlsx(content) ? CompanyMemberWorkbookService.read(content) : parseCsv(content);
     }
 
     private static List<InquiryMemberInputDto> parseCsv(byte[] content) {

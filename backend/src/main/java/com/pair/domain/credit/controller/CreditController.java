@@ -49,7 +49,7 @@ public class CreditController {
 
     @GetMapping
     public BalanceResponse balance(CurrentUser user) {
-        return new BalanceResponse(credits.balance(user.userId()));
+        return new BalanceResponse(credits.balance(user.userId()), credits.isUnlimited(user.userId()));
     }
 
     @GetMapping("/products")
