@@ -127,6 +127,17 @@ class TaskPromptExampleTest {
     }
 
     @Test
+    @DisplayName("g13 Q2: 설명에 요구사항과 똑같은 예 줄이 있으면 뺀다(띄어쓰기·문장부호 무시). 다른 문장과 빈 문단은 건드리지 않는다")
+    void descriptionDropsRepeatedExamples() {
+        List<String> req = List.of("addItem(\"노트\", 10000, 2) 뒤 payable(500) → 19500", "addItem(\"펜\", 3000, 1) 뒤 points() → 30");
+        List<String> desc = List.of("쇼핑몰 주문 화면에 결제액 조회를 더한다.\naddItem(\"노트\", 10000, 2) 뒤  payable(500) → 19500",
+                "addItem(\"펜\", 3000, 1) 뒤 points() → 30", "적립금 사용 정책을 정하고 이유를 설명하세요.");
+        assertThat(TaskWritingService.withoutRequirementLines(desc, req)).containsExactly("쇼핑몰 주문 화면에 결제액 조회를 더한다.", "적립금 사용 정책을 정하고 이유를 설명하세요.");
+        assertThat(TaskWritingService.withoutRequirementLines(desc, List.of())).isEqualTo(desc);
+        assertThat(TaskPromptService.WRITING_DEV).contains("Examples appear only here, never again in description");
+    }
+
+    @Test
     @DisplayName("g12 DEV 프롬프트 충돌 정리: 정답 쪽은 사례 입력을 그대로 쓰고, 규모 문장에 '버그 수정 단계'·'숨은 테스트 1~2개'가 없고, DEV 헷갈리는 자료는 다른 계산이다(BIZ 는 그대로)")
     void devPromptConflictsRemoved() {
         assertThat(TaskPromptService.answerDev(40)).contains("situation input values exactly").doesNotContain("outside the visible examples");

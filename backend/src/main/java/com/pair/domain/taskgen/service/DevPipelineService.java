@@ -245,7 +245,7 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
 
         private DevWritingDto write(String feedback) {
             DevWritingDto w = calls.call(Stage.WRITING, TaskPromptService.WRITING_DEV, TaskWritingService.input(bp, false, form.minutes(), feedback), DevWritingDto.class);
-            return new DevWritingDto(nz(w.description()), nz(w.requirements()), w.notes() == null ? "" : w.notes(), w.taskFollowUp() == null ? "" : w.taskFollowUp());
+            return new DevWritingDto(TaskWritingService.withoutRequirementLines(nz(w.description()), nz(w.requirements())), nz(w.requirements()), w.notes() == null ? "" : w.notes(), w.taskFollowUp() == null ? "" : w.taskFollowUp());
         }
 
         private DevCodeDto writeCode(String feedback) {
