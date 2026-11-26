@@ -357,6 +357,81 @@ class EnvNoticeIntegrationTest {
         assertThat(notices.forEntry(token)).hasSize(1); // 끝난 뒤에도 받은 메시지는 읽을 수 있다
     }
 
+    // ── 환경 점검 사진(귀·손목). 컨텍스트를 늘리지 않으려고 같은 설정의 이 클래스에 둔다 ──
+
+    /** 최소한의 JPEG (FF D8 FF 로 시작) */
+    private static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 16, 'J', 'F', 'I', 'F'};
+    private static final byte[] JPEG2 = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE1, 0, 8, 'E', 'x', 'i', 'f', 1, 2};
+
+    @Autowired com.pair.domain.exam.service.EnvCheckPhotoService envPhotos;
+
+    private static com.pair.domain.exam.dto.EnvCheckPhotoRequest photoReq(com.pair.domain.exam.entity.EnvCheckPhoto.Stage stage, byte[] jpeg) {
+        return new com.pair.domain.exam.dto.EnvCheckPhotoRequest(stage, "data:image/jpeg;base64," + java.util.Base64.getEncoder().encodeToString(jpeg));
+    }
+
+    @Test
+    @DisplayName("점검 사진: 귀·손목을 올리면 콘솔에서 목록과 사진을 볼 수 있고, 다시 올리면 같은 단계를 덮어쓴다")
+    void envCheckPhotoUploadViewReplace() {
+        SessionSummaryResponse s = createSession(501L, true);
+        String token = invite(s.id(), "ph1@test.dev");
+        Long pid = pid(s.id(), "ph1@test.dev");
+
+        var left = envPhotos.upload(token, photoReq(com.pair.domain.exam.entity.EnvCheckPhoto.Stage.EAR_LEFT, JPEG));
+        var wrist = envPhotos.upload(token, photoReq(com.pair.domain.exam.entity.EnvCheckPhoto.Stage.WRIST, JPEG));
+
+        assertThat(envPhotos.photosOf(s.id(), pid)).extracting(v -> v.id()).containsExactly(left.id(), wrist.id());
+        assertThat(envPhotos.image(s.id(), left.id())).isEqualTo(JPEG);
+
+        var again = envPhotos.upload(token, photoReq(com.pair.domain.exam.entity.EnvCheckPhoto.Stage.EAR_LEFT, JPEG2));
+        assertThat(again.id()).isEqualTo(left.id()); // 단계마다 한 장
+        assertThat(envPhotos.photosOf(s.id(), pid)).hasSize(2);
+        assertThat(envPhotos.image(s.id(), left.id())).isEqualTo(JPEG2);
+    }
+
+    @Test
+    @DisplayName("점검 사진 검증: 잘못된 링크, JPEG 아님, 감독 안 쓰는 회차, 취소·끝난 회차는 거절한다")
+    void envCheckPhotoRejects() {
+        SessionSummaryResponse s = createSession(502L, true);
+        String token = invite(s.id(), "ph2@test.dev");
+        var ok = photoReq(com.pair.domain.exam.entity.EnvCheckPhoto.Stage.WRIST, JPEG);
+
+        assertThatThrownBy(() -> envPhotos.upload("x".repeat(43), ok)).isInstanceOf(NoSuchElementException.class);
+        var png = new com.pair.domain.exam.dto.EnvCheckPhotoRequest(com.pair.domain.exam.entity.EnvCheckPhoto.Stage.WRIST,
+                java.util.Base64.getEncoder().encodeToString(new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2}));
+        assertThatThrownBy(() -> envPhotos.upload(token, png)).hasMessageContaining("JPEG");
+
+        String plainToken = invite(createSession(503L, false).id(), "ph3@test.dev");
+        assertThatThrownBy(() -> envPhotos.upload(plainToken, ok)).hasMessageContaining("감독");
+
+        SessionSummaryResponse canceled = createSession(504L, true);
+        String canceledToken = invite(canceled.id(), "ph4@test.dev");
+        sessions.cancel(canceled.id());
+        assertThatThrownBy(() -> envPhotos.upload(canceledToken, ok)).hasMessageContaining("취소");
+
+        clock.set(s.endsAt().plus(Duration.ofMinutes(10)));
+        assertThatThrownBy(() -> envPhotos.upload(token, ok)).hasMessageContaining("끝난");
+    }
+
+    @Test
+    @DisplayName("점검 사진: 다른 회차 번호로는 볼 수 없고, 회차 종료 7일 뒤 사진만 지운다")
+    void envCheckPhotoScopeAndPurge() {
+        SessionSummaryResponse s = createSession(505L, true);
+        SessionSummaryResponse other = createSession(506L, true);
+        String token = invite(s.id(), "ph5@test.dev");
+        var photo = envPhotos.upload(token, photoReq(com.pair.domain.exam.entity.EnvCheckPhoto.Stage.EAR_RIGHT, JPEG));
+        Long pid = pid(s.id(), "ph5@test.dev");
+
+        assertThatThrownBy(() -> envPhotos.image(other.id(), photo.id())).isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> envPhotos.photosOf(other.id(), pid)).isInstanceOf(NoSuchElementException.class);
+
+        clock.set(s.endsAt().plus(Duration.ofDays(6)));
+        assertThat(envPhotos.purgeExpired()).isZero();
+        clock.set(s.endsAt().plus(Duration.ofDays(7)).plusSeconds(1));
+        assertThat(envPhotos.purgeExpired()).isGreaterThanOrEqualTo(1); // 같은 컨텍스트의 다른 테스트가 남긴 사진도 함께 지워질 수 있다
+        assertThatThrownBy(() -> envPhotos.image(s.id(), photo.id())).hasMessageContaining("삭제된 사진");
+        assertThat(envPhotos.photosOf(s.id(), pid)).singleElement().extracting(v -> v.deleted()).isEqualTo(true);
+    }
+
     private SessionSummaryResponse createSession(Long company, boolean proctoring) {
         return sessions.create(new ExamSessionRequest(company, "점검 회차", clock.instant().plus(Duration.ofMinutes(10)),
                 clock.instant().plus(Duration.ofMinutes(70)), proctoring, List.of(com.pair.domain.task.TestTasks.LIVE_DEV)), 1L);
