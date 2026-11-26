@@ -72,6 +72,33 @@ class TaskGenQueueTest extends ExamIntegrationTest {
     }
 
     @Test
+    @DisplayName("배치 작업 응답: 배치에 맡긴 호출을 기다리는 중이면 waitingBatch=true, deadlineAt 이 나간다(바로 생성 작업은 항상 false)")
+    void waitingBatchInStatus() throws Exception {
+        CountDownLatch gate = new CountDownLatch(1);
+        DevTaskGeneratorService dev = mock(DevTaskGeneratorService.class);
+        when(dev.generate(any(), anyLong(), any())).thenAnswer(inv -> {
+            gate.await(10, TimeUnit.SECONDS);
+            return outcome("w-" + UUID.randomUUID().toString().substring(0, 8));
+        });
+        TaskGenJobService s = service(dev, uniqueEnv(), 5, true);
+        String batch = s.start(form("batch"), 1L, "BATCH", 1, null);
+        String now = s.start(form("now"), 1L);
+        s.tick();
+        await(() -> s.status(batch).status() == State.RUNNING && s.status(now).status() == State.RUNNING);
+        assertThat(s.status(batch).waitingBatch()).isFalse();
+        assertThat(s.status(batch).deadlineAt()).isNotNull();
+        callRepo.save(com.pair.domain.taskgen.entity.TaskGenCall.pendingBatch(UUID.randomUUID().toString(), batch, "h", 0, "REVIEW", null, "openai", "batch_1",
+                java.time.Instant.now()));
+        callRepo.save(com.pair.domain.taskgen.entity.TaskGenCall.pendingBatch(UUID.randomUUID().toString(), now, "h", 0, "REVIEW", null, "openai", "batch_2",
+                java.time.Instant.now()));
+        assertThat(s.status(batch).waitingBatch()).isTrue();
+        assertThat(s.status(now).waitingBatch()).isFalse();
+        gate.countDown();
+        await(() -> s.status(batch).status() == State.DONE);
+        assertThat(s.status(batch).waitingBatch()).isFalse();
+    }
+
+    @Test
     @DisplayName("상한 2에 3개를 넣으면 2개 RUNNING, 1개 QUEUED(순번 1). 하나가 끝나면 세 번째가 시작한다")
     void queueRespectsLimit() throws Exception {
         CountDownLatch gate = new CountDownLatch(1);

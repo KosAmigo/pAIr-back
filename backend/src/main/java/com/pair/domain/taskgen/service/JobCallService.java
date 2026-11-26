@@ -1,6 +1,7 @@
 package com.pair.domain.taskgen.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pair.domain.taskgen.dto.StageUsageDto;
 import com.pair.domain.taskgen.entity.TaskGenCall;
 import com.pair.domain.taskgen.repository.TaskGenCallRepository;
 import java.nio.charset.StandardCharsets;
@@ -35,11 +36,43 @@ public final class JobCallService {
     private final Map<String, AtomicInteger> counters = new ConcurrentHashMap<>();
     private final AtomicInteger reused = new AtomicInteger();
     private final DoubleAdder cost = new DoubleAdder();
+    private final BatchCallService window; // 배치(BATCH) 작업이면 모델 호출을 맡길 창구, 아니면 null
+    private final Instant deadlineAt;
+    private volatile String directForRest; // 마감이 모자라 이후 호출을 모두 바로 호출로 돌리는 중이면 그 이유(deadline)
 
     public JobCallService(String jobId, TaskGenCallRepository repo, ObjectMapper json) {
+        this(jobId, repo, json, null, null);
+    }
+
+    /** window 가 있으면 이 작업의 모델 호출을 배치 창구에 맡긴다. deadlineAt 은 배치 작업의 마감 시각 */
+    public JobCallService(String jobId, TaskGenCallRepository repo, ObjectMapper json, BatchCallService window, Instant deadlineAt) {
         this.jobId = jobId;
         this.repo = repo;
         this.json = json;
+        this.window = window;
+        this.deadlineAt = deadlineAt;
+    }
+
+    String jobId() {
+        return jobId;
+    }
+
+    /** 배치 창구(배치 작업이 아니면 null) */
+    BatchCallService window() {
+        return window;
+    }
+
+    Instant deadlineAt() {
+        return deadlineAt;
+    }
+
+    /** 마감 부족으로 이후 호출을 모두 바로 호출로 돌리기로 했는가 */
+    boolean directForRest() {
+        return directForRest != null;
+    }
+
+    void goDirectForRest(String reason) {
+        if (directForRest == null) directForRest = reason;
     }
 
     /** 지금 스레드에 묶인 작업의 호출 저장소(없으면 null: 저장·재사용을 하지 않는다) */
@@ -99,13 +132,34 @@ public final class JobCallService {
 
     /** 부른 결과를 저장한다. 저장이 실패해도 생성은 계속한다(다음에 이어 가지 못할 뿐) */
     void save(String hash, int nth, String stage, String label, String model, Object value, long inputTokens, long outputTokens) {
+        save(hash, nth, stage, label, model, value, inputTokens, outputTokens, StageUsageDto.DIRECT, 0);
+    }
+
+    /**
+     * via 가 BATCH 면 배치로 받은 결과. 같은 자리(작업, 해시, nth)에 배치 대기(PENDING) 행이 있으면 그 행을 DONE 으로 바꾼다
+     * (대기 초과로 배치에서 빼고 바로 부른 결과도 같은 행에 들어간다)
+     */
+    void save(String hash, int nth, String stage, String label, String model, Object value, long inputTokens, long outputTokens, String via, long waitedMs) {
         try {
-            String vendor = model == null ? "" : model.startsWith("claude") ? "anthropic" : model.startsWith("gpt") ? "openai" : "";
-            repo.save(new TaskGenCall(UUID.randomUUID().toString(), jobId, hash, nth, stage, label, vendor, json.writeValueAsString(value),
-                    inputTokens, outputTokens, Instant.now()));
+            String vendor = vendorOf(model);
+            String result = json.writeValueAsString(value);
+            var existing = repo.findByJobIdAndInputHashAndNth(jobId, hash, nth);
+            if (existing.isPresent()) {
+                TaskGenCall c = existing.get();
+                c.done(via, vendor, result, inputTokens, outputTokens, 0, waitedMs);
+                repo.save(c);
+                return;
+            }
+            TaskGenCall c = new TaskGenCall(UUID.randomUUID().toString(), jobId, hash, nth, stage, label, vendor, result, inputTokens, outputTokens, Instant.now());
+            if (!StageUsageDto.DIRECT.equals(via) || waitedMs > 0) c.done(via, vendor, result, inputTokens, outputTokens, 0, waitedMs);
+            repo.save(c);
         } catch (Exception e) {
             log.warn("호출 결과를 저장하지 못했습니다(생성은 계속): {}", e.getMessage());
         }
+    }
+
+    static String vendorOf(String model) {
+        return model == null ? "" : model.startsWith("claude") ? "anthropic" : model.startsWith("gpt") ? "openai" : "";
     }
 
     void markReused() {

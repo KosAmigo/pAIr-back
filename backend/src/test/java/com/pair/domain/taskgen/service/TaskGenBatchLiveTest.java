@@ -75,6 +75,9 @@ class TaskGenBatchLiveTest {
      * 제한 시간은 20·40·60분을 번호 순서대로 돌아가며 배정한다. 환경변수 PAIR_TASKGEN_COUNT=8 (Gradle 은 -D 를 테스트 JVM 에 넘기지 않는다)
      */
     static final int COUNT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_COUNT", "10"));
+    /** 실행 방식: PAIR_TASKGEN_MODE=BATCH 면 배치(비용 약 절반, 느림), 기본 NOW. 배치 마감은 PAIR_TASKGEN_DEADLINE_HOURS(1·3·6, 기본 3). 배치는 실제 돈이 든다 */
+    static final String MODE = System.getenv().getOrDefault("PAIR_TASKGEN_MODE", "NOW").strip().toUpperCase();
+    static final int DEADLINE_HOURS = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_DEADLINE_HOURS", "3"));
     static final int[] MINUTES = {20, 40, 60};
     /** 구성 고르기: PAIR_TASKGEN_TRACKS=DEV,BIZ PAIR_TASKGEN_MINUTES=40 이면 직군마다 40분 과제 1개씩. 둘 다 없으면 위 기본(COUNT 개) */
     static final String TRACKS_ENV = System.getenv("PAIR_TASKGEN_TRACKS"), MINUTES_ENV = System.getenv("PAIR_TASKGEN_MINUTES");
@@ -279,7 +282,7 @@ class TaskGenBatchLiveTest {
 
     /** 대기열에 넣는다(상한을 넘으면 서비스가 알아서 기다리게 한다) */
     private String startWhenFree(TaskGenRequest form, String nn) {
-        return jobs.start(form, ADMIN_ID);
+        return jobs.start(form, ADMIN_ID, MODE, MODE.equals("BATCH") ? DEADLINE_HOURS : null, null);
     }
 
     private static String names(List<GenCheckResultDto> checks, boolean warn) {

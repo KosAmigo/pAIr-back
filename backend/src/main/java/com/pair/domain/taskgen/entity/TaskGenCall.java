@@ -88,4 +88,26 @@ public class TaskGenCall {
         this.outputTokens = outputTokens;
         this.createdAt = now;
     }
+
+    /** 배치로 보낸 호출(결과는 아직). 배치 id 가 있어 서버를 다시 켜도 그 배치를 다시 확인한다 */
+    public static TaskGenCall pendingBatch(String id, String jobId, String inputHash, int nth, String stage, String label, String vendor,
+            String providerBatchId, Instant now) {
+        TaskGenCall c = new TaskGenCall(id, jobId, inputHash, nth, stage, label, vendor, null, 0, 0, now);
+        c.via = BATCH;
+        c.status = PENDING;
+        c.providerBatchId = providerBatchId;
+        return c;
+    }
+
+    /** 결과를 받아 DONE 으로 바꾼다(배치로 받았거나, 배치에서 빼고 바로 불러 받았을 때) */
+    public void done(String via, String vendor, String result, long inputTokens, long outputTokens, long cachedInputTokens, long waitedMs) {
+        this.via = via;
+        if (vendor != null) this.vendor = vendor;
+        this.status = DONE;
+        this.result = result;
+        this.inputTokens = inputTokens;
+        this.outputTokens = outputTokens;
+        this.cachedInputTokens = cachedInputTokens;
+        this.waitedMs = waitedMs;
+    }
 }

@@ -22,6 +22,9 @@ public interface TaskGenJobRepository extends JpaRepository<TaskGenJob, String> 
 
     long countByEnvAndStatus(String env, String status);
 
+    /** 배치(BATCH) 모드로 실행 중인 작업 수(배치 창구가 '모두 기다리는 중인지' 볼 때) */
+    long countByEnvAndStatusAndMode(String env, String status, String mode);
+
     /** 나보다 먼저 만든 대기 작업 수(대기 순번 = 이 값 + 1) */
     long countByEnvAndStatusAndCreatedAtBefore(String env, String status, Instant createdAt);
 

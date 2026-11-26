@@ -51,11 +51,12 @@ public class TaskGenJobService {
 
     /**
      * 작업 응답(GET /api/admin/task-gen/{jobId}, jobs 목록의 한 줄). DONE 이어도 passed 가 false 면 확인에 실패한 채 검수 전으로 저장된 것.
-     * queuePosition 은 QUEUED 일 때만(내 env 의 대기 순번, 1부터). topic·track·minutes 는 폼에서 꺼낸 값
+     * queuePosition 은 QUEUED 일 때만(내 env 의 대기 순번, 1부터). topic·track·minutes 는 폼에서 꺼낸 값.
+     * waitingBatch: 배치 작업이 모델 호출을 배치에 맡기고 결과를 기다리는 중이면 true(프런트의 '배치 대기 중'). deadlineAt 은 배치 마감 시각
      */
     public record JobStatus(String jobId, State status, String step, String taskCode, Boolean passed,
             List<GenCheckResultDto> checks, String error, String mode, Instant deadlineAt, Integer queuePosition,
-            String batchId, String topic, String track, Integer minutes, Double costUsd, Instant createdAt) {}
+            String batchId, String topic, String track, Integer minutes, Double costUsd, Instant createdAt, Boolean waitingBatch) {}
 
     /** 자동 생성으로 한 번에 넣은 작업들 */
     public record Batch(String batchId, List<String> jobIds) {}
@@ -66,6 +67,7 @@ public class TaskGenJobService {
     private final TaskGenJobRepository jobs;
     private final TaskGenCallRepository calls;
     private final ObjectMapper json;
+    private final BatchCallService batchWindow; // 배치 작업의 모델 호출을 맡길 창구(없으면 배치도 바로 호출)
     private final String env;
     private final int maxConcurrent;
     private final boolean workerEnabled;
@@ -75,15 +77,23 @@ public class TaskGenJobService {
 
     @Autowired
     public TaskGenJobService(DevTaskGeneratorService dev, BizTaskGeneratorService biz, TaskGenProperties props, TaskFileStorageGuard storageGuard,
-            TaskGenJobRepository jobs, TaskGenCallRepository calls, ObjectMapper json,
+            TaskGenJobRepository jobs, TaskGenCallRepository calls, ObjectMapper json, BatchCallService batchWindow,
             @Value("${pair.env-name:local-${COMPUTERNAME:${HOSTNAME:dev}}}") String env,
             @Value("${pair.taskgen.worker.enabled:true}") boolean workerEnabled) {
-        this(dev, biz, storageGuard, jobs, calls, json, env, props.maxConcurrent(), workerEnabled);
+        this(dev, biz, storageGuard, jobs, calls, json, batchWindow, env, props.maxConcurrent(), workerEnabled);
     }
 
-    /** 환경 이름·동시 상한·워커 스위치를 직접 정한다(테스트가 새 Spring 컨텍스트 없이 쓴다) */
+    /** 환경 이름·동시 상한·워커 스위치를 직접 정한다(배치 창구 없음: BATCH 작업도 바로 호출로 돈다) */
     public TaskGenJobService(DevTaskGeneratorService dev, BizTaskGeneratorService biz, TaskFileStorageGuard storageGuard,
             TaskGenJobRepository jobs, TaskGenCallRepository calls, ObjectMapper json, String env, int maxConcurrent, boolean workerEnabled) {
+        this(dev, biz, storageGuard, jobs, calls, json, null, env, maxConcurrent, workerEnabled);
+    }
+
+    /** 환경 이름·동시 상한·워커 스위치·배치 창구를 직접 정한다(테스트가 새 Spring 컨텍스트 없이 쓴다) */
+    public TaskGenJobService(DevTaskGeneratorService dev, BizTaskGeneratorService biz, TaskFileStorageGuard storageGuard,
+            TaskGenJobRepository jobs, TaskGenCallRepository calls, ObjectMapper json, BatchCallService batchWindow, String env, int maxConcurrent,
+            boolean workerEnabled) {
+        this.batchWindow = batchWindow;
         this.dev = dev;
         this.biz = biz;
         this.storageGuard = storageGuard;
@@ -102,7 +112,7 @@ public class TaskGenJobService {
         return start(form, adminId, TaskGenJob.NOW, null, null);
     }
 
-    /** mode 는 NOW/BATCH(지금은 BATCH 도 NOW 처럼 돈다). BATCH 면 deadlineHours(1/3/6, 기본 3)로 마감 시각을 정한다 */
+    /** mode 는 NOW/BATCH(BATCH 는 모델 호출을 배치 창구에 맡긴다). BATCH 면 deadlineHours(1/3/6, 기본 3)로 마감 시각을 정한다 */
     public String start(TaskGenRequest form, long adminId, String mode, Integer deadlineHours, String batchId) {
         storageGuard.requireSafe(form.track()); // AI 를 부르기 전에 막는다
         String m = checkedMode(mode);
@@ -190,10 +200,12 @@ public class TaskGenJobService {
     }
 
     private void run(String jobId) {
-        JobCallService recorder = new JobCallService(jobId, calls, json);
-        recorder.bind();
+        JobCallService recorder = null;
         try {
             TaskGenJob job = jobs.findById(jobId).orElseThrow();
+            boolean batch = TaskGenJob.BATCH.equals(job.getMode()) && batchWindow != null;
+            recorder = new JobCallService(jobId, calls, json, batch ? batchWindow : null, batch ? job.getDeadlineAt() : null);
+            recorder.bind();
             TaskGenRequest form = json.readValue(job.getForm(), TaskGenRequest.class);
             TaskGeneratorService<?> generator = "BIZ".equals(form.track()) ? biz : dev;
             TaskGeneratorService.Outcome o = generator.generate(form, job.getAdminId(), step -> step(jobId, step));
@@ -202,7 +214,7 @@ public class TaskGenJobService {
             if (stopping) return; // 서버가 꺼지는 중이라 끊긴 것: RUNNING 으로 두면 다음 서버가 heartbeat 규칙으로 이어 간다
             log.warn("과제 생성 실패: {}", e.getMessage());
             String error = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            jobs.finish(jobId, workerId, TaskGenJob.FAILED, null, null, null, null, error, recorder.costUsd(), Instant.now());
+            jobs.finish(jobId, workerId, TaskGenJob.FAILED, null, null, null, null, error, recorder == null ? 0 : recorder.costUsd(), Instant.now());
         } finally {
             JobCallService.unbind();
         }
@@ -224,7 +236,17 @@ public class TaskGenJobService {
         TaskGenRequest form = readForm(j.getForm());
         return new JobStatus(j.getId(), State.valueOf(j.getStatus()), j.getStep(), j.getTaskCode(), j.getPassed(), readChecks(j.getChecks()), j.getError(),
                 j.getMode(), j.getDeadlineAt(), position, j.getBatchId(), form == null ? null : form.topic(), form == null ? null : form.track(),
-                form == null ? null : form.minutes(), j.getCostUsd(), j.getCreatedAt());
+                form == null ? null : form.minutes(), j.getCostUsd(), j.getCreatedAt(), waitingBatch(j));
+    }
+
+    /** 실행 중인 배치 작업이 배치에 맡긴 호출의 결과를 기다리는 중인가(task_gen_calls 에 PENDING 이 있음) */
+    private boolean waitingBatch(TaskGenJob j) {
+        if (!TaskGenJob.BATCH.equals(j.getMode()) || !TaskGenJob.RUNNING.equals(j.getStatus())) return false;
+        try {
+            return calls.existsByJobIdAndStatus(j.getId(), com.pair.domain.taskgen.entity.TaskGenCall.PENDING);
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private TaskGenRequest readForm(String text) {
