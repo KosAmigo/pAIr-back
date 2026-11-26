@@ -117,6 +117,11 @@ public class AuthAccount {
     public boolean isPasswordChangeRequired() { return passwordChangeRequired; }
     public String getOnboardingMailStatus() { return onboardingMailStatus; }
 
+    /** 이름 바꾸기(내 정보 수정). 토큰 버전은 그대로라 로그인은 유지된다 */
+    public void rename(String name) {
+        this.name = name;
+    }
+
     public void changePassword(String passwordHash) {
         this.passwordHash = passwordHash;
         this.passwordChangeRequired = false;

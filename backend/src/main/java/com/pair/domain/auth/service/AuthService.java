@@ -3,6 +3,7 @@ package com.pair.domain.auth.service;
 import com.pair.domain.auth.dto.AuthResponse;
 import com.pair.domain.auth.dto.LoginRequest;
 import com.pair.domain.auth.dto.PasswordChangeRequest;
+import com.pair.domain.auth.dto.ProfileUpdateRequest;
 import com.pair.domain.auth.dto.SignupRequest;
 import com.pair.domain.auth.dto.UserResponse;
 import com.pair.domain.auth.dto.WithdrawalRequest;
@@ -184,6 +185,17 @@ public class AuthService {
         }
         account.changePassword(PASSWORD_ENCODER.encode(request.newPassword()));
         sessions.revokeAll(account.getId());
+    }
+
+    /** 내 정보 수정: 이름만 바꾼다. 로그인은 유지되고 바뀐 회원 정보를 돌려준다 */
+    @Transactional
+    public UserResponse updateProfile(String accessToken, ProfileUpdateRequest request) {
+        JwtTokens.VerifiedToken jwt = requireAccess(accessToken);
+        AuthAccount account = lockCurrentAccount(jwt);
+        String name = request.name().trim();
+        if (name.isEmpty()) throw new IllegalArgumentException("이름을 입력해 주세요.");
+        account.rename(name);
+        return userResponse(account);
     }
 
     @Transactional
