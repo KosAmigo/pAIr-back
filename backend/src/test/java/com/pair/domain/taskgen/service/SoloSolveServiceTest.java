@@ -22,7 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 가짜 AI + 가짜 CodeRunner 로 "AI 혼자 바로 풀리지 않음" 검사의 판정 규칙을 확인한다 (실제 AI 호출·자바 컴파일 없음).
+ * 가짜 AI + 가짜 CodeRunner 로 참고 지표 "AI 단독 풀이"의 기록 규칙을 확인한다 (실제 AI 호출·자바 컴파일 없음).
  * 실제 LocalJvmRunner 로 끝까지 도는 연결 확인은 realRunnerEndToEnd 1개만 한다.
  */
 class SoloSolveServiceTest {
@@ -95,8 +95,9 @@ class SoloSolveServiceTest {
         return new SoloSolveService(ai, props, pair(), runner);
     }
 
+    /** 2번 돌리는 설정(기본은 1번이라 여러 번 도는 경우를 확인하려고 명시) */
     private SoloSolveService service() {
-        return service(new TaskGenProperties(null, null, null, null, null));
+        return service(new TaskGenProperties(null, null, null, null, null, null, null, null, true, null, 2));
     }
 
     private static DevDraftDto draft() {
@@ -116,50 +117,53 @@ class SoloSolveServiceTest {
     }
 
     @Test
-    @DisplayName("2번 모두 통과하면 용도와 상관없이 fail 이고 ok=false, 풀이 파일과 토큰을 남긴다")
-    void bothSolved() {
+    @DisplayName("기본 설정은 1번만 돌린다(비용 절감). 숨은 테스트까지 통과하면 '잡음' 기록: ok=true, warn, 다시 생성 대상 아님")
+    void defaultOnceSolved() {
         ai.script.add(answer(RIGHT));
-        ai.script.add(answer(RIGHT));
-        var r = service().run(draft());
+        var r = new SoloSolveService(ai, new TaskGenProperties(null, null, null, null, null), pair(), runner).run(draft());
 
-        assertThat(r.check().ok()).isFalse();
-        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.FAIL);
-        assertThat(r.check().needsRegeneration()).isTrue();
-        assertThat(r.check().detail()).startsWith("응시자 AI(gpt-6-luna)가 설명만 보고 2번 모두 바로 풀었어요.")
+        assertThat(r.check().name()).isEqualTo("참고: AI 단독 풀이");
+        assertThat(r.check().ok()).isTrue();
+        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
+        assertThat(r.check().needsRegeneration()).isFalse();
+        assertThat(r.check().detail()).startsWith("참고: AI 단독 풀이(gpt-6-luna)가 숨은 결함을 잡았어요(1번 모두 숨은 테스트 통과)")
                 .contains("AI 가 본 자료: 설명, 요구사항 1줄").contains("AI 가 바로 고친 곳: src/calc/Calc.java")
-                .contains("다시 설계 지시");
-        assertThat(r.files()).containsOnlyKeys("1/src/calc/Calc.java", "2/src/calc/Calc.java");
-        assertThat(r.inputTokens()).isEqualTo(200);
-        assertThat(r.outputTokens()).isEqualTo(100);
-        assertThat(ai.models).containsExactly("gpt-6-luna", "gpt-6-luna");
+                .doesNotContain("다시 설계 지시");
+        assertThat(r.files()).containsOnlyKeys("1/src/calc/Calc.java");
+        assertThat(ai.models).containsExactly("gpt-6-luna");
         assertThat(ai.efforts).containsOnly("low");
         assertThat(ai.systems).containsOnly("시스템 문구");
         // 실행기에는 시작 코드 위에 AI 답을 덮어쓰고 숨은 테스트를 더한 소스가 간다
-        assertThat(fake.calls).hasSize(2).allSatisfy(src -> {
+        assertThat(fake.calls).hasSize(1).allSatisfy(src -> {
             assertThat(src.get("src/calc/Calc.java")).isEqualTo(RIGHT);
             assertThat(src).containsKeys("test/calc/CalcTest.java", "test/calc/HiddenCalcTest.java");
         });
     }
 
     @Test
-    @DisplayName("2번 모두 풀릴 때 fail 이라 다시 생성 대상이고, 설명에 풀이 요지와 '다시 설계 지시' 가 들어간다")
-    void bothSolvedStrict() {
+    @DisplayName("2번 설정에서 모두 풀려도 fail 이 아니다(참고 지표): ok=true, 토큰은 2번 합")
+    void bothSolvedNeverFails() {
         ai.script.add(answer(RIGHT));
         ai.script.add(answer(RIGHT));
         var r = service().run(draft());
 
-        assertThat(r.check().ok()).isFalse();
-        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.FAIL);
-        assertThat(r.check().needsRegeneration()).isTrue();
-        assertThat(r.check().detail()).contains("AI 가 바로 고친 곳").contains("다시 설계 지시").contains("한 줄에서 바로 보이지 않게");
+        assertThat(r.check().ok()).isTrue();
+        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
+        assertThat(r.check().needsRegeneration()).isFalse();
+        assertThat(r.check().detail()).contains("2번 모두 숨은 테스트 통과");
+        assertThat(r.files()).containsOnlyKeys("1/src/calc/Calc.java", "2/src/calc/Calc.java");
+        assertThat(r.inputTokens()).isEqualTo(200);
+        assertThat(r.outputTokens()).isEqualTo(100);
     }
 
     @Test
-    @DisplayName("한 번이라도 못 풀면 ok 이다")
+    @DisplayName("한 번이라도 못 풀면 '지나침'으로 기록한다")
     void oneFailsHiddenStrict() {
         ai.script.add(answer(RIGHT));
         ai.script.add(answer(WRONG));
-        assertThat(service().run(draft()).check().ok()).isTrue();
+        var r = service().run(draft());
+        assertThat(r.check().ok()).isTrue();
+        assertThat(r.check().detail()).contains("숨은 결함을 지나쳤어요");
     }
 
     @Test
@@ -170,13 +174,14 @@ class SoloSolveServiceTest {
         var props = new TaskGenProperties(null, null, null, null, null, null, null, null, true, null, 1);
         var r = service(props).run(draft());
 
-        assertThat(r.check().ok()).isFalse();
-        assertThat(r.check().detail()).contains("1번 모두 바로 풀었어요");
+        assertThat(r.check().ok()).isTrue();
+        assertThat(r.check().needsRegeneration()).isFalse();
+        assertThat(r.check().detail()).contains("숨은 결함을 잡았어요(1번 모두 숨은 테스트 통과)");
         assertThat(r.files()).containsOnlyKeys("1/src/calc/Calc.java");
     }
 
     @Test
-    @DisplayName("한 번이라도 숨은 테스트에서 실패하면 ok (2번 중 1번)")
+    @DisplayName("한 번이라도 숨은 테스트에서 실패하면 '지나침' (2번 중 1번)")
     void oneFailsHidden() {
         ai.script.add(answer(RIGHT));
         ai.script.add(answer(WRONG));
@@ -184,7 +189,7 @@ class SoloSolveServiceTest {
 
         assertThat(r.check().ok()).isTrue();
         assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
-        assertThat(r.check().detail()).isEqualTo("2번 중 1번 숨은 테스트에서 실패(검증이 필요한 과제)");
+        assertThat(r.check().detail()).isEqualTo("참고: AI 단독 풀이가 숨은 결함을 지나쳤어요(2번 중 1번 숨은 테스트에서 실패). 검증이 필요한 과제입니다.");
     }
 
     @Test
@@ -195,7 +200,7 @@ class SoloSolveServiceTest {
         var r = service().run(draft());
 
         assertThat(r.check().ok()).isTrue();
-        assertThat(r.check().detail()).contains("2번 중 1번 숨은 테스트에서 실패");
+        assertThat(r.check().detail()).contains("2번 중 1번 숨은 테스트에서 실패").contains("지나쳤어요");
     }
 
     @Test
@@ -244,7 +249,7 @@ class SoloSolveServiceTest {
         var r = service(props).run(draft());
 
         assertThat(ai.models).containsExactly("gpt-6-mini");
-        assertThat(r.check().detail()).isEqualTo("1번 중 1번 숨은 테스트에서 실패(검증이 필요한 과제)");
+        assertThat(r.check().detail()).isEqualTo("참고: AI 단독 풀이가 숨은 결함을 지나쳤어요(1번 중 1번 숨은 테스트에서 실패). 검증이 필요한 과제입니다.");
     }
 
     @Test
@@ -271,7 +276,7 @@ class SoloSolveServiceTest {
         var extra = gen.afterChecks(TaskGenFixtures.form(), draft(), List.of());
 
         assertThat(ai.users).isEmpty();
-        assertThat(extra.checks()).hasSize(1);
+        assertThat(extra.checks()).hasSize(1); // 건너뜀
         assertThat(extra.checks().get(0).name()).isEqualTo(SoloSolveService.NAME);
         assertThat(extra.checks().get(0).ok()).isTrue();
         assertThat(extra.checks().get(0).detail()).startsWith("건너뜀");

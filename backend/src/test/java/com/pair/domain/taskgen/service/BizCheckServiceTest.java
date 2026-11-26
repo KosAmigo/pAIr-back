@@ -12,6 +12,7 @@ import static com.pair.domain.taskgen.service.BizFixtures.edit;
 import static com.pair.domain.taskgen.service.BizFixtures.replaceQuestion;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
@@ -35,13 +36,63 @@ class BizCheckServiceTest {
     }
 
     @Test
-    @DisplayName("정상 Draft 는 검사 12개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
+    @DisplayName("정상 Draft 는 검사 13개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
     void allPass() {
         var results = run(BizFixtures.good("c"));
-        assertThat(results).hasSize(12).allMatch(GenCheckResultDto::ok, results.toString());
+        assertThat(results).hasSize(13).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
         assertThat(solver.lastPrompt).contains("자료/설문 요약.pdf (2쪽)").contains("34%가 라이트").contains("1) 34%").contains("월,요금제,가입자 수");
         assertThat(solver.calls.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("E2: 판단 지점이 비었거나 선택지가 1개거나 근거 문장이 응시자 자료에 없으면 '판단 지점과 근거가 자료에 있음' 만 실패한다")
+    void judgmentPoints() {
+        BizDraftDto d = BizFixtures.good("c");
+        assertThat(failed(edit(d, b -> b.judgmentPoints(List.of())))).containsExactly(BizCheckService.JUDGMENT);
+        var one = new DevDraftDto.JudgmentPoint("정할 것", List.of("한 가지"), "응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.");
+        assertThat(failed(edit(d, b -> b.judgmentPoints(List.of(one))))).containsExactly(BizCheckService.JUDGMENT);
+        var missing = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), "이 문장은 자료 어디에도 없습니다 절대로");
+        var r = result(edit(d, b -> b.judgmentPoints(List.of(missing))), BizCheckService.JUDGMENT);
+        assertThat(r.ok()).isFalse();
+        assertThat(r.level()).isEqualTo(GenCheckResultDto.FAIL);
+        assertThat(r.detail()).contains("근거 문장을 응시자 자료에서 찾지 못했습니다");
+        // 체크리스트(숨은 채점 기준)에만 있는 문장은 응시자에게 안 보이므로 근거가 될 수 없다
+        var hiddenOnly = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), "결론을 밝힌다.");
+        assertThat(failed(edit(d, b -> b.judgmentPoints(List.of(hiddenOnly))))).containsExactly(BizCheckService.JUDGMENT);
+    }
+
+    @Test
+    @DisplayName("E3: 숨은 결함이 비었거나, 어느 문항·결론인지 없거나, 놓쳐도 답·결론이 같으면 '숨은 결함이 답·결론을 가름' 만 실패한다")
+    void hiddenFlaws() {
+        BizDraftDto d = BizFixtures.good("c");
+        assertThat(failed(edit(d, b -> b.hiddenFlaws(List.of())))).containsExactly(BizCheckService.HIDDEN_FLAW);
+        var noRef = new DevDraftDto.HiddenFlaw("결함", "문서 대조", "문항 번호 없음");
+        assertThat(failed(edit(d, b -> b.hiddenFlaws(List.of(noRef))))).containsExactly(BizCheckService.HIDDEN_FLAW);
+        var outOfRange = new DevDraftDto.HiddenFlaw("결함", "문서 대조", "Q9");
+        assertThat(failed(edit(d, b -> b.hiddenFlaws(List.of(outOfRange))))).containsExactly(BizCheckService.HIDDEN_FLAW);
+        var noVerify = new DevDraftDto.HiddenFlaw("결함", "", "Q3");
+        assertThat(failed(edit(d, b -> b.hiddenFlaws(List.of(noVerify))))).containsExactly(BizCheckService.HIDDEN_FLAW);
+        // 문항 번호나 결론으로 가리키고 놓치면 답이 달라지면 통과(단답형 Q3 은 흔한 오답이 있음)
+        var byQuestion = new DevDraftDto.HiddenFlaw("결함", "문서 대조", "문항 3");
+        assertThat(failed(edit(d, b -> b.hiddenFlaws(List.of(byQuestion))))).isEmpty();
+        // 결론을 가리키는데 함정 결론이 정답 결론과 같으면 결과가 달라지지 않는다 → 이 검사와 '함정이 결론을 바꿈' 이 함께 실패
+        var sameConclusion = new BizDraftDto.Trap("t", BizFixtures.EVIDENCE, "시범 출시", "시범 출시");
+        var onlyConclusion = new DevDraftDto.HiddenFlaw("결함", "문서 대조", "결론");
+        assertThat(failed(edit(d, b -> b.trap(sameConclusion).hiddenFlaws(List.of(onlyConclusion)))))
+                .containsExactly(BizCheckService.CONCLUSION, BizCheckService.HIDDEN_FLAW);
+    }
+
+    @Test
+    @DisplayName("옛 형식(judgmentPoints·hiddenFlaws 필드 없음)은 읽히고, 두 검사가 warn 으로만 알린다(다시 생성하지 않음)")
+    void legacyWithoutE2E3() {
+        BizDraftDto legacy = edit(BizFixtures.good("c"), b -> b.judgmentPoints(null).hiddenFlaws(null));
+        var notOk = run(legacy).stream().filter(r -> !r.ok()).toList();
+        assertThat(notOk).extracting(GenCheckResultDto::name).containsExactly(BizCheckService.JUDGMENT, BizCheckService.HIDDEN_FLAW);
+        assertThat(notOk).allSatisfy(r -> {
+            assertThat(r.level()).isEqualTo(GenCheckResultDto.WARN);
+            assertThat(r.needsRegeneration()).isFalse();
+        });
     }
 
     @Test
@@ -154,7 +205,7 @@ class BizCheckServiceTest {
         var threeChoices = BizFixtures.single("q", List.of("a", "b", "c"), 1, DOC1 + "|1", DOC2 + "|1");
         assertThat(BizCheckService.formatProblem(edit(d, b -> b.questions(replaceQuestion(d, 0, threeChoices))), pdf)).contains("보기가 4개");
         var noCorrect = BizFixtures.single("q", List.of("a", "b", "c", "d"), 9, DOC1 + "|1", DOC2 + "|1");
-        assertThat(BizCheckService.formatProblem(edit(d, b -> b.questions(replaceQuestion(d, 0, noCorrect))), pdf)).contains("정답 보기가 1개");
+        assertThat(BizCheckService.softProblem(edit(d, b -> b.questions(replaceQuestion(d, 0, noCorrect))))).contains("정답 보기가 1개"); // 형식 검사는 실패시키되 다른 검사를 막지 않는 문제
         assertThat(BizCheckService.formatProblem(edit(d, b -> b.questions(d.questions().subList(0, 3))), pdf)).contains("단답형이 2개");
         BizDraftDto noList = new BizDraftDto(d.title(), d.summary(), d.code(), d.category(), d.description(), d.requirements(),
                 List.of("하나"), d.documents(), d.csvFiles(), d.checklist(), d.trap(), d.questions());
@@ -182,17 +233,48 @@ class BizCheckServiceTest {
     }
 
     @Test
-    @DisplayName("핵심어가 설명·요구사항·자료 파일 이름에 있으면 '함정 핵심어 노출 없음' 만 실패한다 (공백 무시, 자료 본문은 보지 않음)")
-    void trapWordExposed() {
+    @DisplayName("M4 오탐 방지(v7 06): 근거 한 줄에 선택지 둘의 근거가 함께 있으면 통과하고, 한 선택지의 근거가 없으면 실패한다")
+    void judgmentEvidenceOneLine() {
         BizDraftDto d = BizFixtures.good("c");
-        var hit = edit(d, b -> b.description(List.of("의향  보정 없이 계산하면 틀립니다.")));
-        assertThat(failed(hit)).containsExactly(BizCheckService.TRAP_WORDS);
-        assertThat(result(hit, BizCheckService.TRAP_WORDS).detail()).contains("설명").contains("의향 보정");
-        var inReq = edit(d, b -> b.requirements(List.of("전환율을 반드시 쓴다.")));
-        assertThat(result(inReq, BizCheckService.TRAP_WORDS).detail()).contains("요구사항").contains("전환율");
-        // 자료 본문에 있는 말은 괜찮다 (함정 근거 문장이 거기 있어야 하므로). 설문 요약 문서에 "의향" 이 있어도 통과한다
-        assertThat(failed(d)).isEmpty();
-        assertThat(failed(edit(d, b -> b.trapKeywords(List.of("전환율"))))).containsExactly(BizCheckService.TRAP_WORDS);
+        String basis = "응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.";
+        var both = new DevDraftDto.JudgmentPoint("정할 것", List.of("시범 출시", "전면 출시"), basis, List.of(basis));
+        assertThat(result(edit(d, b -> b.judgmentPoints(List.of(both))), BizCheckService.JUDGMENT).ok()).isFalse(); // 선택지 말이 근거에 없음
+        String line = "응답자의 38%가 시범 출시를 원했고 전면 출시는 12%였습니다.";
+        String shown = "응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.";
+        var docs = new ArrayList<>(d.documents());
+        var f = docs.get(0);
+        var pg = new ArrayList<>(f.pages());
+        pg.set(0, pg.get(0) + "\n" + line);
+        docs.set(0, new BizDraftDto.DocDraft(f.path(), pg));
+        var ok = new DevDraftDto.JudgmentPoint("정할 것", List.of("시범 출시", "전면 출시"), shown, List.of(line));
+        assertThat(result(edit(d, b -> b.documents(docs).judgmentPoints(List.of(ok))), BizCheckService.JUDGMENT).ok()).isTrue();
+    }
+
+    @Test
+    @DisplayName("E3 M3: 함정 문항이 칸 하나를 읽기만 하거나 다른 문항과 같은 계산이면 '함정 문항이 자료 대조를 요구함' 만 실패한다")
+    void trapQuestions() {
+        BizDraftDto d = BizFixtures.good("c");
+        assertThat(result(d, BizCheckService.TRAP_QUESTION).ok()).isTrue();
+        var q3 = d.questions().get(2);
+        var lookup = new BizDraftDto.QuestionDraft(q3.type(), q3.content(), null, List.of("62000"),
+                "round(v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\"), 0)", q3.sources(), q3.commonWrongAnswers());
+        var simple = edit(d, b -> b.questions(replaceQuestion(d, 2, lookup)));
+        var r = result(simple, BizCheckService.TRAP_QUESTION);
+        assertThat(r.ok()).isFalse();
+        assertThat(r.level()).isEqualTo(GenCheckResultDto.FAIL);
+        assertThat(r.detail()).contains("Q3").contains("칸 하나");
+        // 같은 계산을 다른 문구로 되풀이
+        var q4 = d.questions().get(3);
+        var same = new BizDraftDto.QuestionDraft(q4.type(), q4.content(), null, q3.accepted(), q3.calc(), q4.sources(), q4.commonWrongAnswers());
+        var repeated = edit(d, b -> b.questions(replaceQuestion(d, 3, same)));
+        assertThat(result(repeated, BizCheckService.TRAP_QUESTION).detail()).contains("Q3 와 Q4 가 같은 계산");
+        // 결론 객관식의 정답 보기가 자료 문장 그대로면 단순 조회
+        var q2 = d.questions().get(1);
+        var copied = new BizDraftDto.QuestionDraft(q2.type(), q2.content(), List.of(new BizDraftDto.Choice("응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.", true),
+                new BizDraftDto.Choice("가", false), new BizDraftDto.Choice("나", false), new BizDraftDto.Choice("다", false)), null, null, q2.sources());
+        var flaws = List.of(new DevDraftDto.HiddenFlaw("결함", "문서 대조", "Q2, Q3"));
+        var lookupSingle = edit(d, b -> b.questions(replaceQuestion(d, 1, copied)).hiddenFlaws(flaws));
+        assertThat(result(lookupSingle, BizCheckService.TRAP_QUESTION).detail()).contains("Q2 의 정답 보기가 자료 문장 그대로");
     }
 
     @Test
@@ -229,20 +311,6 @@ class BizCheckServiceTest {
         assertThat(result(keyword, BizCheckService.FOLLOW_UP).detail()).contains("전환율");
         var same = edit(d, b -> b.followUps(List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "채택하지 않은 제안은?")));
         assertThat(failed(same)).containsExactly(BizCheckService.FOLLOW_UP);
-    }
-
-    @Test
-    @DisplayName("함정 근거가 '~만으로 판단하지 않는다' 같은 지시문이면 경고(warn)만 하고 다시 생성하지는 않는다")
-    void evidenceDirective() {
-        var r = BizCheckService.evidenceStyle(edit(BizFixtures.good("c"), x -> x.trap(new BizDraftDto.Trap("함정",
-                "이 값만으로 하루 인력 충족 여부를 판단하지 않는다."))));
-        assertThat(r.ok()).isFalse();
-        assertThat(r.needsRegeneration()).isFalse();
-        for (String ev : List.of("두 값을 더해서는 안 된다는 점", "혼동하지 말 것")) {
-            assertThat(BizCheckService.evidenceStyle(edit(BizFixtures.good("c"), b -> b.trap(new BizDraftDto.Trap("함정", ev))))
-                    .ok()).isFalse();
-        }
-        assertThat(BizCheckService.evidenceStyle(BizFixtures.good("c")).ok()).isTrue();
     }
 
     @Test

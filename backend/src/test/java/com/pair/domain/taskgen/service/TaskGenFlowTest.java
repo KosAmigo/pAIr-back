@@ -64,6 +64,7 @@ class TaskGenFlowTest {
     static void props(DynamicPropertyRegistry r) {
         r.add("pair.data-dir", () -> dataDir.toString());
         r.add("pair.taskgen.max-concurrent", () -> "2");
+        r.add("pair.taskgen.pipeline", () -> "oneshot"); // 이 테스트는 한 번에 과제 전체를 돌려주는 가짜 AI 를 쓴다(단계별 생성은 TaskPipelineServiceTest)
     }
 
     /** 미리 정한 순서대로 Draft 나 오류를 돌려주는 가짜 AI. gate 가 있으면 열릴 때까지 기다린다 */
@@ -179,11 +180,14 @@ class TaskGenFlowTest {
         assertThat(report.get("passed").asBoolean()).isTrue();
         assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
         assertThat(report.get("outputTokens").asLong()).isEqualTo(2000);
-        // 13개 + AI 혼자 바로 풀림(준비된 풀이가 없어 호출 실패 → 이 검사만 warn, 생성은 계속)
+        // 15개 + 참고 지표 AI 단독 풀이(준비된 풀이가 없어 호출 실패 → 이 검사만 warn, 생성은 계속)
         assertThat(report.get("checks")).hasSize(14);
         assertThat(report.get("checks").get(13).get("name").asText()).isEqualTo(SoloSolveService.NAME);
-        assertThat(report.get("checks").get(13).get("ok").asBoolean()).isTrue();
+        assertThat(report.get("checks").get(12).get("ok").asBoolean()).isTrue();
         assertThat(report.get("checks").get(13).get("detail").asText()).contains("호출 실패");
+        // E2·E3 보고용 정보가 report.details 에 남는다
+        assertThat(report.get("details").get("judgmentPoints").get(0).get("basis").asText()).isEqualTo(TaskGenFixtures.JUDGMENT.basis());
+        assertThat(report.get("details").get("hiddenFlaws").get(0).get("caughtBy").asText()).isEqualTo("couponOnce");
         assertThat(report.get("checks")).allSatisfy(c -> assertThat(c.get("level").asText()).isIn("fail", "warn"));
         assertThat(report.get("form").get("topic").asText()).isEqualTo("쿠폰 할인 계산");
     }
@@ -348,26 +352,25 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("LIVE 에서 AI 혼자 풀리면 다시 만들 때 AI 의 변경 요약과 단서 문장(메모의 해법 문장)과 지시가 프롬프트에 들어간다")
-    void soloFeedbackHasChangeSummaryAndClues() {
+    @DisplayName("LIVE 에서 AI 단독 풀이가 풀리면 다시 만들지 않고, 검수용 기록에 AI 의 변경 요약과 단서 문장(메모의 해법 문장)을 남긴다")
+    void soloRecordHasChangeSummaryAndClues() {
         String clueNotes = TaskGenFixtures.NOTES + "- 쿠폰은 한 장만 적용하도록 고치면 됩니다.\n";
         DevDraftDto clued = TaskGenFixtures.edit(good("flow-clue-1"), b -> b.files(List.of(
                 TaskGenFixtures.f("src/shop/Cart.java", TaskGenFixtures.CART_START),
                 TaskGenFixtures.f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
                 TaskGenFixtures.f("NOTES.md", clueNotes))));
         ai.script.add(clued);
-        ai.script.add(good("flow-clue-2"));
-        for (int i = 0; i < 4; i++) ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        ai.script.add(good("flow-clue-never"));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
         var o = generator.generate(new com.pair.domain.taskgen.dto.TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "LIVE", 60),
                 1L, steps::add);
 
-        assertThat(o.attempts()).isEqualTo(2);
-        String retry = ai.users.get(1);
-        assertThat(retry).contains("AI 가 바로 고친 곳").contains("sum += 11;");                       // 변경 요약
-        assertThat(retry).contains("[NOTES.md] 쿠폰은 한 장만 적용하도록 고치면 됩니다");             // 단서 문장
-        assertThat(retry).contains("다시 설계 지시").contains("한 줄에서 바로 보이지 않게").contains("숨은 테스트에서 걸리게");
-        assertThat(retry).contains("일부러 읽기 어렵게 꼬는 방식은 안 됩니다");
-        assertThat(retry).doesNotContain("[NOTES.md] 고객 A");                                      // 해법과 상관없는 문장은 안 넣는다
+        assertThat(o.attempts()).isEqualTo(1);
+        assertThat(o.passed()).isTrue();
+        String detail = o.checks().stream().filter(c -> c.name().equals(SoloSolveService.NAME)).findFirst().orElseThrow().detail();
+        assertThat(detail).contains("AI 가 바로 고친 곳").contains("sum += 11;");                         // 변경 요약
+        assertThat(detail).contains("[NOTES.md] 쿠폰은 한 장만 적용하도록 고치면 됩니다");               // 단서 문장
+        assertThat(detail).doesNotContain("다시 설계 지시").doesNotContain("[NOTES.md] 고객 A");       // 해법과 상관없는 문장은 안 넣는다
     }
 
     private static DevDraftDto leaky(String code) {
@@ -381,16 +384,16 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("fail 검사(핵심어 노출)에 걸리면 이름과 내용을 붙여 1번 다시 만들고, 다시 만든 것이 통과하면 그것을 저장한다")
+    @DisplayName("fail 검사에 걸리면 이름과 내용을 붙여 1번 다시 만들고, 다시 만든 것이 통과하면 그것을 저장한다")
     void failLevelRegenerates() throws Exception {
-        ai.script.add(leaky("flow-leak-1"));
+        ai.script.add(bad("flow-leak-1"));
         ai.script.add(good("flow-leak-2"));
         var o = generate();
 
         assertThat(o.passed()).isTrue();
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(ai.users).hasSize(2);
-        assertThat(ai.users.get(1)).contains(DevCheckService.TRAP_WORDS).contains("'중복 적용'");
+        assertThat(ai.users.get(1)).contains(DevCheckService.SOLVED_PASSES);
         assertThat(records.findByCode("flow-leak-1")).isEmpty();
         assertThat(json.readTree(writer.report("flow-leak-2")).get("checks")).allSatisfy(c -> assertThat(c.get("ok").asBoolean()).isTrue());
     }
@@ -415,7 +418,7 @@ class TaskGenFlowTest {
         for (var c : report.get("checks")) {
             boolean amount = c.get("name").asText().equals(DevCheckService.AMOUNT);
             boolean solo = c.get("name").asText().equals(SoloSolveService.NAME); // 풀이가 준비되지 않아 호출 실패 → ok, warn
-            boolean text = c.get("name").asText().equals(DevCheckService.NO_SOLUTION_TEXT);
+            boolean text = false;
             assertThat(c.get("level").asText()).isEqualTo(amount || solo || text ? "warn" : "fail");
             assertThat(c.get("ok").asBoolean()).isEqualTo(!amount);
             assertThat(c.has("name") && c.has("detail")).isTrue();
@@ -425,13 +428,14 @@ class TaskGenFlowTest {
     @Test
     @DisplayName("fail 과 warn 이 함께 있으면 fail 만 다시 만들 때 프롬프트에 붙고, warn 은 붙지 않는다")
     void retryPromptHasOnlyFail() throws Exception {
-        ai.script.add(TaskGenFixtures.edit(small("flow-mix-1"), b -> b.description(List.of("이중 할인이 원인입니다."))));
+        DevDraftDto mixed = small("flow-mix-1");
+        ai.script.add(TaskGenFixtures.withSolution(mixed, mixed.solution().get(0).content().replace(" // FIXED", ""))); // 정답이 안 풀려 fail + 분량 warn
         ai.script.add(small("flow-mix-2"));
         var o = generate();
 
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(o.passed()).isTrue(); // 두 번째는 warn 만 남음
-        assertThat(ai.users.get(1)).contains(DevCheckService.TRAP_WORDS).doesNotContain(DevCheckService.AMOUNT);
+        assertThat(ai.users.get(1)).contains(DevCheckService.SOLVED_PASSES).doesNotContain(DevCheckService.AMOUNT);
     }
 
     @Test
@@ -582,82 +586,68 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("fail 검사가 모두 통과하면 AI 혼자 풀기를 2번 돌리고 풀이 파일(_gen/solo)과 토큰을 저장한다. 2번 다 풀면 SELF 여도 fail 이라 1회 다시 만든다")
-    void soloAllSolved() throws Exception {
-        ai.script.add(good("flow-solo-1"));
+    @DisplayName("fail 검사가 모두 통과하면 참고 지표 AI 단독 풀이를 1번만 돌리고 풀이 파일(_gen/solo)과 토큰을 저장한다. 풀려도 다시 만들지 않는다")
+    void soloSolvedIsOnlyRecorded() throws Exception {
         ai.script.add(good("flow-solo"));
-        for (int i = 0; i < 4; i++) ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        ai.script.add(good("flow-solo-never"));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
         var o = generate();
 
-        assertThat(o.passed()).isFalse(); // 다시 만들어도 풀리면 fail 이 남는다(저장은 한다)
-        assertThat(o.attempts()).isEqualTo(2);
-        assertThat(ai.users).hasSize(2);
-        assertThat(ai.soloUsers).hasSize(4);
+        assertThat(o.passed()).isTrue(); // 풀려도 합격·불합격에 영향 없음
+        assertThat(o.attempts()).isEqualTo(1);
+        assertThat(ai.users).hasSize(1);
+        assertThat(ai.soloUsers).hasSize(1);
         assertThat(ai.soloUsers.get(0)).doesNotContain("HiddenCartTest", "couponOnce", "쿠폰은 한 장만 적용한다", "중복 적용");
         assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement().satisfies(c -> {
-            assertThat(c.ok()).isFalse();
-            assertThat(c.level()).isEqualTo("fail");
+            assertThat(c.ok()).isTrue();
+            assertThat(c.level()).isEqualTo("warn");
+            assertThat(c.detail()).contains("숨은 결함을 잡았어요");
         });
 
         var report = json.readTree(writer.report("flow-solo"));
-        assertThat(report.get("passed").asBoolean()).isFalse();
-        assertThat(report.get("inputTokens").asLong()).isEqualTo(2000);
-        assertThat(report.get("details").get("soloTokens").get("input").asLong()).isEqualTo(60);
-        assertThat(report.get("details").get("soloTokens").get("output").asLong()).isEqualTo(40);
-        assertThat(tasks.hiddenFiles("flow-solo")).containsKeys("_gen/solo/1/src/shop/Cart.java.txt", "_gen/solo/2/src/shop/Cart.java.txt");
+        assertThat(report.get("passed").asBoolean()).isTrue();
+        assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
+        assertThat(report.get("details").get("soloTokens").get("input").asLong()).isEqualTo(30);
+        assertThat(report.get("details").get("soloTokens").get("output").asLong()).isEqualTo(20);
+        assertThat(tasks.hiddenFiles("flow-solo")).containsKeys("_gen/solo/1/src/shop/Cart.java.txt");
     }
 
     @Test
-    @DisplayName("LIVE 용도는 AI 혼자 2번 다 풀면 fail 이라 1회 다시 만들고, 다시 만들 때 AI 가 고친 곳과 '함정을 더 깊게' 가 전달된다")
-    void soloSolvedRegeneratesForLive() {
+    @DisplayName("LIVE 용도도 AI 단독 풀이가 풀리든(잡음) 못 풀든(지나침) 다시 만들지 않고 통과한다")
+    void soloNeverRegeneratesForLive() {
+        var live = new com.pair.domain.taskgen.dto.TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "LIVE", 60);
         ai.script.add(good("flow-live-1"));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
+        var solved = generator.generate(live, 1L, steps::add);
+        assertThat(solved.attempts()).isEqualTo(1);
+        assertThat(solved.passed()).isTrue();
+        assertThat(ai.users).hasSize(1);
+
         ai.script.add(good("flow-live-2"));
-        for (int i = 0; i < 4; i++) ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
-        var o = generator.generate(new com.pair.domain.taskgen.dto.TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "LIVE", 60),
-                1L, steps::add);
-
-        assertThat(o.attempts()).isEqualTo(2);
-        assertThat(ai.users).hasSize(2);
-        assertThat(ai.users.get(1)).contains(SoloSolveService.NAME).contains("AI 가 바로 고친 곳").contains("다시 설계 지시");
-        assertThat(ai.soloUsers).hasSize(4);
-        assertThat(o.passed()).isFalse(); // 다시 만들어도 풀리면 fail 이 남는다(저장은 한다)
-        assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement()
-                .satisfies(c -> assertThat(c.level()).isEqualTo("fail"));
+        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
+        var missed = generator.generate(live, 1L, steps::add);
+        assertThat(missed.attempts()).isEqualTo(1);
+        assertThat(missed.passed()).isTrue();
+        assertThat(missed.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement()
+                .satisfies(c -> assertThat(c.detail()).contains("숨은 결함을 지나쳤어요"));
     }
 
     @Test
-    @DisplayName("LIVE 용도라도 다시 만든 Draft 를 AI 가 못 풀면 통과한다")
-    void soloUnsolvedAfterRegenerateForLive() {
-        ai.script.add(good("flow-live-3"));
-        ai.script.add(good("flow-live-4"));
-        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
-        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_SOLVED));
-        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
-        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
-        var o = generator.generate(new com.pair.domain.taskgen.dto.TaskGenRequest("DEV", "쿠폰 할인 계산", "쿠폰 두 장을 겹치면 할인이 중복 적용", "LIVE", 60),
-                1L, steps::add);
-
-        assertThat(o.attempts()).isEqualTo(2);
-        assertThat(o.passed()).isTrue();
-    }
-
-    @Test
-    @DisplayName("fail 검사가 있어 다시 만들 때는 첫 Draft 에 AI 혼자 풀기를 돌리지 않고 최종 Draft 에만 돌린다")
+    @DisplayName("fail 검사가 있어 다시 만들 때는 첫 Draft 에 AI 단독 풀이를 돌리지 않고 최종 Draft 에만 1번 돌린다")
     void soloOnlyOnFinalDraft() {
         ai.script.add(bad("flow-solo-first"));
         ai.script.add(good("flow-solo-second"));
         ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
-        ai.soloScript.add(soloAnswer(TaskGenFixtures.CART_START));
         var o = generate();
 
         assertThat(o.attempts()).isEqualTo(2);
-        assertThat(ai.soloUsers).hasSize(2);
+        assertThat(ai.soloUsers).hasSize(1);
         assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement()
-                .satisfies(c -> assertThat(c.detail()).contains("2번 중 2번 숨은 테스트에서 실패"));
+                .satisfies(c -> assertThat(c.detail()).contains("1번 중 1번 숨은 테스트에서 실패"));
     }
 
     @Test
-    @DisplayName("다시 만들어도 fail 검사가 남으면 AI 혼자 풀기는 건너뛴다 (AI 호출 없음)")
+    @DisplayName("다시 만들어도 fail 검사가 남으면 AI 단독 풀이는 건너뛴다 (AI 호출 없음)")
     void soloSkippedWhenStillFailing() {
         ai.script.add(bad("flow-solo-bad1"));
         ai.script.add(bad("flow-solo-bad2"));
@@ -667,5 +657,18 @@ class TaskGenFlowTest {
         assertThat(ai.soloUsers).isEmpty();
         assertThat(o.checks()).filteredOn(c -> c.name().equals(SoloSolveService.NAME)).singleElement()
                 .satisfies(c -> assertThat(c.detail()).startsWith("건너뜀"));
+    }
+
+    @Test
+    @DisplayName("E2·E3: 판단 지점의 근거가 자료에 없으면 fail 이라 1회 다시 만들고, 실패 내용이 다시 만들기 프롬프트에 들어간다")
+    void judgmentFailRegenerates() {
+        var noBasis = new com.pair.domain.taskgen.dto.DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), "자료 어디에도 없는 문장입니다 정말로");
+        ai.script.add(TaskGenFixtures.edit(good("flow-e2-1"), b -> b.judgmentPoints(List.of(noBasis))));
+        ai.script.add(good("flow-e2-2"));
+        var o = generate();
+
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(o.passed()).isTrue();
+        assertThat(ai.users.get(1)).contains(DevCheckService.JUDGMENT).contains("근거 문장을 응시자 자료에서 찾지 못했습니다");
     }
 }

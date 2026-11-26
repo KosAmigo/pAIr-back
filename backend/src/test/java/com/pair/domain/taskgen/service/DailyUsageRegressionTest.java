@@ -137,20 +137,11 @@ class DailyUsageRegressionTest {
             assertThat(named(results, name).ok()).as(name + ": " + named(results, name).detail()).isTrue();
         }
 
-        var leak = named(results, DevCheckService.TRAP_WORDS);
-        assertThat(leak.ok()).isFalse();
-        assertThat(leak.level()).isEqualTo("fail");
-        assertThat(leak.detail()).contains("설명").contains("서머타임").contains("요구사항");
-
         var wrong = named(results, DevCheckService.WRONG_FIXES);
         assertThat(wrong.ok()).isFalse();
         assertThat(wrong.level()).isEqualTo("fail");
         // 늦은 오프셋 오답(오답 1)만 통과했고, plusDays 오답(오답 2)은 Apia 날짜 없는 날에서 걸린다
         assertThat(wrong.detail()).contains("오답 1").contains("숨은 테스트를 모두 통과").doesNotContain("오답 2");
-
-        var materials = named(results, DevCheckService.MATERIALS);
-        assertThat(materials.ok()).isFalse();
-        assertThat(materials.level()).isEqualTo("fail");
 
         var amount = named(results, DevCheckService.AMOUNT);
         assertThat(amount.ok()).isFalse();
@@ -158,7 +149,7 @@ class DailyUsageRegressionTest {
         assertThat(amount.detail()).contains("정답 변경 2줄, 40분 과제치고 적음");
 
         assertThat(results.stream().filter(GenCheckResultDto::needsRegeneration).map(GenCheckResultDto::name))
-                .containsExactly(DevCheckService.TRAP_WORDS, DevCheckService.WRONG_FIXES, DevCheckService.MATERIALS);
+                .containsExactly(DevCheckService.WRONG_FIXES);
     }
 
     @Test
@@ -167,7 +158,7 @@ class DailyUsageRegressionTest {
         var results = run(fixed());
         assertThat(results.stream().filter(GenCheckResultDto::needsRegeneration).map(r -> r.name() + ": " + r.detail())).isEmpty();
         assertThat(results.stream().filter(r -> !r.ok()).map(GenCheckResultDto::name))
-                .containsExactly(DevCheckService.AMOUNT, DevCheckService.ALT_SOLUTIONS); // 이 옛 Draft 에는 다른 풀이가 없어 warn
+                .containsExactly(DevCheckService.AMOUNT, DevCheckService.ALT_SOLUTIONS, DevCheckService.JUDGMENT, DevCheckService.HIDDEN_FLAW); // 이 옛 Draft 에는 다른 풀이·판단 지점·숨은 결함이 없어 모두 warn
         assertThat(named(results, DevCheckService.WRONG_FIXES).detail()).contains("오답 2개 모두");
     }
 }

@@ -48,9 +48,7 @@ class DevCheckServiceTest {
         assertThat(results).hasSize(13).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(results).extracting(GenCheckResultDto::level).containsOnly("fail", "warn");
         assertThat(results).filteredOn(r -> r.name().equals(DevCheckService.AMOUNT)).extracting(GenCheckResultDto::level).containsExactly("warn");
-        assertThat(results).filteredOn(r -> r.name().equals(DevCheckService.NO_SOLUTION_TEXT)).extracting(GenCheckResultDto::level).containsExactly("warn");
-        assertThat(results).filteredOn(r -> !r.name().equals(DevCheckService.AMOUNT) && !r.name().equals(DevCheckService.NO_SOLUTION_TEXT))
-                .extracting(GenCheckResultDto::level).containsOnly("fail");
+        assertThat(results).filteredOn(r -> !r.name().equals(DevCheckService.AMOUNT)).extracting(GenCheckResultDto::level).containsOnly("fail");
         assertThat(runner.calls.get()).isEqualTo(6);
     }
 
@@ -59,7 +57,82 @@ class DevCheckServiceTest {
     void hiddenDoesNotCatch() {
         runner.bugCaught = false;
         // 숨은 테스트가 아무것도 못 잡으니 오답도 모두 통과한다 → 오답 검사도 함께 실패
-        assertThat(failedNames(TaskGenFixtures.good())).containsExactly(DevCheckService.HIDDEN_CATCHES, DevCheckService.WRONG_FIXES);
+        assertThat(failedNames(TaskGenFixtures.good())).containsExactly(DevCheckService.HIDDEN_CATCHES, DevCheckService.WRONG_FIXES, DevCheckService.HIDDEN_FLAW);
+    }
+
+    @Test
+    @DisplayName("E2: 판단 지점이 비었거나, 선택지가 1개거나, 근거 문장이 응시자 자료에 없으면 '판단 지점과 근거가 자료에 있음' 만 실패한다")
+    void judgmentPoints() {
+        var good = TaskGenFixtures.good();
+        assertThat(failedNames(edit(good, b -> b.judgmentPoints(List.of())))).containsExactly(DevCheckService.JUDGMENT);
+        var oneOption = new DevDraftDto.JudgmentPoint("정할 것", List.of("한 가지"), "쿠폰 두 장을 쓰면 결제 금액이 이상합니다.");
+        assertThat(failedNames(edit(good, b -> b.judgmentPoints(List.of(oneOption))))).containsExactly(DevCheckService.JUDGMENT);
+        var noBasis = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), "이 문장은 어느 자료에도 없습니다 절대로");
+        var r = result(edit(good, b -> b.judgmentPoints(List.of(noBasis))), DevCheckService.JUDGMENT, null);
+        assertThat(r.ok()).isFalse();
+        assertThat(r.level()).isEqualTo(GenCheckResultDto.FAIL);
+        assertThat(r.detail()).contains("근거 문장을 응시자 자료에서 찾지 못했습니다");
+        // 숨은 테스트에만 있는 문장은 응시자에게 안 보이므로 근거가 될 수 없다
+        var hiddenOnly = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), "class HiddenCartTest");
+        assertThat(failedNames(edit(good, b -> b.judgmentPoints(List.of(hiddenOnly))))).containsExactly(DevCheckService.JUDGMENT);
+        // 근거가 요구사항이나 NOTES.md 에 있어도 된다(공백·따옴표 차이 무시)
+        var inNotes = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), "\"고객 B: 같은 쿠폰 조합인데   어제는 정상이고 오늘은 금액이 이상함\"", TaskGenFixtures.JUDGMENT.evidence());
+        assertThat(failedNames(edit(good, b -> b.judgmentPoints(List.of(inNotes))))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("E2 M4: 선택지별 근거 사실이 없거나, 자료에 없거나, 자료가 있다고만 가리키면 '판단 지점과 근거가 자료에 있음' 이 fail 이다")
+    void judgmentEvidence() {
+        var good = TaskGenFixtures.good();
+        String basis = TaskGenFixtures.JUDGMENT.basis();
+        var none = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), basis, null);
+        assertThat(result(edit(good, b -> b.judgmentPoints(List.of(none))), DevCheckService.JUDGMENT, null).detail()).contains("선택지별 근거 사실(evidence)이 없습니다");
+        var few = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), basis, List.of(basis));
+        assertThat(result(edit(good, b -> b.judgmentPoints(List.of(few))), DevCheckService.JUDGMENT, null).detail()).contains("근거가 없습니다");
+        var absent = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), basis, List.of(basis, "운영 기록에 소비자 A 는 -1 을 받는다고 적혀 있습니다"));
+        assertThat(result(edit(good, b -> b.judgmentPoints(List.of(absent))), DevCheckService.JUDGMENT, null).detail()).contains("근거 사실을 응시자 자료에서 찾지 못했습니다");
+        // 사례가 있다고만 말하고 실제 사례가 없는 문장(설명에는 있지만 사실이 아니다)
+        var pointer = new DevDraftDto.JudgmentPoint("정할 것", List.of("가", "나"), basis, List.of(basis, "운영 자료에 사례가 모두 있습니다"));
+        var withPointer = edit(good, b -> b.judgmentPoints(List.of(pointer)).description(List.of("운영 자료에 사례가 모두 있습니다", basis)));
+        var r = result(withPointer, DevCheckService.JUDGMENT, null);
+        assertThat(r.ok()).isFalse();
+        assertThat(r.level()).isEqualTo(GenCheckResultDto.FAIL);
+        assertThat(r.detail()).contains("가리킵니다");
+    }
+
+    @Test
+    @DisplayName("옛 형식(judgmentPoints·hiddenFlaws 필드 없음)은 읽히고, 두 검사가 warn 으로만 알린다(다시 생성하지 않음)")
+    void legacyDraftWithoutE2E3() {
+        var legacy = edit(TaskGenFixtures.good(), b -> b.judgmentPoints(null).hiddenFlaws(null));
+        var results = run(legacy, null);
+        assertThat(results).filteredOn(r -> !r.ok()).extracting(GenCheckResultDto::name)
+                .containsExactly(DevCheckService.JUDGMENT, DevCheckService.HIDDEN_FLAW);
+        assertThat(results).filteredOn(r -> !r.ok()).allSatisfy(r -> {
+            assertThat(r.level()).isEqualTo(GenCheckResultDto.WARN);
+            assertThat(r.needsRegeneration()).isFalse();
+        });
+    }
+
+    @Test
+    @DisplayName("E3: 숨은 결함이 비었거나, 잡는 테스트가 숨은 테스트에 없거나, 어디서도 실패하지 않으면 '숨은 결함을 숨은 테스트가 잡음' 만 실패한다")
+    void hiddenFlaws() {
+        var good = TaskGenFixtures.good();
+        assertThat(failedNames(edit(good, b -> b.hiddenFlaws(List.of())))).containsExactly(DevCheckService.HIDDEN_FLAW);
+        var noTest = new DevDraftDto.HiddenFlaw("결함", "NOTES.md 대조", "noSuchTest");
+        var r = result(edit(good, b -> b.hiddenFlaws(List.of(noTest))), DevCheckService.HIDDEN_FLAW, null);
+        assertThat(r.ok()).isFalse();
+        assertThat(r.level()).isEqualTo(GenCheckResultDto.FAIL);
+        assertThat(r.detail()).contains("noSuchTest").contains("숨은 테스트 파일에 없습니다");
+        var noVerify = new DevDraftDto.HiddenFlaw("결함", " ", "couponOnce");
+        assertThat(failedNames(edit(good, b -> b.hiddenFlaws(List.of(noVerify))))).containsExactly(DevCheckService.HIDDEN_FLAW);
+        // 메서드 이름에 ()를 붙여 적어도 된다
+        var withParens = new DevDraftDto.HiddenFlaw("결함", "NOTES.md 대조", "couponOnce()");
+        assertThat(failedNames(edit(good, b -> b.hiddenFlaws(List.of(withParens))))).isEmpty();
+        // 그 테스트가 어디서도 실패하지 않으면(시작 코드, 오답 모두 통과) 결함을 잡지 못한다
+        runner.bugCaught = false;
+        var rr = result(good, DevCheckService.HIDDEN_FLAW, null);
+        assertThat(rr.ok()).isFalse();
+        assertThat(rr.detail()).contains("결함을 잡지 못합니다");
     }
 
     @Test
@@ -108,51 +181,6 @@ class DevCheckServiceTest {
     }
 
     // ── 1. 함정 핵심어 노출 ─────────────────────
-
-    @Test
-    @DisplayName("핵심어가 설명·요구사항·보이는 파일 경로·코드 주석·메모에 있으면 '함정 핵심어 노출 없음' 만 실패한다 (대소문자·공백 무시)")
-    void trapWordExposed() {
-        var d = TaskGenFixtures.good();
-        var inDescription = edit(d, b -> b.description(List.of("쿠폰이 중복  적용 되는 문제입니다.")));
-        assertThat(failedNames(inDescription)).containsExactly(DevCheckService.TRAP_WORDS);
-        assertThat(result(inDescription, DevCheckService.TRAP_WORDS, null).detail()).contains("설명").contains("중복 적용");
-
-        var inRequirements = edit(d, b -> b.requirements(List.of("이중할인을 막는다.")));
-        assertThat(result(inRequirements, DevCheckService.TRAP_WORDS, null).detail()).contains("요구사항");
-
-        var inPath = edit(d, b -> b.filesWith(f("logs/이중할인.log", "x")));
-        assertThat(result(inPath, DevCheckService.TRAP_WORDS, null).detail()).contains("보이는 파일 경로");
-
-        var inComment = TaskGenFixtures.withFiles(d, List.of(f("src/shop/Cart.java", CART_START.replace("int sum = 0;", "int sum = 0; // 이중 할인 처리")),
-                f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"), f("NOTES.md", NOTES)));
-        assertThat(result(inComment, DevCheckService.TRAP_WORDS, null).detail()).contains("보이는 코드 주석");
-
-        var inNotes = TaskGenFixtures.withFiles(d, List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("NOTES.md", NOTES + "원인은 이중 할인으로 보임\n")));
-        assertThat(result(inNotes, DevCheckService.TRAP_WORDS, null).detail()).contains("메모·로그");
-
-        // 코드(주석이 아닌 곳)에 있는 말은 보지 않는다
-        var inCode = TaskGenFixtures.withFiles(d, List.of(f("src/shop/Cart.java", CART_START.replace("int sum = 0;", "int 이중할인 = 0; int sum = 0;")),
-                f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"), f("NOTES.md", NOTES)));
-        assertThat(result(inCode, DevCheckService.TRAP_WORDS, null).ok()).isTrue();
-    }
-
-    @Test
-    @DisplayName("핵심어가 2개 미만이면 실패한다. 폼 함정 문장의 3글자 이상 말도 함께 본다 (2글자 이하·주제 말은 뺌)")
-    void trapWordsFromForm() {
-        var d = TaskGenFixtures.good();
-        assertThat(failedNames(edit(d, b -> b.trapKeywords(List.of("중복 적용"))))).containsExactly(DevCheckService.TRAP_WORDS);
-        assertThat(failedNames(edit(d, b -> b.trapKeywords(null)))).containsExactly(DevCheckService.TRAP_WORDS);
-
-        assertThat(GenTextService.formWords("하루를 항상 24시간으로 계산", "일별 이용량 집계")).containsExactly("24시간");
-        assertThat(GenTextService.formWords("쿠폰 두 장을 겹치면 할인이 중복 적용", "쿠폰 할인 계산")).containsExactly("겹치면");
-
-        // 폼 문장에서 뽑은 '겹치면' 이 설명에 있으면 모델이 정한 핵심어가 아니어도 걸린다
-        var form = TaskGenFixtures.form();
-        var leaked = edit(d, b -> b.description(List.of("쿠폰을 겹치면 금액이 이상합니다.")));
-        assertThat(result(leaked, DevCheckService.TRAP_WORDS, form).ok()).isFalse();
-        assertThat(result(leaked, DevCheckService.TRAP_WORDS, null).ok()).isTrue();
-    }
 
     // ── 2. 그럴듯한 오답 ─────────────────────
 
@@ -223,32 +251,6 @@ class DevCheckServiceTest {
 
     // ── 4. 과제 종류별 필수 자료 ─────────────────────
 
-    @Test
-    @DisplayName("'장애' 과제에 로그·접수 메모가 없거나 200자 미만이면 '과제 종류별 필수 자료' 만 실패한다")
-    void incidentNeedsMaterials() {
-        var onlyCode = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n")));
-        assertThat(failedNames(onlyCode)).containsExactly(DevCheckService.MATERIALS);
-        assertThat(result(onlyCode, DevCheckService.MATERIALS, null).detail()).contains("재현 로그나 접수 메모");
-
-        var tooShort = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("NOTES.md", "# 메모\n쿠폰 두 장에서 금액이 이상함\n")));
-        assertThat(failedNames(tooShort)).containsExactly(DevCheckService.MATERIALS);
-
-        // logs/ 아래 파일이면 이름은 상관없고, 여러 파일의 글자 수를 합친다
-        String line = "2026-11-20 10:01:02 WARN order=1042 coupons=2 total=3100 expected=6200 result=MISMATCH\n";
-        var logs = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("logs/order.log", line + line), f("logs/payment.log", line)));
-        assertThat(result(logs, DevCheckService.MATERIALS, null).ok()).isTrue();
-
-        var incidentMd = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("INCIDENT.md", NOTES)));
-        assertThat(result(incidentMd, DevCheckService.MATERIALS, null).ok()).isTrue();
-
-        // 장애가 아닌 과제는 자료가 없어도 된다
-        var feature = edit(onlyCode, b -> b.category("기능 구현"));
-        assertThat(failedNames(feature)).isEmpty();
-    }
-
     // ── 5. 후속 질문 ─────────────────────
 
     private static DevDraftDto.AltSolution alt(String note, String cart) {
@@ -315,29 +317,13 @@ class DevCheckServiceTest {
     }
 
     @Test
-    @DisplayName("요구사항·NOTES 의 해법 문장은 warn: 계산식을 말로 쓰거나 '~해야 합니다/~하도록 고치면' 이 있으면 걸리고, 현상·불변식 문장은 안 걸린다")
-    void solutionTextWarn() {
-        var good = TaskGenFixtures.good();
-        assertThat(result(good, DevCheckService.NO_SOLUTION_TEXT, null).ok()).isTrue();
-
-        var req = edit(good, b -> b.requirements(List.of("결제액 1원당 100분의 1점을 주고 가장 큰 정수로 맞춘다.", "승인된 주문 수는 재고를 넘지 않는다.")));
-        var rr = result(req, DevCheckService.NO_SOLUTION_TEXT, null);
-        assertThat(rr.ok()).isFalse();
-        assertThat(rr.level()).isEqualTo("warn");
-        assertThat(rr.needsRegeneration()).isFalse();
-        assertThat(rr.detail()).contains("요구사항: 결제액 1원당").doesNotContain("승인된 주문 수는");
-
-        var notes = edit(good, b -> b.files(List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("NOTES.md", NOTES + "재고 확인과 차감은 한 번에 확정해야 합니다.\n"))));
-        assertThat(result(notes, DevCheckService.NO_SOLUTION_TEXT, null).detail()).contains("NOTES.md: 재고 확인과 차감은 한 번에 확정해야 합니다");
-        assertThat(result(notes, DevCheckService.NO_SOLUTION_TEXT, null).needsRegeneration()).isFalse();
-    }
-
-    @Test
     @DisplayName("해법 문장 패턴: 실제 예시 문장 몇 개로 오탐·미탐을 조정한다")
     void solutionPatterns() {
         for (String hit : List.of("재고 차감과 확인을 한 번에 확정해야 합니다.", "락을 하나로 합치도록 고치면 해결됩니다.", "상태를 먼저 바꿔야 한다.",
-                "금액에서 차감액을 뺀 뒤 100으로 나눈다.", "합계를 곱해 내림한다.", "점수는 결제액의 100분의 1이며 가장 큰 정수를 쓴다.")) {
+                "금액에서 차감액을 뺀 뒤 100으로 나눈다.", "합계를 곱해 내림한다.", "점수는 결제액의 100분의 1이며 가장 큰 정수를 쓴다.",
+                // M5: 리뷰에서 나온 누출 문장(규칙 문장, 결함을 피하는 결과를 규칙으로 말함)
+                "한 구간의 남는 처리 여력은 다른 구간의 접수 건수를 처리한 실적으로 잡히지 않는다.",
+                "입고 결과가 이 범위를 넘는 요청은 IllegalArgumentException이 발생하며 재고는 바뀌지 않습니다.")) {
             assertThat(DevCheckService.NOTES_HINT.matcher(hit).find() || DevCheckService.REQ_HINT.matcher(hit).find()).as(hit).isTrue();
         }
         for (String miss : List.of("상품 A의 수량이 1인 상태에서 서로 다른 주문 두 건이 접수됐고 조회값은 -1이었습니다.",
@@ -391,7 +377,10 @@ class DevCheckServiceTest {
                         new DevDraftDto.WrongFix("음수에 1 을 더한다", List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return n < 0 ? n + 1 : n; } }\n")))),
                 "AI 가 고친 코드를 다른 입력으로도 확인했나요?",
                 List.of(new DevDraftDto.AltSolution("Math.abs 로 바로 구한다",
-                        List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return Math.abs(n); } }\n")))));
+                        List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return Math.abs(n); } }\n")))),
+                List.of(new DevDraftDto.JudgmentPoint("0 의 부호를 어떻게 표시할지", List.of("0", "-0"), "음수 입력에서 결과가 틀립니다.",
+                        List.of("음수 입력에서 결과가 틀립니다.", "고친다."))),
+                List.of(new DevDraftDto.HiddenFlaw("음수 입력을 그대로 돌려줌", "공개 테스트는 양수만 확인하므로 숨은 테스트와 대조", "negative")));
         var results = DevCheckService.forDraft(local, d).stream().map(c -> c.run(d)).toList();
         assertThat(results.stream().filter(GenCheckResultDto::needsRegeneration)).isEmpty();
         assertThat(results.stream().filter(r -> !r.ok()).map(GenCheckResultDto::name)).containsExactly(DevCheckService.AMOUNT); // 분량 경고만

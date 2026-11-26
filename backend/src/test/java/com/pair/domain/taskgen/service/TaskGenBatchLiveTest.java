@@ -37,7 +37,7 @@ import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.infra.storage.TaskFileStorage;
 
 /**
- * 실제 AI 로 과제 10개를 3개씩 동시에 만들고 내용을 build/taskgen-batch/ 에 내보낸다 (H2, 비용 발생).
+ * 실제 AI 로 과제 6개(DEV/BIZ × 20·40·60분, 주제는 매번 추천에서)를 3개씩 동시에 만들고 내용을 build/taskgen-batch/ 에 내보낸다 (H2, 비용 발생).
  * PAIR_TASKGEN_LIVE=1 일 때만 돈다. 데이터 폴더도 build/taskgen-batch/data 에 고정해 PDF 가 남는다.
  */
 @SpringBootTest
@@ -46,7 +46,7 @@ import com.pair.infra.storage.TaskFileStorage;
 @Tag("slow")
 class TaskGenBatchLiveTest {
 
-    static final int CONCURRENT = 3;
+    static final int CONCURRENT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_PARALLEL", "6")); // 라이브 배치만: 한 번에 도는 작업 수(운영 max-concurrent 와 무관)
     static final long ADMIN_ID = 1L;
     static final Path OUT = Path.of("build", "taskgen-batch").toAbsolutePath();
 
@@ -61,6 +61,7 @@ class TaskGenBatchLiveTest {
 
     @MockitoBean JavaMailSender mail;
     @Autowired TaskGenJobService jobs;
+    @Autowired TaskSuggestionService suggestions;
     @Autowired GeneratedTaskRepository writer;
     @Autowired TaskRepository records;
     @Autowired TaskFileRepository files;
@@ -68,24 +69,53 @@ class TaskGenBatchLiveTest {
     @Autowired ObjectMapper json;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
-    private static TaskGenRequest f(String track, String topic, String trap, String usage, int min) {
-        return new TaskGenRequest(track, topic, trap, usage, min).validated();
+    /** 한 번에 만들 과제 수. 6 = DEV/BIZ × 20·40·60분 1개씩. 12로 올리면 같은 조합을 한 번 더(6의 배수만). 환경변수 PAIR_TASKGEN_COUNT=12 (Gradle 은 -D 를 테스트 JVM 에 넘기지 않는다) */
+    static final int COUNT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_COUNT", "6"));
+    static final int[] MINUTES = {20, 40, 60};
+    /** 구성 고르기: PAIR_TASKGEN_TRACKS=DEV,BIZ PAIR_TASKGEN_MINUTES=40 이면 직군마다 40분 과제 1개씩. 둘 다 없으면 위 기본(6개) */
+    static final String TRACKS_ENV = System.getenv("PAIR_TASKGEN_TRACKS"), MINUTES_ENV = System.getenv("PAIR_TASKGEN_MINUTES");
+
+    /** 직군과 제한 시간 목록(직군마다 시간마다 1개). 환경변수를 안 쓰면 null */
+    static List<String> customTracks() {
+        return TRACKS_ENV == null || TRACKS_ENV.isBlank() && (MINUTES_ENV == null || MINUTES_ENV.isBlank()) ? null
+                : List.of((TRACKS_ENV == null || TRACKS_ENV.isBlank() ? "DEV,BIZ" : TRACKS_ENV).trim().split("\\s*,\\s*"));
+    }
+
+    /** 매번 새 주제: 과제 추천(TaskSuggestionService, 주제 없음 모드)에서 직군마다 받는다. 이미 있는 과제·앞서 받은 후보와는 겹치지 않는다 */
+    private List<TaskGenRequest> pickForms() {
+        List<String> tracks = customTracks();
+        int[] minutes = MINUTES;
+        int per;
+        if (tracks == null) {
+            if (COUNT < 6 || COUNT % 6 != 0) throw new IllegalArgumentException("count 는 6의 배수여야 합니다: " + COUNT);
+            tracks = List.of("DEV", "BIZ");
+            per = COUNT / 2;
+        } else {
+            if (MINUTES_ENV != null && !MINUTES_ENV.isBlank()) minutes = java.util.Arrays.stream(MINUTES_ENV.trim().split("\\s*,\\s*")).mapToInt(Integer::parseInt).toArray();
+            per = minutes.length; // 직군마다 시간마다 1개
+        }
+        List<TaskGenRequest> forms = new ArrayList<>();
+        for (String track : tracks) {
+            List<TaskSuggestionService.Suggestion> picked = new ArrayList<>();
+            for (int tries = 0; picked.size() < per && tries < 5; tries++) {
+                List<String> exclude = picked.stream().map(TaskSuggestionService.Suggestion::situation).toList();
+                var res = suggestions.suggest(new TaskSuggestionService.Request(track, "", exclude), ADMIN_ID);
+                for (var sg : res.suggestions()) if (picked.size() < per) picked.add(sg);
+            }
+            if (picked.size() < per) throw new IllegalStateException(track + " 추천을 " + per + "개 받지 못했습니다");
+            for (int i = 0; i < picked.size(); i++) {
+                var sg = picked.get(i);
+                forms.add(new TaskGenRequest(track, sg.situation(), sg.trap(), "SELF", minutes[i % minutes.length], sg.competencies()).validated());
+            }
+        }
+        return forms;
     }
 
     @Test
-    void generateTen() throws Exception {
-        List<TaskGenRequest> forms = List.of(
-                f("DEV", "동시 주문 재고 차감", "두 주문이 동시에 마지막 재고를 차감해 재고가 음수가 됨", "LIVE", 60),
-                f("DEV", "포인트 적립 계산", "할인 전 금액에 적립률을 곱한 뒤 절사해 적립액이 1원씩 어긋남", "SELF", 20),
-                f("DEV", "게시글 목록 페이지 나누기", "전체 개수가 페이지 크기의 배수일 때 마지막 페이지 수가 하나 많음", "SELF", 20),
-                f("DEV", "회의실 예약 겹침 확인", "앞 예약이 끝나는 시각에 시작하는 예약을 겹친다고 거절함", "LIVE", 40),
-                f("DEV", "무료 배송 기준 판정", "쿠폰 할인 후 금액이 아니라 할인 전 금액으로 무료 배송을 판단함", "SELF", 40),
-                f("BIZ", "구독 해지율 분석", "신규 가입 급증으로 분모가 커져 해지율이 좋아진 것처럼 보임", "SELF", 60),
-                f("BIZ", "신규 매장 입지 선정", "유동 인구 자료가 평일에만 측정되어 주말 상권을 놓침", "LIVE", 40),
-                f("BIZ", "마케팅 채널 예산 재배분", "마지막 클릭 기여만 보고 검색 광고 성과를 과대평가함", "LIVE", 60),
-                f("BIZ", "고객센터 상담 인력 배치", "하루 평균 문의량만 보고 점심 직후 몰리는 시간을 무시함", "SELF", 20),
-                f("BIZ", "가격 인상 효과 판단", "같은 기간 성수기 효과를 가격 인상 효과로 착각함", "SELF", 40));
+    void generateBatch() throws Exception {
+        List<TaskGenRequest> forms = pickForms();
 
+        clean(OUT); // 이전 실행·시도의 파일(옛 숨은 테스트, 안 쓰는 PDF·CSV)이 폴더에 섞이지 않게 비운다
         Files.createDirectories(OUT);
         long total = System.nanoTime();
         // 실제 서비스 경로(TaskGenJobService.start → status 폴링). 자리(max-concurrent=3)가 나야 다음 작업을 넣는다
@@ -102,8 +132,14 @@ class TaskGenBatchLiveTest {
         StringBuilder md = new StringBuilder("# 과제 생성 배치 결과\n\n");
         md.append("동시 실행 ").append(CONCURRENT).append("개 (TaskGenJobService 경로)\n\n");
         for (String l : lines) md.append(l);
+        double sum = 0;
+        for (String l : lines) {
+            var m = java.util.regex.Pattern.compile("cost=\\$([0-9.]+)").matcher(l == null ? "" : l);
+            if (m.find()) sum += Double.parseDouble(m.group(1));
+        }
+        md.append(String.format(java.util.Locale.ROOT, "\n비용 합계 $%.3f (각 줄의 attempts=시도 수, cost=토큰×가격)\n", sum));
         md.append("\n총 ").append(sec).append("초 (작업별 시간은 각 줄의 '초', 시작 후 완료까지)\n");
-        Files.writeString(OUT.resolve("summary.md"), md.toString());
+        Files.writeString(OUT.resolve("summary.md"), md.toString(), StandardCharsets.UTF_8);
     }
 
     /** 한 과제를 만든다. 한 과제가 실패해도 예외를 밖으로 내보내지 않고 summary 한 줄로 남긴다 */
@@ -128,25 +164,27 @@ class TaskGenBatchLiveTest {
             code = st.taskCode();
             export(OUT.resolve(nn + "-" + code), form, code);
 
-            String tokens = "-";
+            String tokens = "-", cost = "미제공";
             int attempts = 0;
             try {
                 JsonNode rep = json.readTree(writer.report(code));
                 tokens = rep.path("inputTokens").asLong() + "/" + rep.path("outputTokens").asLong();
                 attempts = rep.path("attempts").asInt();
+                JsonNode c = rep.path("details").path("cost");
+                if (!c.isMissingNode()) cost = String.format(java.util.Locale.ROOT, "$%.3f%s", c.path("totalUsd").asDouble(), c.path("stoppedByCap").asBoolean() ? "(비용 상한)" : "");
             } catch (Exception ignore) { }
             System.out.println("[batch " + nn + "] 완료 code=" + code + " passed=" + st.passed() + " " + sec + "초");
             return "- " + nn + " | " + form.track() + " | " + form.minutes() + "분 | " + form.usage() + " | " + code
                     + " | passed=" + st.passed() + " | attempts=" + attempts + " | " + sec + "초 | tokens(in/out)=" + tokens
-                    + " | cost=미제공 | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
+                    + " | cost=" + cost + " | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
         } catch (Throwable e) {
             long sec = Math.round((System.nanoTime() - t) / 1e9);
             e.printStackTrace();
             try {
                 Path dir = OUT.resolve(nn + "-" + (code == null ? "error" : code));
                 Files.createDirectories(dir);
-                Files.writeString(dir.resolve("request.json"), json.writerWithDefaultPrettyPrinter().writeValueAsString(form));
-                Files.writeString(dir.resolve("error.txt"), String.valueOf(e));
+                Files.writeString(dir.resolve("request.json"), json.writerWithDefaultPrettyPrinter().writeValueAsString(form), StandardCharsets.UTF_8);
+                Files.writeString(dir.resolve("error.txt"), String.valueOf(e), StandardCharsets.UTF_8);
             } catch (Exception ignore) { }
             return "- " + nn + " | " + form.track() + " | " + form.minutes() + "분 | " + form.usage() + " | 예외 | " + sec
                     + "초 | " + String.valueOf(e).replace('\n', ' ') + "\n";
@@ -170,11 +208,20 @@ class TaskGenBatchLiveTest {
                 .map(GenCheckResultDto::name).collect(Collectors.joining(","));
     }
 
+    /** 폴더와 안의 모든 파일을 지운다(없으면 아무것도 안 함) */
+    static void clean(Path dir) throws java.io.IOException {
+        if (!Files.exists(dir)) return;
+        try (var walk = Files.walk(dir)) {
+            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(p);
+        }
+    }
+
     private void export(Path dir, TaskGenRequest form, String code) throws Exception {
+        clean(dir); // 같은 코드로 다시 내보낼 때 옛 파일이 남지 않게
         Files.createDirectories(dir);
         var pretty = json.writerWithDefaultPrettyPrinter();
-        Files.writeString(dir.resolve("request.json"), pretty.writeValueAsString(form));
-        Files.writeString(dir.resolve("report.json"), pretty.writeValueAsString(json.readTree(writer.report(code))));
+        Files.writeString(dir.resolve("request.json"), pretty.writeValueAsString(form), StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("report.json"), pretty.writeValueAsString(json.readTree(writer.report(code))), StandardCharsets.UTF_8);
         Task task = records.findByCode(code).orElseThrow();
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("code", task.getCode());
@@ -188,7 +235,7 @@ class TaskGenBatchLiveTest {
         m.put("description", task.getDescription());
         m.put("requirements", task.getRequirements());
         m.put("settings", task.getSettings() == null ? null : json.readTree(task.getSettings()));
-        Files.writeString(dir.resolve("task.json"), pretty.writeValueAsString(m));
+        Files.writeString(dir.resolve("task.json"), pretty.writeValueAsString(m), StandardCharsets.UTF_8);
 
         List<TaskFile> mine = new ArrayList<>(files.findAll().stream().filter(x -> task.getId().equals(x.getTaskId())).toList());
         Path fileRoot = dir.resolve("files").normalize();
@@ -212,8 +259,8 @@ class TaskGenBatchLiveTest {
             e.put("storageKey", tf.getStorageKey());
             return e;
         }).toList();
-        Files.writeString(dir.resolve("files.json"), pretty.writeValueAsString(meta));
-        Files.writeString(dir.resolve("questions.json"), pretty.writeValueAsString(questions(task.getId(), code)));
+        Files.writeString(dir.resolve("files.json"), pretty.writeValueAsString(meta), StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("questions.json"), pretty.writeValueAsString(questions(task.getId(), code)), StandardCharsets.UTF_8);
     }
 
     /** 문항(객관식·단답형·후속 질문) 전체. calc 와 흔한 오답은 DB 에 없어 report.json 의 details.questionNotes 에서 가져온다 */

@@ -22,9 +22,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import com.pair.infra.ai.AiUnavailableException;
-import com.pair.infra.ai.ClaudeJudgeClient;
+import com.pair.infra.ai.ModelClient;
+import com.pair.infra.ai.ModelJudge;
 import com.pair.infra.ai.Judge;
-import com.pair.infra.ai.OpenAiJudgeClient;
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.dto.ChatTurnStateDto;
@@ -82,7 +82,7 @@ public class ScoringService {
     });
 
     public ScoringService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
-                          ClaudeJudgeClient claudeJudge, OpenAiJudgeClient openAiJudge, PairProperties props,
+                          ModelClient models, PairProperties props,
                           PromptVersionStateRepository prompts, ReferenceDocService referenceDocs, ScoringResultRepository records,
                           com.pair.domain.question.service.QuestionService questions,
                           ObjectProvider<ScoringQueueService> queues) {
@@ -90,7 +90,7 @@ public class ScoringService {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
-        this.judges = List.of(claudeJudge, openAiJudge);
+        this.judges = List.of(new ModelJudge("claude", props.judge().claude(), models), new ModelJudge("openai", props.judge().openai(), models));
         this.props = props;
         this.prompts = prompts;
         this.referenceDocs = referenceDocs;
