@@ -1,5 +1,9 @@
 server:
   port: 8180
+  # 안전한 종료: 종료 신호(SIGTERM)를 받으면 새 요청은 받지 않고, 처리 중인 요청은 timeout-per-shutdown-phase 까지 끝내게 둔다.
+  # 그 뒤 채점(ScoringService, ScoringWorkerService)이 pair.scoring.shutdown-wait 까지 마저 끝낸다.
+  # 둘을 더한 시간보다 Docker 의 stop_grace_period(docker-compose.prod.yml)가 길어야 강제 종료(SIGKILL)되지 않는다
+  shutdown: graceful
 
 # 모니터링 (Prometheus + Grafana). 지표는 사용자용 포트(8180)와 분리한 관리 포트에서만 연다.
 # 운영에서는 이 포트를 보안 그룹·방화벽으로 내부망에만 열어야 한다 (지표에 내부 상태가 드러난다).
@@ -27,6 +31,8 @@ management:
 spring:
   application:
     name: pair-backend
+  lifecycle:
+    timeout-per-shutdown-phase: ${PAIR_SHUTDOWN_TIMEOUT:30s}
   # 비밀번호·API 키는 저장소 루트(pAIr-back)의 application-secret.yml 에 둔다 (.gitignore 처리, 커밋 금지).
   # 키 이름: PAIR_DB_PASSWORD, OPENAI_API_KEY, ANTHROPIC_API_KEY (PAIR_DB_URL, PAIR_DB_USER 로 주소·계정도 바꿀 수 있다)
   # bootRun 은 pAIr-back 에서, IDE 는 backend 에서 실행될 수 있어 두 위치를 모두 본다
@@ -293,6 +299,8 @@ pair:
   # 서버를 켤 때 SCORING 에 남은 응시(재시작으로 끊긴 채점)를 다시 채점에 맡긴다 (ScoringRecoveryService)
   scoring:
     recover-on-startup: ${PAIR_SCORING_RECOVER_ON_STARTUP:true}
+    # 서버를 끌 때 하던 채점이 끝나기를 기다리는 최대 시간 (채점 1건은 보통 1분 안팎). 시작하지 않은 채점은 다음 시작 때 다시 맡긴다
+    shutdown-wait: ${PAIR_SCORING_SHUTDOWN_WAIT:90s}
 
   # 다시 채점: 응시 하나를 24시간에 채점할 수 있는 횟수(첫 채점과 채점 큐의 자동 재시도 포함). 넘으면 429
   rescore:

@@ -26,7 +26,7 @@ class ScoringWorkerServiceTest {
     @BeforeEach
     void setUp() {
         ScoringQueueProperties props = new ScoringQueueProperties(true, 1, 3, Duration.ofSeconds(30), Duration.ofMinutes(15), null);
-        worker = new ScoringWorkerService(queue, scoring, props);
+        worker = new ScoringWorkerService(queue, scoring, props, Duration.ofSeconds(5));
     }
 
     private static ScoringJobDto job(int attempt) {

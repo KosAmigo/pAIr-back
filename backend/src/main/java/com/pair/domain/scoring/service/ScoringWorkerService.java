@@ -12,6 +12,7 @@ import jakarta.annotation.PreDestroy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -36,9 +37,12 @@ public class ScoringWorkerService {
     private final ScoringQueueProperties props;
     private final List<Thread> workers = new ArrayList<>();
     private ScheduledExecutorService maintenance;
+    private final Duration shutdownWait;
     private volatile boolean running;
 
-    public ScoringWorkerService(ScoringQueueService queue, ScoringService scoring, ScoringQueueProperties props) {
+    public ScoringWorkerService(ScoringQueueService queue, ScoringService scoring, ScoringQueueProperties props,
+                                @Value("${pair.scoring.shutdown-wait:90s}") Duration shutdownWait) {
+        this.shutdownWait = shutdownWait;
         this.queue = queue;
         this.scoring = scoring;
         this.props = props;
@@ -64,11 +68,30 @@ public class ScoringWorkerService {
         log.info("채점 큐 작업자 {}개를 시작했습니다", props.workers());
     }
 
+    /**
+     * 안전한 종료: 새 작업은 꺼내지 않고, 하던 채점은 shutdownWait 까지 끝내게 둔다. 그래도 남은 작업자만 중단시킨다.
+     * 중단된 작업은 Redis 의 처리 중 목록에 남아 recoverStale 이 되살린다.
+     */
     @PreDestroy
     void stop() {
         running = false;
-        workers.forEach(Thread::interrupt);
         if (maintenance != null) maintenance.shutdownNow();
+        long deadline = System.nanoTime() + shutdownWait.toNanos();
+        for (Thread t : workers) {
+            long left = deadline - System.nanoTime();
+            try {
+                if (left > 0) t.join(Duration.ofNanos(left));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        for (Thread t : workers) {
+            if (t.isAlive()) {
+                log.warn("채점 작업자가 {}초 안에 끝나지 않아 중단합니다: {}", shutdownWait.toSeconds(), t.getName());
+                t.interrupt();
+            }
+        }
     }
 
     private void loop() {
