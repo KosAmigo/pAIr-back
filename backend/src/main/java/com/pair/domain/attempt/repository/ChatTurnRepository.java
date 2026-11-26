@@ -17,4 +17,22 @@ public interface ChatTurnRepository extends JpaRepository<ChatTurn, Long> {
     List<Long> findAttemptIdsWithTurns(Collection<Long> attemptIds);
 
     Optional<ChatTurn> findByAttemptIdAndTurnNo(Long attemptId, int turnNo);
+
+    /** 모델별 토큰 합계 (회차 AI 비용) */
+    interface ModelUsage {
+        String getModel();
+        long getCalls();
+        long getInputTokens();
+        long getOutputTokens();
+    }
+
+    /** 회차 응시자들의 AI 답변(AI 턴) 토큰을 모델별로 더한다 */
+    @Query("""
+            select t.model as model, count(t) as calls,
+                   coalesce(sum(t.inputTokens), 0) as inputTokens, coalesce(sum(t.outputTokens), 0) as outputTokens
+            from ChatTurn t, com.pair.domain.attempt.entity.Attempt a, com.pair.domain.exam.entity.ExamParticipant p
+            where t.attemptId = a.id and a.participantId = p.id and p.session.id = :sessionId and t.role = 'AI'
+            group by t.model
+            """)
+    List<ModelUsage> sumBySession(@org.springframework.data.repository.query.Param("sessionId") Long sessionId);
 }

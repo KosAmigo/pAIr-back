@@ -69,13 +69,16 @@ public class ExamConsoleController {
     private final ConnectionGraceService grace;
     private final ConsoleAccessService access;
     private final com.pair.domain.exam.service.SnapshotRetentionService retention;
+    private final com.pair.domain.exam.service.SessionAiCostService aiCosts;
     private final com.pair.domain.exam.service.EvidenceClipService clips;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
             AutoSubmitService autoSubmit, ConnectionGraceService grace, ConsoleAccessService access,
             com.pair.domain.exam.service.EnvCheckService envCheck, com.pair.domain.exam.service.NoticeService notices,
-            com.pair.domain.exam.service.SnapshotRetentionService retention, com.pair.domain.exam.service.EvidenceClipService clips) {
+            com.pair.domain.exam.service.SnapshotRetentionService retention, com.pair.domain.exam.service.EvidenceClipService clips,
+            com.pair.domain.exam.service.SessionAiCostService aiCosts) {
         this.retention = retention;
+        this.aiCosts = aiCosts;
         this.clips = clips;
         this.envCheck = envCheck;
         this.notices = notices;
@@ -282,6 +285,14 @@ public class ExamConsoleController {
     public List<NoticeResponse> noticesOf(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long participantId) {
         access.requireSession(user, sessionId);
         return notices.listOf(sessionId, participantId);
+    }
+
+    /** 회차 AI 비용(채팅·채점 토큰과 추정 금액). 관리자만 본다 (기업은 무료로 쓰므로 원가를 보여 주지 않는다) */
+    @GetMapping("/{sessionId}/ai-cost")
+    public com.pair.domain.exam.dto.SessionAiCostResponse aiCost(CurrentUser user, @PathVariable Long sessionId) {
+        if (!user.isAdmin()) throw new com.pair.global.error.ForbiddenException("관리자만 볼 수 있습니다.");
+        access.requireSession(user, sessionId);
+        return aiCosts.cost(sessionId);
     }
 
     @GetMapping("/{sessionId}/results")
