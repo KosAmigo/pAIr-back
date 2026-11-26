@@ -76,3 +76,6 @@ poc/rag/extract/gradle/wrapper/gradle-wrapper.properties
 poc/rag/extract/gradle/wrapper/gradle-wrapper.jar
 poc/rag/extract/gradlew
 poc/rag/extract/gradlew.bat
+
+# 부하 테스트 결과(loadtest/submit_load.py)
+loadtest/results/

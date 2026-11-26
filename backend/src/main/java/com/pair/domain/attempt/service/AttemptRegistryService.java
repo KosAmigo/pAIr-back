@@ -43,6 +43,15 @@ public class AttemptRegistryService {
         }, () -> log.warn("DB 에 없는 응시를 제출하려 함: {}", attemptId));
     }
 
+    /**
+     * 후속 질문 마무리를 차지한다: FOLLOWUP 인 응시만 SCORING 으로 바꾼다(DB 에서 한 번에).
+     * @return 이 요청이 바꿨으면 true, 다른 요청이 먼저 바꿨으면 false. DB 응시가 아니면(숫자 ID 아님) 막을 것이 없어 true
+     */
+    public boolean startScoring(String attemptId, Instant at) {
+        Long id = parse(attemptId);
+        return id == null || records.startScoring(id, at) > 0;
+    }
+
     public static Long parse(String attemptId) {
         if (attemptId == null || !attemptId.matches("\\d{1,18}")) return null;
         return Long.valueOf(attemptId);

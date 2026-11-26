@@ -18,7 +18,8 @@ final class SandboxServerTestSupport {
 
     static ConfigurableApplicationContext start(String token) {
         return new SpringApplicationBuilder(SandboxServerConfig.class).profiles("sandbox-server")
-                .run("--server.port=0", "--pair.run.mode=local", "--pair.run.remote-token=" + token,
+                // 관리 포트(지표, application.yml 기본 8181)도 무작위로 둔다. 고정이면 같은 포트를 쓰는 다른 컨텍스트와 부딪혀 가끔 실패했다
+                .run("--server.port=0", "--management.server.port=0", "--pair.run.mode=local", "--pair.run.remote-token=" + token,
                         "--pair.run.timeout-seconds=60", "--logging.level.root=WARN");
     }
 

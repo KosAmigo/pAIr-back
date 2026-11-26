@@ -12,6 +12,7 @@ import jakarta.annotation.PreDestroy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -36,9 +37,12 @@ public class ScoringWorkerService {
     private final ScoringQueueProperties props;
     private final List<Thread> workers = new ArrayList<>();
     private ScheduledExecutorService maintenance;
+    private final Duration shutdownWait;
     private volatile boolean running;
 
-    public ScoringWorkerService(ScoringQueueService queue, ScoringService scoring, ScoringQueueProperties props) {
+    public ScoringWorkerService(ScoringQueueService queue, ScoringService scoring, ScoringQueueProperties props,
+                                @Value("${pair.scoring.shutdown-wait:90s}") Duration shutdownWait) {
+        this.shutdownWait = shutdownWait;
         this.queue = queue;
         this.scoring = scoring;
         this.props = props;
@@ -46,6 +50,12 @@ public class ScoringWorkerService {
 
     @PostConstruct
     void start() {
+        // 작업자 이름은 프로세스마다 새로 정해지므로, 지금 처리 중 목록에 있는 작업은 모두 이전 프로세스(재시작·강제 종료)가 남긴 것이다.
+        // staleAfter 를 기다리지 않고 바로 되살린다. 서버가 하나라는 전제(두 서버가 겹쳐 돌면 다시 검토)
+        guarded(() -> {
+            int n = queue.recoverStale(Duration.ZERO, props.maxAttempts());
+            if (n > 0) log.info("이전 서버가 끝내지 못한 채점 작업 {}건을 되살렸습니다", n);
+        });
         running = true;
         for (int i = 1; i <= props.workers(); i++) {
             Thread t = new Thread(this::loop, "scoring-worker-" + i);
@@ -64,11 +74,30 @@ public class ScoringWorkerService {
         log.info("채점 큐 작업자 {}개를 시작했습니다", props.workers());
     }
 
+    /**
+     * 안전한 종료: 새 작업은 꺼내지 않고, 하던 채점은 shutdownWait 까지 끝내게 둔다. 그래도 남은 작업자만 중단시킨다.
+     * 중단된 작업은 Redis 의 처리 중 목록에 남아 recoverStale 이 되살린다.
+     */
     @PreDestroy
     void stop() {
         running = false;
-        workers.forEach(Thread::interrupt);
         if (maintenance != null) maintenance.shutdownNow();
+        long deadline = System.nanoTime() + shutdownWait.toNanos();
+        for (Thread t : workers) {
+            long left = deadline - System.nanoTime();
+            try {
+                if (left > 0) t.join(Duration.ofNanos(left));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        for (Thread t : workers) {
+            if (t.isAlive()) {
+                log.warn("채점 작업자가 {}초 안에 끝나지 않아 중단합니다: {}", shutdownWait.toSeconds(), t.getName());
+                t.interrupt();
+            }
+        }
     }
 
     private void loop() {

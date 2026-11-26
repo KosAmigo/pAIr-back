@@ -18,6 +18,9 @@ services:
   backend:
     image: ghcr.io/kosamigo/pair-back:${BACKEND_TAG:-latest}
     restart: unless-stopped
+    # 안전한 종료: 요청 마무리(30초) + 하던 채점 마무리(최대 90초)를 기다린다. 기본 10초면 채점 중에 강제 종료된다.
+    # application.yml 의 timeout-per-shutdown-phase, pair.scoring.shutdown-wait 를 늘리면 이 값도 같이 늘린다
+    stop_grace_period: 150s
     ports:
       - "127.0.0.1:8181:8181"
     environment:

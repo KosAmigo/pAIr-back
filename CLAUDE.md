@@ -41,6 +41,7 @@ com.pair
 ## Code
 - Java 21, Spring Boot. API requests and responses use `dto/` types.
 - Put transactions on service methods. Watch for N+1 queries.
+- AI model calls go through `infra/ai/ModelClient` (`json(...)` for structured output, `text(...)` for plain text). Pass the model name, prompt, max tokens and effort; it picks the vendor from the name (`claude-*` → Anthropic, `gpt-*` → OpenAI) and returns token counts. Keep model names in settings, not code, so switching models is a config change. Don't add new per-vendor clients or call Spring AI chat models directly. Exceptions: streaming (`AssistantClient`) and the OpenAI Batch API (`BatchClient`). Need a new vendor or call type? Extend `ModelClient`.
 
 ## Tests (keep the build fast)
 Summary for people: pAIr-docs `설계/백엔드_테스트와_빌드.md`.

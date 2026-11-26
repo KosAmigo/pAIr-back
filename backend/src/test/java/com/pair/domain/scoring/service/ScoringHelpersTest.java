@@ -75,4 +75,16 @@ class ScoringHelpersTest {
         Instant start = Instant.parse("2026-11-11T00:00:00Z");
         assertEquals("01:02:03", ScoringService.clock(start, start.plusSeconds(3723)));
     }
+
+    @Test
+    void judgeThreadsGrowWithParallelScoringsAndCalls() {
+        com.pair.infra.ai.Judge claude = org.mockito.Mockito.mock(com.pair.infra.ai.Judge.class);
+        com.pair.infra.ai.Judge openai = org.mockito.Mockito.mock(com.pair.infra.ai.Judge.class);
+        org.mockito.Mockito.when(claude.calls()).thenReturn(1);
+        org.mockito.Mockito.when(openai.calls()).thenReturn(2);
+        // 채점 1건에 호출 3번: 동시 4건이면 12개, 8건이면 24개. 아주 작아도 8개는 둔다
+        assertEquals(12, ScoringService.judgeThreads(4, List.of(claude, openai)));
+        assertEquals(24, ScoringService.judgeThreads(8, List.of(claude, openai)));
+        assertEquals(8, ScoringService.judgeThreads(1, List.of(claude, openai)));
+    }
 }

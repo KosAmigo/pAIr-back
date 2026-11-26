@@ -75,6 +75,7 @@ class BizFlowTest {
     static void props(DynamicPropertyRegistry r) {
         r.add("pair.data-dir", () -> dataDir.toString());
         r.add("pair.taskgen.file-storage", () -> "local");
+        r.add("pair.taskgen.pipeline", () -> "oneshot"); // 한 번에 과제 전체를 돌려주는 가짜 AI 용
     }
 
     static class ScriptedAi implements TaskGenAiService {
@@ -177,7 +178,7 @@ class BizFlowTest {
 
         assertThat(o.passed()).isTrue();
         assertThat(o.attempts()).isEqualTo(1);
-        assertThat(o.checks()).hasSize(13);
+        assertThat(o.checks()).hasSize(14);
         assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
 
@@ -239,7 +240,7 @@ class BizFlowTest {
 
         // report.json: 함정, 검사 7개
         var report = json.readTree(writer.report("biz-pass"));
-        assertThat(report.get("checks")).hasSize(13);
+        assertThat(report.get("checks")).hasSize(14);
         assertThat(report.get("details").get("trap").get("evidence").asText()).isEqualTo(BizFixtures.EVIDENCE);
         assertThat(report.get("details").get("solverModel").asText()).isEqualTo("claude-sonnet-5-5");
         assertThat(report.get("form").get("track").asText()).isEqualTo("BIZ");
@@ -325,43 +326,61 @@ class BizFlowTest {
     }
 
     @Test
-    @DisplayName("LIVE 에서 AI 가 함정 문항을 모두 맞히면 AI 답과 다시 설계 지시를 붙여 1번 다시 만들고, 이번엔 틀리면 통과해 저장한다 (M5)")
-    void soloSolvedRegeneratesForLive() throws Exception {
+    @DisplayName("LIVE 에서 AI 가 함정 문항을 모두 맞혀도 다시 만들지 않고 '잡음'으로 기록해 통과·저장한다 (참고 지표)")
+    void soloSolvedOnlyRecordedForLive() throws Exception {
         ai.script.add(BizFixtures.good("biz-live-1"));
-        ai.script.add(BizFixtures.good("biz-live-2"));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "23560", "2000")));
+        ai.script.add(BizFixtures.good("biz-live-never"));
+        ai.soloScript.add(BizFixtures.solo("1", "2", "21080", "2000"));
         var live = new com.pair.domain.taskgen.dto.TaskGenRequest("BIZ", "저가 요금제 출시 여부", "설문 의향을 실제 전환율로 보정하지 않음", "LIVE", 60);
         var o = generator.generate(live, 1L, steps::add);
 
         assertThat(o.passed()).isTrue();
-        assertThat(o.attempts()).isEqualTo(2);
-        assertThat(o.taskCode()).isEqualTo("biz-live-2");
-        assertThat(ai.soloUsers).hasSize(2);
-        assertThat(ai.users.get(1)).contains(BizSoloSolveService.NAME, "그대로 내도 통과", "AI 답 21080", "다시 설계 지시");
-        assertThat(steps).containsExactly("생성 중", "확인 중", "다시 생성 중", "확인 중", "저장 중");
-        var report = json.readTree(writer.report("biz-live-2"));
-        assertThat(report.get("details").get("soloAnswers").get(2).asText()).isEqualTo("23560");
+        assertThat(o.attempts()).isEqualTo(1);
+        assertThat(o.taskCode()).isEqualTo("biz-live-1");
+        assertThat(ai.users).hasSize(1);
+        assertThat(ai.soloUsers).hasSize(1);
+        assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
+        assertThat(o.checks()).filteredOn(c -> c.name().equals(BizSoloSolveService.NAME)).singleElement().satisfies(c -> {
+            assertThat(c.ok()).isTrue();
+            assertThat(c.level()).isEqualTo(GenCheckResultDto.WARN);
+            assertThat(c.detail()).contains("숨은 결함을 잡았어요", "AI 답 21080");
+        });
+        var report = json.readTree(writer.report("biz-live-1"));
+        assertThat(report.get("details").get("soloAnswers").get(2).asText()).isEqualTo("21080");
         assertThat(report.get("details").get("soloTokens").get("input").asLong()).isEqualTo(600);
-        assertThat(records.findByCode("biz-live-1")).isEmpty();
+        // E2·E3 보고용 정보
+        assertThat(report.get("details").get("judgmentPoints").get(0).get("question").asText()).isEqualTo(BizFixtures.JUDGMENT.question());
+        assertThat(report.get("details").get("hiddenFlaws").get(0).get("caughtBy").asText()).isEqualTo("Q3, 결론");
     }
 
     @Test
-    @DisplayName("SELF 에서도 그대로 내도 통과하면 fail 이라 1회 다시 만들고, 다시 만들어도 풀리면 실패 표시와 함께 저장한다")
-    void soloSolvedFailsForSelf() {
+    @DisplayName("SELF 에서 AI 가 함정에 빠져도(지나침) 통과하고 기록만 남는다")
+    void soloMissedRecorded() {
         ai.script.add(BizFixtures.good("biz-self-1"));
-        ai.script.add(BizFixtures.good("biz-self-2"));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
-        ai.soloScript.add(new com.pair.domain.taskgen.dto.SoloBizAnswerDto(List.of("1", "2", "21080", "2000")));
+        ai.soloScript.add(BizFixtures.solo("1", "2", "23560", "2000"));
         var o = generate();
 
-        assertThat(o.passed()).isFalse();
-        assertThat(o.attempts()).isEqualTo(2);
-        assertThat(ai.users.get(1)).contains(BizSoloSolveService.NAME, "다시 설계 지시");
+        assertThat(o.passed()).isTrue();
+        assertThat(o.attempts()).isEqualTo(1);
         assertThat(o.checks()).filteredOn(c -> c.name().equals(BizSoloSolveService.NAME)).singleElement().satisfies(c -> {
-            assertThat(c.ok()).isFalse();
-            assertThat(c.level()).isEqualTo(GenCheckResultDto.FAIL);
+            assertThat(c.ok()).isTrue();
+            assertThat(c.detail()).contains("숨은 결함을 지나쳤어요", "Q3(AI 답 23560, 정답 21080)");
         });
+    }
+
+    @Test
+    @DisplayName("E2: 판단 지점의 근거 문장이 자료에 없으면 fail 이라 1회 다시 만들고, 실패 내용이 프롬프트에 들어간다")
+    void judgmentFailRegenerates() {
+        var missing = new com.pair.domain.taskgen.dto.DevDraftDto.JudgmentPoint("정할 것", java.util.List.of("가", "나"), "자료 어디에도 없는 문장입니다 정말로");
+        ai.script.add(BizFixtures.edit(BizFixtures.good("biz-e2-1"), b -> b.judgmentPoints(java.util.List.of(missing))));
+        ai.script.add(BizFixtures.good("biz-e2-2"));
+        ai.soloScript.add(BizFixtures.solo("1", "2", "23560", "2000"));
+        var o = generate();
+
+        assertThat(o.attempts()).isEqualTo(2);
+        assertThat(o.passed()).isTrue();
+        assertThat(ai.users.get(1)).contains(BizCheckService.JUDGMENT, "근거 문장을 응시자 자료에서 찾지 못했습니다");
+        assertThat(ai.soloUsers).hasSize(1); // 첫 Draft 는 fail 이라 돌리지 않고 최종 Draft 에만 1번
     }
 
     // ── API ─────────────────────────────────
@@ -388,7 +407,7 @@ class BizFlowTest {
         var j = json.readTree(done);
         assertThat(j.get("status").asText()).as(done).isEqualTo("DONE");
         assertThat(j.get("taskCode").asText()).isEqualTo("biz-api");
-        assertThat(j.get("checks")).hasSize(13);
+        assertThat(j.get("checks")).hasSize(14);
         assertThat(records.findByCode("biz-api").orElseThrow().getTrack()).isEqualTo("BIZ");
         assertThat(pdfFilesOnDisk()).isPositive();
     }
