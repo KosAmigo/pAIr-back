@@ -36,6 +36,16 @@ public class CompanyInquiryController {
                 .body(CSV_TEMPLATE.getBytes(StandardCharsets.UTF_8));
     }
 
+    /** 회원 명단 엑셀 양식(회차 대상자 양식과 같은 모양: 예시 행, 역할 목록, 작성 안내 시트) */
+    @GetMapping("/members-template.xlsx")
+    public ResponseEntity<byte[]> memberTemplateXlsx() {
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename("기업_회원명단_양식.xlsx", StandardCharsets.UTF_8).build();
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(com.pair.domain.company.service.CompanyMemberWorkbookService.template());
+    }
+
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<InquiryResponse> submit(
             @RequestParam String companyName,
@@ -44,9 +54,9 @@ public class CompanyInquiryController {
             @RequestParam String contactEmail,
             @RequestParam(required = false) String message,
             @RequestParam("members") MultipartFile membersFile) {
-        if (membersFile == null || membersFile.isEmpty()) throw new IllegalArgumentException("회원 명단 CSV 파일을 올려 주세요.");
+        if (membersFile == null || membersFile.isEmpty()) throw new IllegalArgumentException("회원 명단 파일(엑셀 또는 CSV)을 올려 주세요.");
         String filename = membersFile.getOriginalFilename() == null ? "" : membersFile.getOriginalFilename().toLowerCase();
-        if (!filename.endsWith(".csv")) throw new IllegalArgumentException("회원 명단은 CSV 파일만 올릴 수 있습니다.");
+        if (!filename.endsWith(".csv") && !filename.endsWith(".xlsx")) throw new IllegalArgumentException("회원 명단은 엑셀(.xlsx) 또는 CSV 파일만 올릴 수 있습니다.");
         try {
             return ResponseEntity.status(201).body(inquiries.submit(companyName, businessNo, contactName, contactEmail,
                     message, membersFile.getBytes()));
