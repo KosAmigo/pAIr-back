@@ -32,6 +32,7 @@ final class DevBlueprintService {
             }
         }
         bad.addAll(addedMethodCases(b));
+        bad.addAll(exampleBasisCases(b));
         bad.addAll(pinnedJudgments(b));
         bad.addAll(flawHidden(b));
         bad.addAll(flawCasesInRequirements(b));
@@ -109,7 +110,39 @@ final class DevBlueprintService {
         return bad.stream().distinct().toList();
     }
 
-    private static final Pattern WHERE_PATH = Pattern.compile("src/[\\w/]*?([A-Z]\\w*)\\.java");
+    private static final int MIN_EXAMPLE_INPUT = 8;
+
+    /**
+     * 사례 근거가 예(examples) 문장이면 그 사례 입력은 그 예의 입력과 같아야 한다(g8 04: 근거는 도윤·allowed 예인데 사례는 지호·cachedAllowed →
+     * 테스트 근거 관문 실패). 근거에 예의 입력이 그대로 들어 있을 때만 보고(정규화 비교), 예의 따옴표 값·숫자·메서드 호출이 사례 situation 에 모두 있어야 한다
+     */
+    static List<String> exampleBasisCases(BlueprintDto b) {
+        List<String> bad = new ArrayList<>();
+        for (var c : nz(b.cases())) {
+            if (blank(c.basis()) || blank(c.situation())) continue;
+            String basis = GenTextService.norm(c.basis());
+            String situation = GenTextService.norm(c.situation());
+            for (var e : nz(b.examples())) {
+                String input = GenTextService.norm(e.input());
+                if (input.length() < MIN_EXAMPLE_INPUT || !basis.contains(input)) continue;
+                List<String> missing = new ArrayList<>();
+                for (String l : literals(e.input())) {
+                    if (!situation.contains(GenTextService.norm(l))) missing.add(l);
+                }
+                var m = CALL.matcher(e.input());
+                while (m.find()) {
+                    if (!Pattern.compile("(?<![\\w])" + Pattern.quote(m.group(1)) + "\\s*\\(").matcher(c.situation()).find()) missing.add(m.group(1) + "(");
+                }
+                if (!missing.isEmpty()) {
+                    bad.add("사례 " + c.name() + " 의 근거는 예 '" + e.input() + "' 인데 사례 입력(situation)에 그 예의 " + missing.stream().distinct().toList()
+                            + " 가 없습니다. 근거가 예면 situation 은 그 예와 같은 호출·값을 쓰고, 다른 입력을 쓰려면 그 결과를 끌어낼 수 있는 사실(facts)을 근거로 하세요");
+                }
+            }
+        }
+        return bad.stream().distinct().toList();
+    }
+
+    private static final Pattern WHERE_PATH =Pattern.compile("src/[\\w/]*?([A-Z]\\w*)\\.java");
     private static final Pattern WHERE_CALL = Pattern.compile("(?<![\\w.])([A-Z]\\w*)\\.([a-z]\\w*)");
 
     /** 결함 위치(flaws.where)가 가리키는 클래스 이름: 경로 src/…/X.java 의 X 와 "X.method" 의 X */

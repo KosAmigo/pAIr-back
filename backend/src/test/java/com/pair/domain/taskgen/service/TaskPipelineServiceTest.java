@@ -569,7 +569,7 @@ class TaskPipelineServiceTest {
         assertThat(TaskPromptService.writingBizDoc(20, false, 2)).contains("write only background");
         assertThat(TaskPromptService.QUESTIONS_BIZ).contains("Do not put another question's value").contains("no explanation sentences");
         assertThat(TaskPromptService.answerBiz("깊이")).contains("You write only the answer keys").doesNotContain("taskFollowUp");
-        assertThat(TaskPromptService.answerDev(20)).contains("the visible examples already pass on the starter code");
+        assertThat(TaskPromptService.answerDev(20)).contains("situation input values exactly");
     }
 
     @Test

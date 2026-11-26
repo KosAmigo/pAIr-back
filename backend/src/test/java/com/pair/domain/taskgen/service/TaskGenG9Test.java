@@ -101,7 +101,7 @@ class TaskGenG9Test {
     @DisplayName("프롬프트: 결함 사례 하나 이상은 AI 기본 풀이(가장 단순한 관용 구현)로 틀리는 입력이고, 오답 하나는 AI 기본 풀이다. BIZ 요청 글·문항은 자료 이름을 대지 않는다")
     void prompts() {
         String dev = TaskPromptService.devBlueprint(40, TaskPromptService.stageDepth(false, 40, true), true);
-        assertThat(dev).contains("AI's default solution").contains("start.plusMonths(i)").contains("wrongAnswer is the AI's default solution itself");
+        assertThat(dev).contains("AI default solution =").contains("start.plusMonths(i)").contains("wrongAnswer is the AI default solution itself");
         assertThat(TaskPromptService.answerDev(40)).contains("One wrong fix is always the AI's default solution");
         assertThat(TaskPromptService.WRITING_BIZ_BRIEF).contains("never name a material by its title");
         assertThat(TaskPromptService.QUESTIONS_BIZ).contains("never name a material by its title");

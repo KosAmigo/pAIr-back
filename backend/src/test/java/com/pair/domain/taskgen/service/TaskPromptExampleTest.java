@@ -111,6 +111,42 @@ class TaskPromptExampleTest {
     }
 
     @Test
+    @DisplayName("g12: 사례 근거가 예 문장이면 사례 입력은 그 예와 같은 호출·값이어야 한다(g8 04: 근거는 allowed 예, 사례는 다른 이름·cachedAllowed)")
+    void exampleBasisCaseUsesExampleInput() throws Exception {
+        BlueprintDto dev = parse(TaskPromptService.DEV_EXAMPLE, false);
+        assertThat(DevBlueprintService.exampleBasisCases(dev)).isEmpty();
+        var cases = dev.cases().stream().map(c -> c.name().equals("payableAfterPoints")
+                ? new BlueprintDto.Case(c.name(), "addItem(\"공책\", 7000, 3) 뒤 payable(500)", "20500", c.basis()) : c).toList();
+        var changed = new BlueprintDto(dev.title(), dev.summary(), dev.code(), dev.category(), dev.competencies(), dev.scenario(), dev.api(), dev.facts(), dev.examples(),
+                dev.flaws(), dev.judgments(), dev.trapKeywords(), dev.conclusion(), dev.tables(), dev.figures(), dev.docs(), dev.questionPlan(), cases,
+                dev.neededFiles(), dev.fillers());
+        assertThat(DevBlueprintService.exampleBasisCases(changed)).singleElement().asString().contains("payableAfterPoints").contains("노트");
+        assertThat(BlueprintService.problems(changed, false)).anyMatch(p -> p.contains("근거가 예면"));
+        // 근거가 사실(정산 기록)인 사례는 입력이 달라도 된다
+        assertThat(DevBlueprintService.exampleBasisCases(dev)).noneMatch(p -> p.contains("pointsFollowSettlementRecord"));
+    }
+
+    @Test
+    @DisplayName("g12 DEV 프롬프트 충돌 정리: 정답 쪽은 사례 입력을 그대로 쓰고, 규모 문장에 '버그 수정 단계'·'숨은 테스트 1~2개'가 없고, DEV 헷갈리는 자료는 다른 계산이다(BIZ 는 그대로)")
+    void devPromptConflictsRemoved() {
+        assertThat(TaskPromptService.answerDev(40)).contains("situation input values exactly").doesNotContain("outside the visible examples");
+        for (int m : new int[] {20, 40, 60}) {
+            assertThat(TaskPromptService.stageDepth(false, m, true)).doesNotContain("bug fix").doesNotContain("1–2 hidden tests").contains("추가 method");
+        }
+        String dev = TaskPromptService.devBlueprint(40, TaskPromptService.stageDepth(false, 40, true), true);
+        String biz = TaskPromptService.bizBlueprint(40, TaskPromptService.stageDepth(true, 40, true), true);
+        assertThat(dev).contains("a DIFFERENT calculation or feature").doesNotContain("an old version doing the same calculation").doesNotContain("LegacyPointRule");
+        assertThat(biz).contains("an old version doing the same calculation").doesNotContain("a DIFFERENT calculation or feature");
+        assertThat(dev.split("AI default solution =", -1)).hasSize(2); // 기본 풀이 규칙은 한 번만
+        assertThat(dev).doesNotContain("\n            - Never put generator"); // 텍스트 블록 들여쓰기가 맞으면 앞 공백이 없다
+        assertThat(TaskPromptService.filler(false)).contains("Implement only what the one-line content says");
+        // g12 03: 추가 메서드 예도 결함이 바꾸는 값을 보이면 안 된다(설계도 규칙·체크리스트·조기 점검)
+        assertThat(dev).contains("they too use only inputs where the flaw does not change the result").contains("No example (기존 or 추가 method) has an expected value that the flaw changes")
+                .doesNotContain("Examples calling a 추가 method are exempt");
+        assertThat(TaskPromptService.check("blueprint-leak")).contains("예가 결함의 답을 보임");
+    }
+
+    @Test
     @DisplayName("점검 #7: BIZ 사실의 날짜·쪽 숫자는 숫자표에 없어도 되고, 값 숫자는 여전히 숫자표에 있어야 한다")
     void bizFactDatesAreNotFigures() throws Exception {
         BlueprintDto biz = parse(TaskPromptService.BIZ_EXAMPLE, true);

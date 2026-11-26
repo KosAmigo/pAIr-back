@@ -46,7 +46,7 @@ final class TaskPromptService {
             {"name":"payableAfterPoints","situation":"addItem(\\"노트\\", 10000, 2) 뒤 payable(500)","expected":"19500","basis":"addItem(\\"노트\\", 10000, 2) 뒤 payable(500) → 19500"}],\
             "trapKeywords":["10원 단위","버림","상품별"],\
             "neededFiles":["src/order/OrderCheckout.java","src/order/RewardPolicy.java","NOTES.md"],\
-            "fillers":[{"path":"src/order/LegacyPointRule.java","summary":"이전 주문 화면에서 회원 등급별 적립률로 적립금을 계산하던 클래스","confusing":true},\
+            "fillers":[{"path":"src/order/PointExpiryPolicy.java","summary":"적립금 지급일로부터 유효기간이 끝나는 날짜를 계산하는 클래스","confusing":true},\
             {"path":"src/order/ReceiptFormatter.java","summary":"영수증 금액 줄을 화면 표시용 문자열로 만드는 클래스","confusing":false},\
             {"path":"src/order/DeliveryLogReader.java","summary":"배송 로그 한 줄을 읽어 날짜와 상태로 나누는 클래스","confusing":false}]}""";
 
@@ -86,9 +86,10 @@ final class TaskPromptService {
         if (!e6) return biz ? BizTaskGeneratorService.depth(minutes) : DevTaskGeneratorService.depth(minutes);
         int band = minutes <= 30 ? 0 : minutes <= 50 ? 1 : 2;
         String[] dev = {
-                "20 minutes = add 1 feature to existing code, 1 judgment point, 1 hidden flaw, 1–2 hidden tests. Keep it small enough to read and solve quickly.",
-                "40 minutes = 2 steps (bug fix → feature), 1–2 judgment points, 1–2 hidden flaws. The usual first fix passes NOTES.md and the public tests but fails a hidden test.",
-                "60 minutes = 3 steps (bug fix → feature → extension), 2 judgment points, 2 hidden flaws. The solver must follow several files; one textbook pattern must not solve it. The usual first fix passes NOTES.md and the public tests but fails a hidden test."};
+                "20 minutes = 1 추가 method, 1 judgment point, 1 hidden flaw in 기존 code, about 4–6 cases (hidden tests). Keep it small enough to read and solve quickly.",
+                "40 minutes = 1–2 추가 methods, 1–2 judgment points, 1–2 hidden flaws in 기존 code, about 5–8 cases (hidden tests).",
+                "60 minutes = 2–3 추가 methods, 2 judgment points, 2 hidden flaws in 기존 code, about 7–10 cases (hidden tests). The solver must follow several files; one textbook pattern must not solve it."};
+        // 결함은 기존 코드에 숨어 있고 설명은 추가할 기능만 말한다(g10). 예전 "bug fix → feature" 단계는 설명이 결함을 가리키게 해서 뺐다(g12)
         String[] bizDepth = {
                 "20 minutes = 1 CSV + 2 documents, 3 questions (2 multiple choice, 1 short answer), 1 judgment point, 1 trap.",
                 "40 minutes = 1–2 CSVs + 2–3 documents, 4 questions (2 multiple choice, 2 short answer), 1–2 judgment points, 1–2 traps.",
@@ -104,10 +105,10 @@ final class TaskPromptService {
             Output only the blueprint JSON (structure and the exact sentences listed below). Later stages write the prose without knowing the flaw.
 
             What makes a good task (criteria E1–E6, M1–M6):
-            - The AI can do most of the work fast when instructed well (E1). The hidden flaw (E3) is where the AI's usual solution (idiomatic code, common sense) is wrong because a business rule recorded only in the materials says otherwise; the candidate gets it right only by checking the materials (E4). No generic bugs that an idiomatic rewrite fixes by itself (overflow, float sums, date arithmetic, null handling). No tricks, no knowledge outside the materials (Q3, Q5).
+            - The AI can do most of the work fast when instructed well (E1). The hidden flaw (E3) is where the AI's usual solution (idiomatic code, common sense) is wrong because a business rule recorded only in the materials says otherwise; the candidate gets it right only by checking the materials (E4). No generic bugs that an idiomatic rewrite or common sense fixes by itself ([Flaw types] lists them). No tricks, no knowledge outside the materials (Q3, Q5).
             - 1–2 judgment points (E2): a human must choose, and every option is defensible from a fact in the materials (M4).
             - Never give away the answer (M5): materials state facts and records, never causes, fix locations, rules, definitions that resolve the trap, calculation steps, or "~해야 한다".
-- Never put generator information in candidate text: file counts, character counts, attachment or context limits, "needed files", "fillers".
+            - Never put generator information in candidate text: file counts, character counts, attachment or context limits, "needed files", "fillers".
 
             Language:
             - Write every text value in Korean{{ascii}}.
@@ -133,13 +134,13 @@ final class TaskPromptService {
             - Flaw placement: the starter code follows the AI's usual default, and only a business-rule record (a NOTES.md settlement record on another input, a description observation) shows it is wrong. It must not be visible from one line of starter code or public tests. Do not put a requirement example or NOTES record right next to the flaw's input value (examples on the same input use other values).
             - Flaw file: the flaw lives in a class the api classes call (e.g. OrderCheckout.points() calls RewardPolicy.pointsFor). That class is never in api, examples or description facts, so the description and the opened file do not point at it (g6: "기존: X.method" in the api list named the flawed file). flaws.where names that class and its path.
             - api: public signatures shared by the text and the code, only for the classes the candidate calls. Exactly "기존: Class.method(Type name, …): ReturnType" or "추가: Class.method(Type name, …): ReturnType". No modifiers (public, static), no package, no body, no ";" (e.g. "추가: OrderDiscount.payable(): long"). 기존 = already implemented in the starter code; 추가 = the candidate writes it. The flaw lives in 기존 code.
-            - examples: 3–5 input → expected pairs with correct values. Examples calling a 기존 method must already pass on the flawed starter code (an example that fails at once makes the flaw obvious); the flaw-triggering inputs belong to hidden tests. Examples calling a 추가 method are exempt (the starter code is a stub).
-            - cases = hidden tests: name = the test method name (English), situation = input, expected = result, basis = verbatim facts or examples sentence (an example "input → expected" is an example sentence that fixes the expected result directly). The answer stage implements only these cases. Behaviour the materials do not decide (trailing empty item, null, empty input, which side a boundary belongs to) either gets its own example/fact as basis or is left out.
+            - examples: 3–5 input → expected pairs with correct values. Examples calling a 기존 method must already pass on the flawed starter code (an example that fails at once makes the flaw obvious); the flaw-triggering inputs belong to hidden tests. Examples calling a 추가 method cannot run on the starter code (it is a stub), but they too use only inputs where the flaw does not change the result: the expected value must be the same under the flawed 기존 code and under the business rule (g12 03: "payable(1000, 500) → 14500" depended on the discount order the flaw is about, so the requirements gave away the answer). Check each 추가 example against the flawed behaviour before writing it.
+            - cases = hidden tests: name = the test method name (English), situation = input, expected = result, basis = verbatim facts or examples sentence (an example "input → expected" is an example sentence that fixes the expected result directly). If the basis is an example, the situation uses that example's exact calls and values; a case with other inputs (other names, amounts, another method) takes a fact as basis instead. The answer stage implements only these cases, with these exact inputs. Behaviour the materials do not decide (trailing empty item, null, empty input, which side a boundary belongs to) either gets its own example/fact as basis or is left out.
             - Each 추가 method needs at least 1 case whose situation contains the call as written, e.g. "payable(\\"10.00\\")", with basis = the same example. Each example calling a 추가 method needs a case with the same input values. If the method returns boolean, give one true and one false case; for numbers, lists or strings, give a case whose result differs from a constant (0, empty list, "") so a constant-returning stub fails.
-            - At least one flaw case (caughtBy) uses an input where the AI's default solution — the simplest idiomatic implementation, e.g. start.plusMonths(i), Math.round(total), a plain split(",") — gives a wrong result and only the business rule in the materials gives the expected one (g8 02: NOTES said "month-end stays month-end" from 2024-11-30, but hidden tests used only 1/31 and 1/30 starts, so plain plusMonths passed all). Check the expected value against that default before writing the case.
             - Every flaw case (caughtBy, separatedBy) calls at least one method that also appears in an example (the requirements), so the flaw is graded through behaviour the candidate is asked about; never grade only a 기존 method the requirements never mention (g9 01: only an unmentioned eligible() was graded).
             - Cases named in caughtBy or separatedBy call only 기존 methods (a 추가 stub always throws, so a flaw test calling it proves nothing).
-            - flaws.wrongAnswer + flaws.separatedBy: for each flaw, a common wrong fix an AI would make (e.g. round the result, count hours instead of dates). For at least one flaw, wrongAnswer is the AI's default solution itself (the simplest idiomatic implementation that ignores the materials' rule). Add another case that gives different results for that wrong fix and the right fix, and put its name in separatedBy (≠ caughtBy, calls only 기존 methods). Its input must make the wrong fix fail (values near integers do not separate). Its basis is the same input → expected in examples, or a fact that derives it.
+            - AI default solution = the simplest idiomatic implementation that ignores the materials' rule, e.g. start.plusMonths(i), Math.round(total), a plain split(","). At least one caughtBy case uses an input where that default gives a wrong result and only the business rule gives the expected one; check the expected value against the default before writing the case (g8 02: NOTES said "month-end stays month-end" from 2024-11-30, but hidden tests used only 1/31 and 1/30 starts, so plain plusMonths passed all).
+            - flaws.wrongAnswer + flaws.separatedBy: for each flaw, a common wrong fix an AI would make (e.g. round the result, count hours instead of dates); for at least one flaw, wrongAnswer is the AI default solution itself. Add another case that gives different results for that wrong fix and the right fix, and put its name in separatedBy (≠ caughtBy, calls only 기존 methods). Its input must make the wrong fix fail (values near integers do not separate). Its basis is the same input → expected in examples, or a fact that derives it.
             - Every behaviour written in examples or description (input → result, "거절돼도 처리 건수는 늘지 않는다", both sides of a boundary) needs a case; behaviour without a case is not checked by hidden tests, so a constant would pass.
             - A case basis must never be the same sentence as a judgment option fact, and no example may contain an option fact (the choice would then be fixed, M4).
             - scenario and description facts never mention reviewing, checking or comparing existing behaviour against records or ledgers, not even as a work-order item ("기존 조회 결과를 정산 내역과 대조하는 작업이 등록되었다" points at the flaw; g10). They state the situation and the feature to add only.
@@ -173,7 +174,6 @@ final class TaskPromptService {
             - The needed files together are {{min}}–{{cap}} characters (40–70% of the limit, aim for {{target}}). Too small means attaching the first files solves it, so plan needed files as full, realistic work files.
             """;
     private static final String E6_TAIL = """
-            - At least 1/3 of fillers have confusing=true: same domain in both name AND content (an old version doing the same calculation, another feature applying a similar rule, a previous policy on the same subject) so they look worth attaching, but they hold no answer, flaw evidence or judgment basis. Sharing only a name prefix with unrelated content does not count (g5 07). Write the summary so the content overlap is clear. Other fillers have confusing=false and are ordinary co-located work files.
             - All materials together reach {{allChars}}+ characters; a cheaper model writes the fillers from your list only and knows no facts, flaw or answer, so summaries never mention them.
             """;
     private static final String E6_DEV = """
@@ -182,12 +182,14 @@ final class TaskPromptService {
             - Evidence in 2+ needed files: flaws.where names the flawed class and its path (e.g. "RewardPolicy.pointsFor (src/order/RewardPolicy.java)"), and at least one case basis is a fact with place "notes" (counts as NOTES.md) or the flaw spans a second needed class. Code files carry no comments, so do not plan sentences inside code.
             - fillers: Java files not needed for the solution (src/…/X.java, path and one-line Korean summary): other domain classes of the same service, log formats, config readers, unrelated to this task's flaw and judgment. Paths must differ from neededFiles.
             - Count: neededFiles + fillers = {{totalLo}}–{{totalHi}} files (public tests and NOTES.md count when listed).
+            - At least 1/3 of fillers have confusing=true: same domain and a similar class name, so they look worth attaching, but a DIFFERENT calculation or feature (e.g. next to RewardPolicy: PointExpiryPolicy computing when points expire). Never an old or alternative version of the flawed or api calculation: generated code for it ends up implementing the judgment point or the flaw rule (g8 08, g9 03 failed M6). A summary never describes behaviour that a judgment point, flaw case or example decides (duplicates, boundaries, rounding, apply order, parsing the same format). Other fillers have confusing=false and are ordinary co-located work files.
             """;
     private static final String E6_BIZ = """
             - neededFiles: exactly {{needed}} paths, each one of the docs or tables paths.
             - Evidence in 2+ needed files: name the needed file paths in flaws.where, and put the facts used as case basis, flaw evidence and judgment basis into at least 2 different needed documents (facts.place). If docs + tables have more files than neededFiles, the extra document gets background facts only.
             - fillers: documents (자료/name.pdf) or CSVs (자료/name.csv) not needed for the solution (path, one-line Korean summary): another team's minutes, last quarter's report, another campaign's schedule, unrelated to this task's facts, flaw and judgment. Paths must differ from docs and tables.
             - Count: docs + tables + fillers = {{totalLo}}–{{totalHi}} files.
+            - At least 1/3 of fillers have confusing=true: same domain in both name AND content (an old version doing the same calculation, another feature applying a similar rule, a previous policy on the same subject) so they look worth attaching, but they hold no answer, flaw evidence or judgment basis. Sharing only a name prefix with unrelated content does not count (g5 07). Write the summary so the content overlap is clear. Other fillers have confusing=false and are ordinary co-located work files.
             """;
 
     /** E6·M6 설계도 규칙(기준 문서 6장). 개수·경로 조건은 Dev/BizBlueprintService.materialProblems 와 같다 */
@@ -219,8 +221,8 @@ final class TaskPromptService {
     /** DEV 체크리스트(DevBlueprintService.problems·materialProblems 와 1:1) */
     private static final String CHECK_DEV = """
             7. api is not empty; every item is "기존: …" or "추가: …" with no "{", "}" or ";".
-            8. examples ≥ 2, each with input and expected.
-            9. Every 추가 method is called as "name(" in some case situation; every example calling it has a case containing the same quoted values and numbers.
+            8. examples ≥ 2, each with input and expected. No example (기존 or 추가 method) has an expected value that the flaw changes.
+            9. Every 추가 method is called as "name(" in some case situation; every example calling it has a case containing the same quoted values and numbers. A case whose basis quotes an example uses that example's calls, quoted values and numbers in its situation.
             10. Cases in caughtBy/separatedBy do not call 추가 methods. Every flaw with wrongAnswer has separatedBy = a different case name.
             11. No case basis equals or contains a judgment option fact; no example contains one.
             12. The flawed class named in flaws.where appears in no api item, no example and no description fact; every flaw case calls a method that appears in some example; scenario and description facts never ask to compare or review existing behaviour.
@@ -370,7 +372,7 @@ final class TaskPromptService {
                 Rules:
                 - files: one entry per listed path, path identical to the list, content = the whole file. The package declaration matches the folders under src/.
                 - Pure Java 21 with JDK classes only. Never call, extend or import classes from the other files (the names you are given). Each file compiles alone, and class names do not clash with other files. The public class name equals the file name.
-                - No comments (no Javadoc). Ordinary business code matching the one-line content (fields, constructors, methods, validation, formatting). No main method, no tests. You do not know this task's bug or solution, so do not try to write them.
+                - No comments (no Javadoc). Ordinary business code matching the one-line content (fields, constructors, methods, validation, formatting). Implement only what the one-line content says; no extra handling of duplicates, boundaries, rounding or special input formats. No main method, no tests. You do not know this task's bug or solution, so do not try to write them.
                 - String literals and identifiers in English or Korean only; never Chinese characters (漢字) or Japanese.
                 - Reach the per-file character count in the input (short files are regenerated) with enough fields and methods.
                 """;
@@ -381,7 +383,7 @@ final class TaskPromptService {
         return """
                 You write the answer side of a development task. You receive the blueprint plus the text and starter code the candidate already sees.
                 Rules:
-                - hiddenTests: JUnit 5 hidden tests (test/…java) implementing only the blueprint cases. Hidden tests call the api's "추가:" methods directly and assert on them. One @Test method per case (method name = case.name), asserting only case.expected. Do not assert behaviour outside the cases (empty input, null fallback values and other behaviour the materials do not support). Each must fail on the starter code where the case targets the flaw and pass on a correct solution. Catch the flaw on inputs outside the visible examples (another boundary or branch of the same cause); the visible examples already pass on the starter code. A solution that hardcodes the cases must fail. Assert only results that hold whichever judgment option is chosen.
+                - hiddenTests: JUnit 5 hidden tests (test/…java) implementing only the blueprint cases. Hidden tests call the api's "추가:" methods directly and assert on them. One @Test method per case (method name = case.name), asserting only case.expected. Do not assert behaviour outside the cases (empty input, null fallback values and other behaviour the materials do not support). Each test uses its case's situation input values exactly (same values, same calls, same order); never change, add or reorder inputs — the blueprint already chose inputs that differ from the examples. Each must fail on the starter code where the case targets the flaw and pass on a correct solution. A solution that hardcodes the cases must fail. Assert only results that hold whichever judgment option is chosen.
                 - Concurrency or time tests finish within 10 seconds with assertTimeoutPreemptively; a waiting helper that times out must not fail the test, and no test assumes a specific implementation structure.
                 - solution: full content of each changed src file. Do not change test files. Changed lines vs the starter code (added + removed) ≥ {{lines}}.
                 - altSolutions: 1–2 correct solutions structured differently from the solution (note = one line, files = full changed src files; paths start with src/ only, never NOTES.md or other files). They pass all public and hidden tests.
