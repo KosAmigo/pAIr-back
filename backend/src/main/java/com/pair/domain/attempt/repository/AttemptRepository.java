@@ -46,6 +46,18 @@ public interface AttemptRepository extends JpaRepository<Attempt, Long> {
             """)
     int startRescoring(@Param("id") Long id, @Param("expected") com.pair.domain.attempt.dto.AttemptStateDto.Status expected);
 
+    /**
+     * 후속 질문 마무리: 지금 상태가 FOLLOWUP 일 때만 SCORING 으로 바꾸고 완료 시각을 적는다. 바뀐 행 수(0이면 다른 요청이 먼저 바꿨다).
+     * 응시자가 두 번 누르거나 응시자 제출과 시험 종료 자동 마무리가 겹쳐도 하나만 채점을 시작한다.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update Attempt a set a.status = com.pair.domain.attempt.dto.AttemptStateDto.Status.SCORING, a.followupsDoneAt = :at
+            where a.id = :id and a.status = com.pair.domain.attempt.dto.AttemptStateDto.Status.FOLLOWUP
+            """)
+    int startScoring(@Param("id") Long id, @Param("at") java.time.Instant at);
+
     /** 회차별 제출 완료 인원: 응시가 있고, 제출 안 한 응시가 하나도 없는 대상자 수 */
     interface SessionSubmitted {
         Long getSessionId();

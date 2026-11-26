@@ -70,8 +70,15 @@ public class AttemptSubmitService {
     }
 
     private void finishOne(String attemptId) {
-        if (store.load(attemptId).status() == AttemptStateDto.Status.SOLVING) attempts.submit(attemptId);
-        if (store.load(attemptId).status() == AttemptStateDto.Status.FOLLOWUP) attempts.followUps(attemptId, List.of());
+        try {
+            if (store.load(attemptId).status() == AttemptStateDto.Status.SOLVING) attempts.submit(attemptId);
+            if (store.load(attemptId).status() == AttemptStateDto.Status.FOLLOWUP) attempts.followUps(attemptId, List.of());
+        } catch (IllegalStateException e) {
+            // 그 사이 응시자가 직접 제출하거나 후속 질문을 마쳐 이미 채점 단계로 넘어갔으면 할 일이 없다. 아니면 진짜 실패다
+            AttemptStateDto.Status now = store.load(attemptId).status();
+            if (now == AttemptStateDto.Status.SOLVING || now == AttemptStateDto.Status.FOLLOWUP) throw e;
+            log.debug("이미 마무리된 응시: {} ({})", attemptId, now);
+        }
     }
 
     /** 과제 하나 제출. 이미 제출했으면 false (두 번 불러도 안전) */
