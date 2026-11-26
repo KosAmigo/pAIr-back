@@ -118,7 +118,7 @@ class MaterialLimitTest {
     }
 
     @Test
-    @DisplayName("M6 필요한 묶음: 한도의 70% 이하면 통과, 넘으면 실패해 설계도를 다시 만든다")
+    @DisplayName("M6 필요한 묶음: 한도의 70% 이하면 통과, 넘으면 실패. DEV 는 코드를 다시 쓰고(g14), BIZ 는 설계도를 다시 만든다")
     void neededBundleAtMost70Percent() {
         BlueprintDto b = bp(List.of("src/a.java", "src/b.java"), List.of(conf("src/f1.java", "로그 형식")));
         AiLimitsDto limit = new AiLimitsDto(10, 2, 1000);
@@ -129,7 +129,7 @@ class MaterialLimitTest {
         GenCheckResultDto fail = MaterialGateService.needed(b, big, limit);
         assertThat(fail.ok()).isFalse();
         assertThat(fail.name()).isEqualTo(TaskPipelineService.M6_NEEDED_CHECK);
-        assertThat(DevPipelineService.owners(fail, List.of(), List.of())).containsExactly(Stage.BLUEPRINT);
+        assertThat(DevPipelineService.owners(fail, List.of(), List.of())).containsExactly(Stage.CODE); // NOTES.md 가 없으니 코드만
         assertThat(BizPipelineService.owners(fail)).containsExactly(Stage.BLUEPRINT);
     }
 

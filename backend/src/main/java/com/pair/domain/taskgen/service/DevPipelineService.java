@@ -50,6 +50,18 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         return owners(c, codePaths, List.of());
     }
 
+    private static final java.util.regex.Pattern NOTES_SIZE = java.util.regex.Pattern.compile("NOTES\\.md (\\d+)자");
+    private static final java.util.regex.Pattern BUNDLE_CAP = java.util.regex.Pattern.compile("70%\\((\\d+)자\\)");
+    /** NOTES.md 가 묶음 상한의 이 비율보다 크면 작성 단계도 다시(코드만 줄이면 코드가 너무 작아진다) */
+    static final double NOTES_SHARE_MAX = 0.4;
+
+    /** 필요한 묶음 크기 실패 상세("… 70%(5600자) … NOTES.md 2529자")에서 NOTES.md 가 상한의 40%를 넘는지 */
+    static boolean notesTooLarge(String detail) {
+        var n = NOTES_SIZE.matcher(detail);
+        var c = BUNDLE_CAP.matcher(detail);
+        return n.find() && c.find() && Integer.parseInt(n.group(1)) > Integer.parseInt(c.group(1)) * NOTES_SHARE_MAX;
+    }
+
     /** fillerPaths: 단계 4' 가 만든 파일 경로. 실행·형식 검사가 이 파일을 가리키면 단계 4' 만 다시 돌린다(E6) */
     static Set<Stage> owners(GenCheckResultDto c, List<String> codePaths, List<String> fillerPaths) {
         Set<Stage> gate = StageRouteService.gateOwners(c, false);
@@ -58,7 +70,9 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         if (n.equals(TaskPipelineService.M6_TOTAL_CHECK)) return EnumSet.of(Stage.FILLER); // 자료 전체가 모자람: 관련 적은 자료를 다시
         if (n.equals(TaskPipelineService.M6_NEEDED_CHECK)) {
             if (d.contains("만들어지지 않았습니다")) return d.contains("NOTES.md") ? EnumSet.of(Stage.WRITING) : EnumSet.of(Stage.CODE);
-            return EnumSet.of(Stage.BLUEPRINT); // 필요한 묶음이 큼: 설계도를 다시
+            // 필요한 묶음이 큼(g14: 설계도부터 다시 해도 같은 크기로 또 실패). 코드를 남은 예산에 맞춰 다시 쓰고, NOTES.md 자체가 크면 작성도 다시
+            if (d.contains("넘습니다")) return notesTooLarge(d) ? EnumSet.of(Stage.WRITING, Stage.CODE) : EnumSet.of(Stage.CODE);
+            return EnumSet.of(Stage.BLUEPRINT);
         }
         if (!fillerPaths.isEmpty() && fillerPaths.stream().anyMatch(d::contains)
                 && (n.equals(DevCheckService.START_PASSES) || n.equals(DevCheckService.HIDDEN_CATCHES) || n.equals(DevCheckService.SOLVED_PASSES)
@@ -250,7 +264,8 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
 
         private DevCodeDto writeCode(String feedback) {
             String user = StageCallService.json(bp) + (feedback.isEmpty() ? "" : "\n\n" + feedback);
-            DevCodeDto c = calls.call(Stage.CODE, TaskPromptService.code(TaskPromptService.stageDepth(false, form.minutes(), e6), e6, form.minutes()), user, DevCodeDto.class);
+            int notesChars = writing == null || writing.notes() == null ? TaskPromptService.ASSUMED_NOTES_CHARS : writing.notes().length(); // 작성 단계가 먼저 돈다
+            DevCodeDto c = calls.call(Stage.CODE, TaskPromptService.code(TaskPromptService.stageDepth(false, form.minutes(), e6), e6, form.minutes(), notesChars), user, DevCodeDto.class);
             return new DevCodeDto(nz(c.files()));
         }
 

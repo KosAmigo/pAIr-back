@@ -291,7 +291,7 @@ final class TaskPromptService {
             - Never write generator information: file counts, character counts, attachment or context limits, which files are needed.
             - description: situation and the job (add the feature) in 3–6 sentences of business prose, plus every place=description fact. Never name or point to specific files or classes to read (no "NOTES.md를 확인하세요", no "X.java의 Y 메서드"); finding them is part of the task. Ask only to build the "추가:" methods and decide the open points; never ask to review, check or compare existing methods or their results (no "기존 X.f의 결과를 기록과 대조하세요", no "기존 코드를 검토하세요"). Not even as background or a work-order item: no "기존 지급액 계산의 정산 기록 대조", "기존 조회 결과 점검", "지급 내역을 대조하는 작업" (g9: these sentences point at the flaw and are rejected by code). The description says only the situation and the features to add. For things the candidate must decide, write only "~를 정하고 선택한 이유를 설명하세요"; no options, no hint which is right.
             - requirements: each example on its own line as "input → expected", values unchanged. No rule sentences beyond the examples. Examples appear only here, never again in description, and no sentence is written twice.
-            - notes: place=notes facts as an operations note (the given records, in date order, with plain connecting words). Empty string if there are none. Never add a record of a wrong output or a failing input.
+            - notes: place=notes facts as an operations note (the given records, in date order, with plain connecting words). Empty string if there are none. Never add a record of a wrong output or a failing input. Keep it compact: one title line, then each record on its own line with at most a short connecting clause; no background paragraphs, summaries or extra records (a long note pushes the needed files over the size limit).
             - taskFollowUp: one follow-up question built from "the thing to decide" and a generic frame (why you chose it, what if conditions change, would you ship it as is), phrased for this task. No fact values, records, file fields or columns, and no hint where to look.
             """ + KOREAN_STYLE;
 
@@ -335,12 +335,35 @@ final class TaskPromptService {
 
     /** 2'단계(DEV) 시작 코드 프롬프트(E6·M6 켜짐): 필요한 묶음의 src·test 경로로만 만들고 관련 적은 자료·NOTES.md 는 만들지 않는다 */
     static String code(String depth, boolean e6, int minutes) {
-        if (!e6) return code(depth);
+        return code(depth, e6, minutes, ASSUMED_NOTES_CHARS);
+    }
+
+    /** NOTES.md 를 모를 때(테스트·옛 호출) 잡는 길이. 실제 생성은 작성 단계가 쓴 notes 길이를 넘긴다 */
+    static final int ASSUMED_NOTES_CHARS = 1000;
+    /** 필요한 묶음 상한과 src 합계 사이 여유(글자) */
+    private static final int BUNDLE_MARGIN = 300;
+    /** src 합계의 가장 작은 범위 끝(NOTES 가 커도 코드가 너무 작아지지 않게) */
+    private static final int MIN_SRC_CHARS = 1500;
+
+    /**
+     * src 파일 합계의 글자 수 범위. 필요한 묶음(src + NOTES.md)이 맥락 한도의 40~70% 안에 들도록, 작성 단계가 이미 쓴 NOTES.md 길이를 뺀다
+     * (2026-11-27 g14: NOTES 를 1,000자로 가정해 src 를 잡았는데 실제 NOTES 가 2,400~3,500자라 묶음이 70%를 넘음, g13 01 도 같음)
+     */
+    static int[] srcRange(int minutes, int notesChars) {
         int ctx = AiLimitsDto.forMinutes(minutes).contextChars();
         int cap = (int) (ctx * MaterialGateService.NEEDED_MAX_RATIO), lo = (int) Math.ceil(ctx * MaterialGateService.NEEDED_MIN_RATIO);
+        int from = Math.max(MIN_SRC_CHARS, lo - notesChars);
+        int to = Math.max(from, cap - notesChars - BUNDLE_MARGIN);
+        return new int[] {from, to};
+    }
+
+    static String code(String depth, boolean e6, int minutes, int notesChars) {
+        if (!e6) return code(depth);
+        int[] r = srcRange(minutes, notesChars);
         return code(depth) + "- E6·M6: create exactly the src/ and test/ paths in the blueprint's neededFiles (create the public test test/…java even if it is not listed). "
                 + "Do not create NOTES.md (another stage writes it) or any other file; the fillers paths are written by another stage. "
-                + "The src files together (public tests not counted) are " + lo + "–" + (cap - 1000) + " characters: write realistic business code (fields, validation, formatting, helper methods) unrelated to the flaw so the files are not tiny. This overrides any file-count statement.\n";
+                + "The src files together (public tests not counted) are " + r[0] + "–" + r[1] + " characters, counting every character of the files; stay inside this range (over the upper end the task is rejected). "
+                + "Write realistic business code (fields, validation, formatting, helper methods) unrelated to the flaw so the files are not tiny. This overrides any file-count statement.\n";
     }
 
     /** 2'단계(DEV) 시작 코드 프롬프트. depth 는 과제 규모 */
