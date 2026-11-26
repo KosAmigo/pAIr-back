@@ -80,12 +80,11 @@ public class ScoringService {
     private final Duration shutdownWait;
     /** 채점 큐(Redis). pair.scoring-queue.enabled=true 일 때만 있다. */
     private final ObjectProvider<ScoringQueueService> queues;
-    /** 두 채점 모델을 동시에 부를 때 쓴다. */
-    private final ExecutorService judgePool = Executors.newFixedThreadPool(8, r -> {
-        Thread t = new Thread(r, "judge");
-        t.setDaemon(true);
-        return t;
-    });
+    /**
+     * 채점 모델 호출 풀. 채점 1건이 모델 호출을 여러 번(모델별 calls 합) 동시에 하므로 "동시 채점 수 × 채점 1건의 호출 수"만큼 둔다.
+     * 예전처럼 8개로 고정하면 동시 채점 수를 늘려도 호출이 이 풀에서 줄을 서서 처리량이 늘지 않았다(부하 테스트 2026-11-26).
+     */
+    private final ExecutorService judgePool;
 
     public ScoringService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           ModelClient models, PairProperties props,
@@ -105,11 +104,24 @@ public class ScoringService {
         this.records = records;
         this.questions = questions;
         int parallel = props.grader() == null || props.grader().parallel() < 1 ? 4 : props.grader().parallel();
+        int judgeThreads = judgeThreads(parallel, judges);
+        this.judgePool = Executors.newFixedThreadPool(judgeThreads, r -> {
+            Thread t = new Thread(r, "judge");
+            t.setDaemon(true);
+            return t;
+        });
+        log.info("채점: 동시 {}건, 채점 모델 호출 스레드 {}개", parallel, judgeThreads);
         this.executor = new ThreadPoolExecutor(parallel, parallel, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>(), r -> {
             Thread t = new Thread(r, "scoring");
             t.setDaemon(true);
             return t;
         });
+    }
+
+    /** 동시 채점 수 × 채점 1건의 모델 호출 수(모델별 calls 합). 최소 8 */
+    static int judgeThreads(int parallel, List<Judge> judges) {
+        int perScoring = judges.stream().mapToInt(Judge::calls).sum();
+        return Math.max(8, parallel * Math.max(1, perScoring));
     }
 
     /**

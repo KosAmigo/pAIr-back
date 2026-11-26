@@ -109,6 +109,8 @@ class ScoringShutdownTest {
 
         verify(queue, timeout(1000)).complete(job);
         verify(queue, never()).retryLater(any(), any());
+        // 시작할 때 이전 프로세스가 남긴 작업을 기다리지 않고 되살린다
+        verify(queue).recoverStale(Duration.ZERO, 3);
     }
 
     private static void sleep(long ms) {

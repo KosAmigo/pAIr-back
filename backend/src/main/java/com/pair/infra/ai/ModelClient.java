@@ -20,7 +20,15 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.openai.api.ResponseFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.pair.domain.taskgen.service.TaskGenAiService;
 import com.pair.domain.taskgen.service.TaskGenSolverService;
@@ -56,7 +64,24 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
     private final Backend openai;
     private final Backend anthropic;
 
+    private static final Logger log = LoggerFactory.getLogger(ModelClient.class);
+
+    /**
+     * fake=true 면 실제 모델을 부르지 않고 latency(± jitter 비율)만큼 기다린 뒤 빈 결과를 돌려준다(부하 테스트 전용, loadtest/).
+     * 운영에서는 켜지 않는다(기본 꺼짐).
+     */
     @org.springframework.beans.factory.annotation.Autowired
+    public ModelClient(TaskGenProperties cfg, AiKeyProperties keys,
+                       @Value("${pair.ai.fake.enabled:false}") boolean fake,
+                       @Value("${pair.ai.fake.latency:30s}") java.time.Duration fakeLatency,
+                       @Value("${pair.ai.fake.jitter:0.3}") double fakeJitter) {
+        this(cfg, fake ? new FakeBackend(fakeLatency, fakeJitter) : new OpenAiBackend(keys),
+                fake ? new FakeBackend(fakeLatency, fakeJitter) : new AnthropicBackend(keys));
+        if (fake) log.warn("가짜 AI 모드입니다: 모델을 부르지 않고 {}초(±{}%) 기다린 뒤 빈 결과를 돌려줍니다. 부하 테스트 전용",
+                fakeLatency.toSeconds(), Math.round(fakeJitter * 100));
+    }
+
+    /** 실제 모델을 부르는 기본 구성 */
     public ModelClient(TaskGenProperties cfg, AiKeyProperties keys) {
         this(cfg, new OpenAiBackend(keys), new AnthropicBackend(keys));
     }
@@ -306,6 +331,52 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
             if (text.isBlank()) throw new AiUnavailableException("Claude 응답이 비어 있습니다 (finish=" + SpringAi.finishReason(res) + ").");
             long[] u = usageOf(res);
             return new TextResult(text, u[0], u[1], u[2]);
+        }
+    }
+
+    // ── 가짜(부하 테스트) ─────────────────────────────
+
+    /**
+     * 모델을 부르지 않고 기다리기만 하는 구현. 구조화 출력은 빈 JSON 을 type 으로 읽어 돌려준다(목록은 빈 목록, 나머지는 기본값).
+     * 채점에서는 "판정 체크에 걸린 것 없음"이 된다. 토큰은 0 으로 센다.
+     */
+    static final class FakeBackend implements Backend {
+        private static final ObjectMapper EMPTY = new ObjectMapper()
+                .configure(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES, false)
+                .setDefaultSetterInfo(JsonSetter.Value.forValueNulls(Nulls.AS_EMPTY));
+
+        private final java.time.Duration latency;
+        private final double jitter;
+
+        FakeBackend(java.time.Duration latency, double jitter) {
+            this.latency = latency;
+            this.jitter = Math.max(0, Math.min(jitter, 1));
+        }
+
+        @Override
+        public <T> Result<T> json(String model, String system, String cachedPrefix, String user, Class<T> type, int maxTokens, String effort) {
+            pause();
+            try {
+                return new Result<>(EMPTY.readValue("{}", type), 0, 0, 0);
+            } catch (java.io.IOException e) {
+                throw new AiUnavailableException("가짜 AI 가 " + type.getSimpleName() + " 빈 결과를 만들지 못했습니다: " + e.getMessage());
+            }
+        }
+
+        @Override
+        public TextResult text(String model, String system, String user, int maxTokens, String effort) {
+            pause();
+            return new TextResult("(가짜 AI 응답)", 0, 0, 0);
+        }
+
+        private void pause() {
+            double factor = 1 + (java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 2 - 1) * jitter;
+            try {
+                Thread.sleep(Math.max(0, Math.round(latency.toMillis() * factor)));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AiUnavailableException("가짜 AI 호출이 중단됐습니다.");
+            }
         }
     }
 
