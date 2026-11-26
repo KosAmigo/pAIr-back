@@ -19,6 +19,28 @@ final class TaskWritingService {
 
     private TaskWritingService() {}
 
+    /**
+     * 설명(description)에서 요구사항 줄과 똑같은 줄을 뺀다(g12·g13 판정 Q2: 작성 모델이 예를 요구사항과 설명 끝에 두 번 씀).
+     * 줄 단위로 띄어쓰기·문장부호를 무시하고 같을 때만 빼며, 빈 문단은 남기지 않는다
+     */
+    static List<String> withoutRequirementLines(List<String> description, List<String> requirements) {
+        java.util.Set<String> req = new java.util.HashSet<>();
+        for (String r : requirements == null ? List.<String>of() : requirements) {
+            for (String line : r.split("\n")) {
+                String n = GenTextService.norm(line);
+                if (!n.isEmpty()) req.add(n);
+            }
+        }
+        if (req.isEmpty() || description == null) return description;
+        List<String> out = new ArrayList<>();
+        for (String p : description) {
+            if (p == null) continue;
+            String kept = String.join("\n", java.util.Arrays.stream(p.split("\n")).filter(l -> !req.contains(GenTextService.norm(l))).toList()).strip();
+            if (!kept.isEmpty()) out.add(kept);
+        }
+        return out;
+    }
+
     /** 작성 단계 입력. feedback 은 다시 쓸 때만(writerFeedback 으로 만든, 결함 정보가 없는 글) */
     static String input(BlueprintDto b, boolean biz, int minutes, String feedback) {
         StringBuilder sb = new StringBuilder("제한 시간: ").append(minutes).append("분\n상황: ").append(b.scenario()).append('\n');
