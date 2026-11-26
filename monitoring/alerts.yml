@@ -1,4 +1,4 @@
-# 경고 규칙 3개. 알림 전송(Slack·메일)은 아직 연결하지 않았다. http://localhost:9090/alerts 에서 상태를 본다.
+# 경고 규칙 4개. 알림 전송(Slack·메일)은 아직 연결하지 않았다. http://localhost:9090/alerts 에서 상태를 본다.
 groups:
   - name: pair
     rules:
@@ -18,3 +18,8 @@ groups:
         expr: increase(pair_sandbox_busy_total[5m]) >= 5
         annotations:
           summary: "코드 실행 서버가 5분 동안 5건 이상 거절했습니다 (동시 실행 한도 초과)"
+      - alert: ScoringQueueDown
+        expr: pair_scoring_queue_up == 0
+        for: 2m
+        annotations:
+          summary: "채점 큐(Redis)에 2분 넘게 연결할 수 없습니다. 채점은 서버 안에서 계속되지만 재시작 때 대기 작업을 잃을 수 있습니다 (docker compose ps redis)"
