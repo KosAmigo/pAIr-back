@@ -135,7 +135,15 @@ public class AttemptController {
         AttemptStateDto a = store.load(id);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("attempt", a);
-        m.put("task", tasks.get(a.taskId()));
+        var def = tasks.get(a.taskId());
+        m.put("task", def);
+        // E6: 응시 화면이 남은 턴·첨부 한도를 보여 준다. 과제에 제한이 없으면 전역 설정
+        var lim = def.aiLimits();
+        Map<String, Object> ai = new LinkedHashMap<>();
+        ai.put("turns", lim == null ? props.assistant().maxTurns() : lim.turns());
+        ai.put("maxAttach", lim == null ? chatAttachments.defaultMaxFiles() : lim.maxAttach());
+        ai.put("contextChars", lim == null ? chatAttachments.defaultMaxChars() : lim.contextChars());
+        m.put("aiLimits", ai);
         m.put("files", store.readFiles(id).keySet());
         var edits = attempts.edits(id);
         var attached = chatAttachments.views(Long.parseLong(id));

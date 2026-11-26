@@ -115,6 +115,13 @@ class TaskGenFlowTest {
         TaskGenFixtures.FakeRunner fakeRunner() {
             return new TaskGenFixtures.FakeRunner();
         }
+
+        /** 생성기는 전용 실행 장치를 받는다: 가짜 러너를 감싼다 */
+        @Bean
+        @Primary
+        TaskGenRunService taskGenRunService(TaskGenFixtures.FakeRunner fake) {
+            return new TaskGenRunService(fake, 4);
+        }
     }
 
     @Autowired MockMvc mvc;
@@ -223,7 +230,7 @@ class TaskGenFlowTest {
 
         var settings = json.readTree(settingsOf("flow-comp-req"));
         assertThat(settings.get("competencies")).extracting(n -> n.asText()).containsExactly("control", "delegation");
-        assertThat(settings.get("openFile").asText()).isEqualTo("src/shop/Cart.java"); // 기존 키는 그대로
+        assertThat(settings.get("openFile").asText()).isEqualTo("test/shop/CartTest.java"); // 기존 키는 그대로(g8: 공개 테스트를 먼저 연다)
         assertThat(settings.has("d4Minutes")).isTrue();
         var report = json.readTree(writer.report("flow-comp-req"));
         assertThat(report.get("form").get("competencies")).extracting(n -> n.asText()).containsExactly("control", "delegation");
@@ -293,7 +300,7 @@ class TaskGenFlowTest {
         assertThat(def.requirements()).containsExactlyElementsOf(d.requirements());
         assertThat(def.followUps()).containsExactly(GeneratedTaskRepository.DEV_FOLLOW_UPS.get(0),
                 GeneratedTaskRepository.DEV_FOLLOW_UPS.get(1), d.taskFollowUp()); // 3번째는 과제 맞춤 질문
-        assertThat(def.openFile()).isEqualTo("src/shop/Cart.java");
+        assertThat(def.openFile()).isEqualTo("test/shop/CartTest.java");
         assertThat(def.d4Minutes()).containsExactly(20, 30, 40, 50);
 
         assertThat(tasks.visibleFiles("flow-roundtrip")).containsOnlyKeys("src/shop/Cart.java", "test/shop/CartTest.java", "NOTES.md")

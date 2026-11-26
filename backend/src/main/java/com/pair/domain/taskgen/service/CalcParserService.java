@@ -27,11 +27,25 @@ public final class CalcParserService {
 
     public static double eval(String expr, Tables tables) {
         if (expr == null || expr.isBlank()) throw new IllegalArgumentException("계산식이 비어 있습니다.");
-        CalcParserService p = new CalcParserService(expr, tables);
+        CalcParserService p = new CalcParserService(asciiOperators(expr), tables);
         double v = p.expr();
         p.skip();
         if (p.pos < p.s.length()) throw p.error("해석할 수 없는 부분입니다");
         return finite(v);
+    }
+
+    /** 따옴표 밖의 수학 기호(−, ×, ÷)를 -, *, / 로 바꾼다(g5 04·10: 모델이 − ÷ 를 써 검산식을 읽지 못함) */
+    static String asciiOperators(String expr) {
+        StringBuilder sb = new StringBuilder(expr.length());
+        boolean quoted = false;
+        for (char c : expr.toCharArray()) {
+            if (c == '"') quoted = !quoted;
+            if (!quoted && (c == '−' || c == '–')) c = '-';
+            else if (!quoted && c == '×') c = '*';
+            else if (!quoted && c == '÷') c = '/';
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     private double expr() {

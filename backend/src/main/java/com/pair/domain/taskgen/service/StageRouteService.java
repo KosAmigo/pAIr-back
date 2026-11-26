@@ -45,6 +45,13 @@ final class StageRouteService {
         return new Plan(stages, by, failed);
     }
 
+    /** 출력 한도 끊김으로 stage 에서 멈춘 뒤 이어 만들기: stage 와 그 뒤 단계를 모두 다시 돈다(앞 단계 결과는 그대로, 고칠 안내 없음) */
+    static Plan from(Stage stage, Set<Stage> all) {
+        Set<Stage> stages = EnumSet.noneOf(Stage.class);
+        for (Stage s : all) if (s.ordinal() >= stage.ordinal()) stages.add(s);
+        return new Plan(stages, Map.of(), List.of());
+    }
+
     /**
      * 관문 검사 실패가 가리키는 단계. 관문이 아니면 null.
      * 답 노출은 위치(검수자가 적은 곳)를 보고 정한다: 문항·보기 → 문항 글(BIZ), 시작 코드·파일(DEV) → 시작 코드, 그 밖(설명·자료·요구사항)이나 모르면 작성.
@@ -61,6 +68,7 @@ final class StageRouteService {
             if (s.isEmpty() || d.contains("설명") || d.contains("요구사항") || d.contains("문서") || d.contains("NOTES") || d.contains("CSV")) s.add(Stage.WRITING);
             return s;
         }
+        if (n.equals(TaskPipelineService.FILLER_GATE)) return EnumSet.of(Stage.FILLER); // 관련 적은 자료만 다시 만든다(M6)
         if (n.equals(TaskPipelineService.KEY_GATE) || n.equals(TaskPipelineService.BACKING_GATE) || n.equals(TaskPipelineService.ALT_GATE)) {
             Set<Stage> marked = markedStages(c.detail());
             if (!marked.isEmpty()) return marked; // 관문이 직접 적은 고칠 단계

@@ -47,7 +47,12 @@ import com.pair.global.config.TaskGenProperties;
 public class ModelClient implements TaskGenAiService, TaskGenSolverService {
 
     /** cachedInputTokens: 입력 중 캐시에서 읽은 토큰(inputTokens 에 포함) */
-    public record Result<T>(T value, long inputTokens, long outputTokens, long cachedInputTokens) {}
+    public record Result<T>(T value, long inputTokens, long outputTokens, long cachedInputTokens, boolean effortLowered) {
+
+        public Result(T value, long inputTokens, long outputTokens, long cachedInputTokens) {
+            this(value, inputTokens, outputTokens, cachedInputTokens, false);
+        }
+    }
 
     public record TextResult(String text, long inputTokens, long outputTokens, long cachedInputTokens) {}
 
@@ -102,7 +107,32 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
 
     /** cachedPrefix: 바뀌지 않는 앞부분(과제, 정답 등). 프롬프트 캐시를 지원하는 회사에서는 재사용된다 */
     public <T> Result<T> json(String model, String system, String cachedPrefix, String user, Class<T> type, int maxTokens, String effort) {
-        return backend(model).json(model, system, cachedPrefix, user, type, maxTokens, effort);
+        Backend b = backend(model);
+        try {
+            return b.json(model, system, cachedPrefix, user, type, maxTokens, effort);
+        } catch (OutputLimitException first) {
+            // 생각 토큰이 한도를 다 써 빈 답이 오면(g5 08: sol medium 이 16000 을 다 씀) 추론 강도를 한 단계 낮춰 한 번만 다시 부른다. 버린 토큰도 센다
+            String lower = lowerEffort(effort);
+            if (lower == null) throw first;
+            try {
+                Result<T> r = b.json(model, system, cachedPrefix, user, type, maxTokens, lower);
+                return new Result<>(r.value(), r.inputTokens() + first.inputTokens(), r.outputTokens() + first.outputTokens(), r.cachedInputTokens(), true);
+            } catch (OutputLimitException second) {
+                throw new OutputLimitException(second.getMessage() + " (추론 강도 " + effort + "→" + lower + " 로 다시 불러도 끊김)",
+                        first.inputTokens() + second.inputTokens(), first.outputTokens() + second.outputTokens(), true);
+            }
+        }
+    }
+
+    /** 한 단계 낮은 추론 강도. 더 낮출 수 없거나 정하지 않았으면 null */
+    static String lowerEffort(String effort) {
+        if (!has(effort)) return null;
+        return switch (effort.strip().toLowerCase()) {
+            case "xhigh", "max" -> "high";
+            case "high" -> "medium";
+            case "medium" -> "low";
+            default -> null;
+        };
     }
 
     /** 글로 받는다. system 은 없어도 된다 */
@@ -135,7 +165,7 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
     @Override
     public <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
         Result<T> r = json(model, system, user, type, maxTokens, effort);
-        return new Output<>(r.value(), r.inputTokens(), r.outputTokens());
+        return new Output<>(r.value(), r.inputTokens(), r.outputTokens(), r.effortLowered());
     }
 
     /** 풀이 검사: 추론 강도는 pair.taskgen.solver-effort */
@@ -165,6 +195,16 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
             return new long[] {SpringAi.n(u.inputTokens()) + read + SpringAi.n(u.cacheCreationInputTokens()), SpringAi.n(u.outputTokens()), read};
         }
         return new long[] {SpringAi.n(usage.getPromptTokens()), SpringAi.n(usage.getCompletionTokens()), 0};
+    }
+
+    /** 실패 메시지용: 입력·출력 토큰과 그중 생각(reasoning) 토큰. 출력 토큰에는 생각 토큰이 들어 있다 */
+    static String usageText(ChatResponse res) {
+        long[] u = usageOf(res);
+        long reasoning = 0;
+        if (res.getMetadata().getUsage().getNativeUsage() instanceof OpenAiApi.Usage nu && nu.completionTokenDetails() != null) {
+            reasoning = SpringAi.n(nu.completionTokenDetails().reasoningTokens());
+        }
+        return "입력 " + u[0] + "·출력 " + u[1] + "(생각 " + reasoning + ")";
     }
 
     private static boolean has(String s) {
@@ -210,7 +250,13 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
             ChatResponse res = SpringAi.call("OpenAI " + model, () -> chat.call(prompt));
             String text = SpringAi.text(res);
             if (text.isBlank()) {
-                throw new AiUnavailableException("OpenAI 응답이 비어 있습니다 (finish=" + SpringAi.finishReason(res) + "). 출력 한도를 늘리거나 추론 강도를 낮추세요.");
+                String msg = "OpenAI 응답이 비어 있습니다 (finish=" + SpringAi.finishReason(res) + ", model=" + model + ", 한도=" + maxTokens + ", 추론 강도="
+                        + (has(effort) ? effort : "기본") + ", 토큰 " + usageText(res) + "). 출력 한도를 늘리거나 추론 강도를 낮추세요.";
+                if (SpringAi.finishReason(res).contains("length")) {
+                    long[] u = usageOf(res);
+                    throw new OutputLimitException(msg, u[0], u[1], false);
+                }
+                throw new AiUnavailableException(msg);
             }
             T value;
             try {
@@ -229,7 +275,7 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
             Prompt prompt = new Prompt(messages(system, null, user), options(model, maxTokens, effort).build());
             ChatResponse res = SpringAi.call("OpenAI " + model, () -> chat.call(prompt));
             String text = SpringAi.text(res);
-            if (text.isBlank()) throw new AiUnavailableException("OpenAI 응답이 비어 있습니다 (finish=" + SpringAi.finishReason(res) + ").");
+            if (text.isBlank()) throw new AiUnavailableException("OpenAI 응답이 비어 있습니다 (finish=" + SpringAi.finishReason(res) + ", model=" + model + ", 한도=" + maxTokens + ", 토큰 " + usageText(res) + ").");
             long[] u = usageOf(res);
             return new TextResult(text, u[0], u[1], u[2]);
         }
@@ -311,7 +357,11 @@ public class ModelClient implements TaskGenAiService, TaskGenSolverService {
             String finish = SpringAi.finishReason(res);
             if (finish.contains("refusal")) throw new AiUnavailableException("Claude 가 요청을 거절했습니다(refusal).");
             String text = SpringAi.text(res);
-            if (text.isBlank()) throw new AiUnavailableException("Claude 응답이 비어 있습니다 (finish=" + finish + "). 출력 한도를 늘리세요.");
+            if (text.isBlank()) {
+                String msg = "Claude 응답이 비어 있습니다 (finish=" + finish + ", model=" + model + ", 한도=" + maxTokens + "). 출력 한도를 늘리세요.";
+                if (finish.contains("max_tokens") || finish.contains("length")) throw new OutputLimitException(msg, sum[0], sum[1], false);
+                throw new AiUnavailableException(msg);
+            }
             T value;
             try {
                 value = converter.convert(text);

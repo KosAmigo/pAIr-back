@@ -1,5 +1,7 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.task.dto.AiLimitsDto;
+import com.pair.domain.taskgen.dto.BlueprintDto;
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
@@ -101,21 +103,32 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
      * 결과는 항상 ok(warn 등급)라 다시 생성을 일으키지 않는다. 호출이 실패해도 warn.
      */
     @Override
-    protected Extra afterChecks(TaskGenRequest form, BizDraftDto draft, List<GenCheckResultDto> results) {
-        return soloExtra(draft, results);
+    protected Map<String, String> fillerTexts(BizDraftDto draft, BlueprintDto bp) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (bp == null || bp.fillers() == null) return out;
+        for (var f : bp.fillers()) {
+            draft.documents().stream().filter(x -> x.path().equals(f.path())).findFirst().ifPresent(x -> out.put(f.path(), String.join("\n", x.pages())));
+            draft.csvFiles().stream().filter(x -> x.path().equals(f.path())).findFirst().ifPresent(x -> out.put(f.path(), x.content()));
+        }
+        return out;
     }
 
-    private Extra soloExtra(BizDraftDto draft, List<GenCheckResultDto> results) {
-        if (solo == null || !solo.enabled()) return skip("pair.taskgen.solo-enabled=false");
+    @Override
+    protected Extra afterChecks(TaskGenRequest form, BizDraftDto draft, List<GenCheckResultDto> results) {
+        return soloExtra(draft, results, AiLimitsDto.forMinutes(form.minutes()));
+    }
+
+    private Extra soloExtra(BizDraftDto draft, List<GenCheckResultDto> results, AiLimitsDto limits) {
+        if (solo == null || !solo.enabled()) return skip(solo == null ? "단독 풀이 서비스가 없음" : "pair.taskgen.solo-enabled=false");
         if (results.stream().anyMatch(GenCheckResultDto::needsRegeneration)) return skip("다른 검사가 실패해 돌리지 않음");
         try {
-            BizSoloSolveService.Result r = solo.run(draft);
+            BizSoloSolveService.Result r = solo.run(draft, limits);
             Map<String, Object> d = new LinkedHashMap<>();
             d.put("soloTokens", Map.of("input", r.inputTokens(), "output", r.outputTokens()));
             d.put("soloAnswers", r.answers());
             return new Extra(List.of(r.check()), d, Map.of());
         } catch (RuntimeException e) {
-            return new Extra(List.of(new GenCheckResultDto(BizSoloSolveService.NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패)",
+            return new Extra(List.of(new GenCheckResultDto(BizSoloSolveService.NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패: " + e.getMessage() + ")",
                     GenCheckResultDto.WARN)), Map.of(), Map.of());
         }
     }

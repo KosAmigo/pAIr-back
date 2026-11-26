@@ -26,6 +26,7 @@ final class TaskReviewService {
         ANSWER_KEY("answer-key", false, true, Set.of("M2"), true), // 정답 키(BIZ): 문항·보기·인정 답 + 사례·판단 지점
         ALT("alt-solution", true, false, Set.of("M2"), true), // 다른 풀이 실행(DEV): 풀이를 쓰게 하고 숨은 테스트로 돌림
         CONSISTENCY("consistency", true, true, Set.of("C1", "C2", "C3"), false), // 일관성: 경고만
+        FILLER("filler-leak", true, true, Set.of("M6", "M5"), true), // 관련 적은 자료(E6·M6): 답·결함 근거·판단 근거가 없는지. 생성(terra)과 다른 회사 모델이 본다
         BLUEPRINT("blueprint-leak", true, true, Set.of("M5", "M4"), true); // 설계도 문장 점검(관문 아님): 글에 그대로 들어갈 사실·근거·예가 규칙·절차를 말하거나 판단 지점을 못 박는지
 
         final String resource;
@@ -51,8 +52,10 @@ final class TaskReviewService {
     static List<Gate> gates(boolean dev) {
         return dev
                 ? List.of(new Gate(TaskPipelineService.LEAK_A_GATE, Check.LEAK, Stage.REVIEW), new Gate(TaskPipelineService.LEAK_B_GATE, Check.LEAK, Stage.REVIEW2),
+                        new Gate(TaskPipelineService.FILLER_GATE, Check.FILLER, Stage.FILLER_REVIEW),
                         new Gate(TaskPipelineService.BACKING_GATE, Check.BACKING, Stage.REVIEW), new Gate(TaskPipelineService.ALT_GATE, Check.ALT, Stage.REVIEW))
                 : List.of(new Gate(TaskPipelineService.LEAK_A_GATE, Check.LEAK, Stage.REVIEW), new Gate(TaskPipelineService.LEAK_B_GATE, Check.LEAK, Stage.REVIEW2),
+                        new Gate(TaskPipelineService.FILLER_GATE, Check.FILLER, Stage.FILLER_REVIEW),
                         new Gate(TaskPipelineService.KEY_GATE, Check.ANSWER_KEY, Stage.REVIEW));
     }
 
@@ -187,6 +190,27 @@ final class TaskReviewService {
                 return null;
             }
         }
+        return sb.toString();
+    }
+
+    /**
+     * 관련 적은 자료 점검의 입력(E6·M6): 출제자만 아는 정보(결함, 사례 기대 결과, 정답 결론, 판단 지점)와 관련 적은 자료 글.
+     * 관련 적은 자료가 없으면 null(점검하지 않음)
+     */
+    static String fillerInput(BlueprintDto bp, java.util.Map<String, String> fillerTexts) {
+        if (bp == null || fillerTexts == null || fillerTexts.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder("[숨은 결함(출제자만 아는 정보)]\n").append(flaws(bp));
+        for (var f : nz(bp.flaws())) sb.append("  결함 근거 문장: ").append(f.evidence()).append('\n');
+        if (bp.conclusion() != null) sb.append("정답 결론: ").append(bp.conclusion().correct()).append(" / 함정에 빠진 결론: ").append(bp.conclusion().wrong()).append('\n');
+        sb.append("[사례 기대 결과(출제자만 아는 정보)]\n");
+        for (var cs : nz(bp.cases())) sb.append("- ").append(cs.name()).append(" | ").append(cs.situation()).append(" → ").append(cs.expected()).append('\n');
+        sb.append("[판단 지점과 선택지 근거]\n");
+        for (var j : nz(bp.judgments())) {
+            sb.append("- ").append(j.question()).append('\n');
+            for (var o : nz(j.options())) sb.append("  선택지: ").append(o.text()).append(" | 근거: ").append(o.fact()).append('\n');
+        }
+        sb.append("[관련 적은 자료]\n");
+        fillerTexts.forEach((path, text) -> sb.append("\n[파일 ").append(path).append("]\n").append(text).append('\n'));
         return sb.toString();
     }
 

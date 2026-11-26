@@ -34,6 +34,8 @@ public final class BizCheckService {
     static final String CONCLUSION = "함정이 결론을 바꿈"; // M3
     static final String JUDGMENT = "판단 지점과 근거가 자료에 있음"; // E2, M4(존재·근거 위치만 자동 확인, 적절성은 검수)
     static final String HIDDEN_FLAW = "숨은 결함이 답·결론을 가름"; // E3, M3
+    /** 정답이 CSV 칸 값 그대로일 때의 문구: 정답 쪽이 아니라 설계도(함정·정의)를 고쳐야 해서 BizPipelineService 가 이 문구로 설계도로 보낸다 */
+    static final String CELL_SAME = "CSV 칸 값 그대로입니다(계산·대조가 필요 없어 함정이 사라짐)";
     static final String TRAP_QUESTION = "함정 문항이 자료 대조를 요구함"; // E3, M3 (단순 조회·같은 계산 반복 금지)
 
     /** 근거 문장이 응시자에게 해석을 지시하는 말투 */
@@ -199,7 +201,7 @@ public final class BizCheckService {
                 }),
                 check(TRAP_QUESTION, d -> {
                     if (ctx.problem != null) return skipped();
-                    return trapQuestions(d, ctx.corpus());
+                    return trapQuestions(d, ctx.corpus(), ctx.tables);
                 }));
     }
 
@@ -267,6 +269,21 @@ public final class BizCheckService {
      * 단답형끼리 계산식이나 답이 같으면(같은 계산 반복) fail
      */
     static GenCheckResultDto trapQuestions(BizDraftDto d, String corpus) {
+        return trapQuestions(d, corpus, null);
+    }
+
+    /** 이 정답이 표의 칸 하나와 같은 값인가(10 미만 정수는 우연히 같기 쉬워 보지 않는다) */
+    private static boolean singleCellValue(Double answer, BizTableService tables) {
+        if (answer == null || tables == null || (answer == Math.rint(answer) && Math.abs(answer) < 10)) return false;
+        for (var rows : tables.all().values()) {
+            for (var row : rows.stream().skip(1).toList()) { // 첫 줄은 머리글
+                for (String cell : row) if (close(answer, BizTableService.num(cell))) return true;
+            }
+        }
+        return false;
+    }
+
+    static GenCheckResultDto trapQuestions(BizDraftDto d, String corpus, BizTableService tables) {
         Set<Integer> trap = new LinkedHashSet<>();
         if (d.hiddenFlaws() != null) {
             for (var f : d.hiddenFlaws()) {
@@ -285,6 +302,9 @@ public final class BizCheckService {
                 String expr = q.calc().replaceAll("v\\(\"[^\"]*\"\\s*,\\s*\"[^\"]*\"\\s*,\\s*\"[^\"]*\"\\s*\\)", "V")
                         .replaceAll("round\\(|,\\s*\\d+\\)|[()\\s]", "");
                 if (expr.equals("V")) bad.add("Q" + (i + 1) + " 는 자료 칸 하나를 그대로 읽는 문항입니다");
+                else if (!q.accepted().isEmpty() && singleCellValue(BizTableService.num(q.accepted().get(0)), tables)) {
+                    bad.add("Q" + (i + 1) + " 의 정답이 " + CELL_SAME); // 계산식이 있어도 값이 칸 하나와 같으면 함정이 사라진 것(설계도의 정의가 답을 정함)
+                }
             } else {
                 for (var c : q.choices()) {
                     String t = squash(c.content());

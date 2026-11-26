@@ -204,7 +204,7 @@ class BizSoloSolveServiceTest {
         assertThat(r.check().ok()).isTrue();
         assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
         assertThat(r.check().needsRegeneration()).isFalse();
-        assertThat(r.check().detail()).isEqualTo("AI 단독 풀이를 확인하지 못했어요(호출 실패)");
+        assertThat(r.check().detail()).startsWith("AI 단독 풀이를 확인하지 못했어요(").contains("호출 실패");
         assertThat(r.inputTokens()).isZero();
         assertThat(r.answers()).isEmpty();
     }

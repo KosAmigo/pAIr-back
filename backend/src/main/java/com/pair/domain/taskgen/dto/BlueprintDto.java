@@ -33,7 +33,39 @@ public record BlueprintDto(
         /** BIZ: 문항 계획("Q1 객관식 결론", "Q2 단답형 …"). flaws.caughtBy 의 Q 번호와 맞춘다 */
         List<String> questionPlan,
         /** 숨은 테스트(DEV)·문항(BIZ)이 확인할 사례 목록. 답 쪽 단계는 이 사례만 구현한다 */
-        List<Case> cases) {
+        List<Case> cases,
+        /** E6·M6: 풀이에 꼭 필요한 자료 묶음의 파일 이름(DEV: 시작 코드·공개 테스트·NOTES.md 경로, BIZ: 문서·CSV 경로). 20~30% */
+        List<String> neededFiles,
+        /** E6·M6: 관련 적은 자료 목록(파일 이름과 한 줄 내용). 단계 4'(싼 모델)가 결함·답을 모른 채 만든다 */
+        List<Filler> fillers) {
+
+    /** 필요한 묶음·관련 적은 자료 없이 만든다(테스트·옛 코드용) */
+    public BlueprintDto(String title, String summary, String code, String category, List<String> competencies, String scenario, List<String> api,
+            List<Fact> facts, List<Example> examples, List<Flaw> flaws, List<Judgment> judgments, List<String> trapKeywords, Conclusion conclusion,
+            List<Table> tables, List<Figure> figures, List<Doc> docs, List<String> questionPlan, List<Case> cases) {
+        this(title, summary, code, category, competencies, scenario, api, facts, examples, flaws, judgments, trapKeywords, conclusion, tables, figures, docs,
+                questionPlan, cases, List.of(), List.of());
+    }
+
+    /** 필요한 묶음과 관련 적은 자료 목록만 바꾼 복사본 */
+    public BlueprintDto withMaterials(List<String> neededFiles, List<Filler> fillers) {
+        return new BlueprintDto(title, summary, code, category, competencies, scenario, api, facts, examples, flaws, judgments, trapKeywords, conclusion,
+                tables, figures, docs, questionPlan, cases, neededFiles, fillers);
+    }
+
+    /** 관련 적은 자료 하나: path 는 파일 이름(DEV src/…java, BIZ 자료/…pdf·csv), summary 는 한 줄 내용(결함·답과 상관없는 일반 업무 내용) */
+    public record Filler(String path, String summary, Boolean confusing) {
+
+        /** 헷갈리는 자료 표시 없이 만든다(테스트·옛 코드용) */
+        public Filler(String path, String summary) {
+            this(path, summary, false);
+        }
+
+        /** 헷갈리는 자료인가: 과제와 같은 영역의 이름·내용이지만 답·결함 근거·판단 근거는 없는 자료(M6) */
+        public boolean confusingFlag() {
+            return Boolean.TRUE.equals(confusing);
+        }
+    }
 
     /** 사례 없이 만든다(테스트·옛 코드용) */
     public BlueprintDto(String title, String summary, String code, String category, List<String> competencies, String scenario, List<String> api,

@@ -6,6 +6,7 @@ import com.pair.domain.task.entity.TaskFile;
 import com.pair.domain.task.entity.TaskQuestion;
 import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.task.dto.TaskDefDto;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -202,7 +203,8 @@ public class TaskDefRepository {
         return new TaskDefDto(t.getCode(), t.getTrack().toLowerCase(), t.getTitle(), t.getTimeLimitMin(),
                 lines(t.getDescription()), lines(t.getRequirements()), dev ? NOTES_DEV : NOTES_BIZ, followUps,
                 s.openFile, s.d4Minutes == null ? List.of() : s.d4Minutes,
-                s.requiredHeadings == null ? List.of() : s.requiredHeadings, s.editableFile);
+                s.requiredHeadings == null ? List.of() : s.requiredHeadings, s.editableFile,
+                AiLimitsDto.ofOrNull(s.aiTurns, s.aiMaxAttach, s.aiContextChars));
     }
 
     private static List<String> lines(String text) {
@@ -229,5 +231,5 @@ public class TaskDefRepository {
 
     /** tasks.settings JSON 모양 */
     private record Settings(String openFile, String editableFile, List<String> requiredHeadings,
-            List<Integer> d4Minutes) {}
+            List<Integer> d4Minutes, Integer aiTurns, Integer aiMaxAttach, Integer aiContextChars) {}
 }
