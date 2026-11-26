@@ -67,6 +67,18 @@ class GeneratedTaskSaveRetryTest {
     }
 
     @Test
+    void savedSettingsKeepAiLimitsByMinutes() throws Exception {
+        // E6: 생성기가 저장할 때 과제별 AI 제한(제한시간 기본값)을 settings 에 함께 넣는다
+        var form = TaskGenFixtures.form();
+        String code = writer.saveDev(form, draft("limits-solo"), report(), 1L);
+        var settings = new com.fasterxml.jackson.databind.ObjectMapper().readTree(realFind(code).orElseThrow().getSettings());
+        var expected = com.pair.domain.task.dto.AiLimitsDto.forMinutes(form.minutes());
+        assertThat(settings.path("aiTurns").asInt()).isEqualTo(expected.turns());
+        assertThat(settings.path("aiMaxAttach").asInt()).isEqualTo(expected.maxAttach());
+        assertThat(settings.path("aiContextChars").asInt()).isEqualTo(expected.contextChars());
+    }
+
+    @Test
     void conflictAtSaveRetriesWithNextCode() {
         writer.saveDev(TaskGenFixtures.form(), draft("retry-solo"), report(), 1L);
 

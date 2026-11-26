@@ -61,6 +61,7 @@ final class StageRouteService {
             if (s.isEmpty() || d.contains("설명") || d.contains("요구사항") || d.contains("문서") || d.contains("NOTES") || d.contains("CSV")) s.add(Stage.WRITING);
             return s;
         }
+        if (n.equals(TaskPipelineService.FILLER_GATE)) return EnumSet.of(Stage.FILLER); // 관련 적은 자료만 다시 만든다(M6)
         if (n.equals(TaskPipelineService.KEY_GATE) || n.equals(TaskPipelineService.BACKING_GATE) || n.equals(TaskPipelineService.ALT_GATE)) {
             Set<Stage> marked = markedStages(c.detail());
             if (!marked.isEmpty()) return marked; // 관문이 직접 적은 고칠 단계

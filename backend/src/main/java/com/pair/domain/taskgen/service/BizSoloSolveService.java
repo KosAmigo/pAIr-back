@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.SoloBizAnswerDto;
@@ -51,17 +52,17 @@ public class BizSoloSolveService {
         return new GenCheckResultDto(NAME, true, "건너뜀: " + why, GenCheckResultDto.WARN);
     }
 
-    /** 응시자가 AI 에 붙여 넣을 만한 글. 정답, 계산식, 체크리스트, 함정 정보는 넣지 않는다 */
+    /** 응시자가 AI 에 붙여 넣을 만한 글(제한 없이 자료 전부). 정답, 계산식, 체크리스트, 함정 정보는 넣지 않는다 */
     static String prompt(BizDraftDto d) {
+        return prompt(d, null);
+    }
+
+    /** limits 가 있으면 자료를 앞에서부터 붙이되 첨부 개수·맥락 글자 한도까지만 붙인다(E6, 고르지 않는 풀이) */
+    static String prompt(BizDraftDto d, AiLimitsDto limits) {
         StringBuilder sb = new StringBuilder();
         sb.append("[설명]\n").append(String.join("\n", d.description())).append("\n\n[요구사항]\n");
         for (String r : d.requirements()) sb.append("- ").append(r).append('\n');
-        for (var doc : d.documents()) {
-            for (int i = 0; i < doc.pages().size(); i++) {
-                sb.append("\n[자료 ").append(doc.path()).append(' ').append(i + 1).append("쪽]\n").append(doc.pages().get(i)).append('\n');
-            }
-        }
-        for (var f : d.csvFiles()) sb.append("\n[자료 ").append(f.path()).append("]\n").append(f.content()).append('\n');
+        for (var m : SoloLimitService.attach(materials(d), limits).attached()) sb.append(m.text());
         sb.append("\n[문항]\n");
         int n = 1;
         for (var q : d.questions()) {
@@ -71,6 +72,20 @@ public class BizSoloSolveService {
             }
         }
         return sb.append('\n').append(REQUEST).toString();
+    }
+
+    /** 붙일 자료(문서 → CSV 순서, 파일 하나가 첨부 하나). 문서는 쪽마다 머리글을 붙인다 */
+    private static List<SoloLimitService.Material> materials(BizDraftDto d) {
+        List<SoloLimitService.Material> out = new ArrayList<>();
+        for (var doc : d.documents()) {
+            StringBuilder t = new StringBuilder();
+            for (int i = 0; i < doc.pages().size(); i++) {
+                t.append("\n[자료 ").append(doc.path()).append(' ').append(i + 1).append("쪽]\n").append(doc.pages().get(i)).append('\n');
+            }
+            out.add(new SoloLimitService.Material(doc.path(), t.toString()));
+        }
+        for (var f : d.csvFiles()) out.add(new SoloLimitService.Material(f.path(), "\n[자료 " + f.path() + "]\n" + f.content() + "\n"));
+        return out;
     }
 
     /** 함정이 걸린 문항의 번호(0부터): 모든 단답형 + 결론 문구와 같은 보기를 가진 객관식 */
@@ -100,16 +115,21 @@ public class BizSoloSolveService {
 
     /** 함정 문항을 모두 맞히면 "잡음", 하나라도 틀리면 "지나침"을 기록한다(항상 ok, warn 등급) */
     public Result run(BizDraftDto d) {
+        return run(d, null);
+    }
+
+    /** limits: 과제의 AI 제한(E6). null 이면 자료를 제한 없이 모두 붙인다 */
+    public Result run(BizDraftDto d, AiLimitsDto limits) {
         String model = props.soloModel() == null || props.soloModel().isBlank() ? pair.assistant().model() : props.soloModel();
         String system = pair.assistant().systemPrompt() == null ? "" : pair.assistant().systemPrompt();
         TaskGenAiService.Output<SoloBizAnswerDto> o;
         try {
-            o = ai.generate(model, system, prompt(d), SoloBizAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
+            o = ai.generate(model, system, prompt(d, limits), SoloBizAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
         } catch (RuntimeException e) {
-            return new Result(unchecked(), 0, 0, List.of());
+            return new Result(unchecked("모델 호출 실패: " + e.getMessage()), 0, 0, List.of());
         }
         List<SoloBizItemDto> items = o.value() == null || o.value().answers() == null ? List.of() : o.value().answers();
-        if (items.isEmpty()) return new Result(unchecked(), o.inputTokens(), o.outputTokens(), List.of());
+        if (items.isEmpty()) return new Result(unchecked("풀이 모델이 답을 주지 않음"), o.inputTokens(), o.outputTokens(), List.of());
         List<String> answers = matchByNumber(items, d.questions().size());
         if (answers == null) {
             // 번호가 문항과 맞지 않거나 빠졌다: 틀림으로 세지 않고 확인하지 못한 것으로 둔다. 기록에는 받은 그대로 남긴다
@@ -127,10 +147,10 @@ public class BizSoloSolveService {
         }
         GenCheckResultDto check;
         if (!missed.isEmpty()) {
-            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요. 자료를 그대로 받고 낸 답이 함정 문항에서 틀렸어요: " + String.join(", ", missed), GenCheckResultDto.WARN);
+            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요. " + limitNote(d, limits) + "자료를 그대로 받고 낸 답이 함정 문항에서 틀렸어요: " + String.join(", ", missed), GenCheckResultDto.WARN);
         } else {
             String evidence = d.trap() == null || d.trap().evidence() == null ? "" : d.trap().evidence().strip();
-            String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요(함정 문항 " + passed.size() + "개를 모두 맞힘): "
+            String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요. " + limitNote(d, limits) + "(함정 문항 " + passed.size() + "개를 모두 맞힘): "
                     + String.join(", ", passed) + ". 난이도가 낮거나 단서가 자료에 많이 드러났는지 검수하세요."
                     + (evidence.isEmpty() ? "" : " AI 가 단서로 썼을 만한 자료 문장: " + (evidence.length() > 150 ? evidence.substring(0, 150) + "…" : evidence));
             check = new GenCheckResultDto(NAME, true, detail, GenCheckResultDto.WARN);
@@ -153,8 +173,13 @@ public class BizSoloSolveService {
         return List.of(byNo);
     }
 
-    private static GenCheckResultDto unchecked() {
-        return new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패)", GenCheckResultDto.WARN);
+    /** 제한 안에서 무엇을 붙였는지(검수자가 난이도를 가늠하는 데 쓴다) */
+    private static String limitNote(BizDraftDto d, AiLimitsDto limits) {
+        return SoloLimitService.note(SoloLimitService.attach(materials(d), limits), limits);
+    }
+
+    private static GenCheckResultDto unchecked(String why) {
+        return new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(" + why + ")", GenCheckResultDto.WARN);
     }
 
     private static boolean isRight(BizDraftDto.QuestionDraft q, String answer) {

@@ -13,14 +13,15 @@ import java.util.function.Consumer;
  */
 public interface TaskPipelineService<D> {
 
-    /** 1 설계도, 2 작성, 2' 시작 코드(DEV), 3 문항 글(BIZ), 4 정답 쪽, REVIEW·REVIEW2 관문 검사(직군마다 생성과 다른 회사 모델). 순서대로 앞 단계 결과가 뒤 단계의 입력이다 */
-    enum Stage { BLUEPRINT, WRITING, CODE, QUESTIONS, ANSWER, REVIEW, REVIEW2 }
+    /** 1 설계도, 2 작성, 2' 시작 코드(DEV), 3 문항 글(BIZ), 4 정답 쪽, 4' 관련 적은 자료(FILLER, 싼 모델, E6), REVIEW·REVIEW2·FILLER_REVIEW 관문 검사(직군마다 생성과 다른 회사 모델). 순서대로 앞 단계 결과가 뒤 단계의 입력이다 */
+    enum Stage { BLUEPRINT, WRITING, CODE, QUESTIONS, ANSWER, FILLER, REVIEW, REVIEW2, FILLER_REVIEW }
 
     String STEP_BLUEPRINT = "설계도 작성 중";
     String STEP_WRITING = "글 작성 중";
     String STEP_CODE = "시작 코드 작성 중";
     String STEP_QUESTIONS = "문항 글 작성 중";
     String STEP_ANSWER = "정답 쪽 작성 중";
+    String STEP_FILLER = "관련 적은 자료 작성 중";
 
     /** 코드가 단계 결과를 보고 확인하는 검사 이름(실행·계산 검사와 같이 results 에 들어간다) */
     String BLUEPRINT_CHECK = "설계도 형식"; // 설계도 단계
@@ -32,6 +33,10 @@ public interface TaskPipelineService<D> {
     String KEY_GATE = "정답 키 점검"; // BIZ
     String BACKING_GATE = "테스트 근거 점검"; // DEV
     String ALT_GATE = "다른 풀이 실행 점검"; // DEV
+
+    String FILLER_GATE = "관련 적은 자료 점검(M6)"; // 관문(AI, 생성과 다른 회사): 관련 적은 자료에 답·결함 근거·판단 근거가 없다
+    String M6_NEEDED_CHECK = "필요한 묶음이 맥락 한도 안(M6)"; // 코드: 필요한 묶음 글자 수 ≤ 맥락 한도의 70%. 실패하면 설계도를 다시
+    String M6_TOTAL_CHECK = "자료 전체가 맥락 한도를 넘음(M6)"; // 코드: 자료 전체 ≥ 맥락 한도의 2배. 실패하면 단계 4'를 다시
 
     String BASIS_CHECK = "사례 근거 문장이 글에 그대로 있음"; // 작성 단계: 사례의 기대 결과를 정하는 문장(M2)
 
@@ -75,6 +80,11 @@ public interface TaskPipelineService<D> {
         /** 지금 설계도(단계별 생성이 아니면 null) */
         default com.pair.domain.taskgen.dto.BlueprintDto blueprint() {
             return null;
+        }
+
+        /** failed 로 redo 하면 다시 돌 단계 이름들(비용 어림용). 모르면 빈 목록 */
+        default List<String> plannedStages(List<GenCheckResultDto> failed) {
+            return List.of();
         }
 
         /** 마지막 redo 가 다시 돌린 단계 이름들(없으면 빈 목록) */

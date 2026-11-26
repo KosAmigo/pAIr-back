@@ -31,6 +31,7 @@ import com.pair.infra.sandbox.JavaDiagnostics;
 import com.pair.domain.task.service.TaskMaterialService;
 import com.pair.domain.scoring.service.ScoringService;
 import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskDefRepository;
@@ -236,11 +237,13 @@ public class AttemptService {
         Attempt record = registry.find(id).orElseThrow(() -> new java.util.NoSuchElementException("없는 응시입니다: " + id));
         // 첨부는 AI 를 부르기 전에 검증하고 글자를 읽는다. 틀리면 AI 도 크레딧도 건드리지 않는다
         Map<String, String> filesAtAsk = store.readFiles(id);
-        List<Resolved> resolved = attachments.resolve(record.getId(), filesAtAsk, refs);
+        AiLimitsDto limits = tasks.get(a.taskId()).aiLimits(); // E6: 과제별 제한, 없으면 null(전역 설정)
+        List<Resolved> resolved = attachments.resolve(record.getId(), filesAtAsk, refs, limits);
         if (record.getUserId() != null) credits.checkChat(record.getUserId(), resolved.size());
         List<ChatTurnStateDto> history = store.turns(id);
-        if (history.size() / 2 >= props.assistant().maxTurns()) {
-            throw new IllegalStateException("응시당 AI 질문 한도(" + props.assistant().maxTurns() + "회)에 도달했습니다.");
+        int maxTurns = limits == null ? props.assistant().maxTurns() : limits.turns();
+        if (history.size() / 2 >= maxTurns) {
+            throw new IllegalStateException("응시당 AI 질문 한도(" + maxTurns + "회)에 도달했습니다.");
         }
         ChatAttachmentService.Built built = attachments.build(record.getId(), history, message, resolved);
         List<Message> msgs = built.messages();

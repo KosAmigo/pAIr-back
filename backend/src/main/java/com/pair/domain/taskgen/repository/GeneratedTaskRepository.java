@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.repository;
 
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.service.BizCheckService;
@@ -273,6 +274,7 @@ public class GeneratedTaskRepository {
         s.put("editableFile", "기획안.md");
         s.put("requiredHeadings", BIZ_HEADINGS);
         s.put("d4Minutes", d4Minutes(form.minutes()));
+        putAiLimits(s, form.minutes());
         s.put("competencies", form.competencies() == null ? List.of() : form.competencies());
         return toJson(s);
     }
@@ -340,8 +342,17 @@ public class GeneratedTaskRepository {
         s.put("editableFile", null);
         s.put("requiredHeadings", List.of());
         s.put("d4Minutes", d4Minutes(form.minutes()));
+        putAiLimits(s, form.minutes());
         s.put("competencies", form.competencies() == null ? List.of() : form.competencies());
         return toJson(s);
+    }
+
+    /** E6: 과제별 AI 제한(턴·한 번에 첨부·첨부 맥락)을 제한시간 기본값으로 settings 에 함께 저장한다 */
+    private static void putAiLimits(Map<String, Object> s, int minutes) {
+        AiLimitsDto l = AiLimitsDto.forMinutes(minutes);
+        s.put("aiTurns", l.turns());
+        s.put("aiMaxAttach", l.maxAttach());
+        s.put("aiContextChars", l.contextChars());
     }
 
     /** tasks.task_id 는 PostgreSQL 에서는 시퀀스, 테스트 DB(H2)에서는 최댓값+1 로 정한다 */

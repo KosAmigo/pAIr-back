@@ -138,8 +138,24 @@ class TaskGenBatchLiveTest {
             if (m.find()) sum += Double.parseDouble(m.group(1));
         }
         md.append(String.format(java.util.Locale.ROOT, "\n비용 합계 $%.3f (각 줄의 attempts=시도 수, cost=토큰×가격)\n", sum));
+        md.append(soloLine(lines)).append('\n');
         md.append("\n총 ").append(sec).append("초 (작업별 시간은 각 줄의 '초', 시작 후 완료까지)\n");
         Files.writeString(OUT.resolve("summary.md"), md.toString(), StandardCharsets.UTF_8);
+    }
+
+    /** 난이도 목표(AI 단독 풀이가 결함을 놓친 비율 50% 이상, 참고)를 보는 한 줄. 놓침 / 돌린 것(놓침+잡음), 안 돌았거나 확인 못 한 것은 따로 센다 */
+    static String soloLine(String[] lines) {
+        int missed = 0, caught = 0, notRun = 0;
+        for (String l : lines) {
+            var m = java.util.regex.Pattern.compile("\\| solo=(\\S+)").matcher(l == null ? "" : l);
+            String st = m.find() ? m.group(1) : "";
+            if (st.equals("missed")) missed++;
+            else if (st.equals("caught")) caught++;
+            else if (l != null && l.contains("| passed=")) notRun++; // 건너뜀·확인 못 함·알 수 없음
+        }
+        int ran = missed + caught;
+        return String.format(java.util.Locale.ROOT, "\nAI 단독 풀이 놓침 %d/%d (%s), 안 돌았거나 확인 못 함 %d개 (목표 50%% 이상, 참고)", missed, ran,
+                ran == 0 ? "-" : Math.round(missed * 100.0 / ran) + "%", notRun);
     }
 
     /** 한 과제를 만든다. 한 과제가 실패해도 예외를 밖으로 내보내지 않고 summary 한 줄로 남긴다 */
@@ -164,19 +180,20 @@ class TaskGenBatchLiveTest {
             code = st.taskCode();
             export(OUT.resolve(nn + "-" + code), form, code);
 
-            String tokens = "-", cost = "미제공";
+            String tokens = "-", cost = "미제공", solo = "알 수 없음";
             int attempts = 0;
             try {
                 JsonNode rep = json.readTree(writer.report(code));
                 tokens = rep.path("inputTokens").asLong() + "/" + rep.path("outputTokens").asLong();
                 attempts = rep.path("attempts").asInt();
+                solo = rep.path("details").path("solo").path("status").asText("알 수 없음");
                 JsonNode c = rep.path("details").path("cost");
                 if (!c.isMissingNode()) cost = String.format(java.util.Locale.ROOT, "$%.3f%s", c.path("totalUsd").asDouble(), c.path("stoppedByCap").asBoolean() ? "(비용 상한)" : "");
             } catch (Exception ignore) { }
             System.out.println("[batch " + nn + "] 완료 code=" + code + " passed=" + st.passed() + " " + sec + "초");
             return "- " + nn + " | " + form.track() + " | " + form.minutes() + "분 | " + form.usage() + " | " + code
                     + " | passed=" + st.passed() + " | attempts=" + attempts + " | " + sec + "초 | tokens(in/out)=" + tokens
-                    + " | cost=" + cost + " | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
+                    + " | cost=" + cost + " | solo=" + solo + " | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
         } catch (Throwable e) {
             long sec = Math.round((System.nanoTime() - t) / 1e9);
             e.printStackTrace();

@@ -4,6 +4,7 @@ import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -29,6 +30,59 @@ final class GenTextService {
     /** 글자·숫자만 남긴 비교용 글(띄어쓰기·문장부호 차이 무시). 근거 문장 매칭(M4)에 쓴다 */
     static String norm(String s) {
         return s == null ? "" : s.replaceAll("[^\\p{L}\\p{N}]+", "").toLowerCase(Locale.ROOT);
+    }
+
+    private static final double SIMILAR = 0.9;
+    private static final int MIN_FUZZY_CHARS = 10;
+
+    /**
+     * 사실·근거 문장(text)이 corpus 에 들어 있는가. 문장마다 따로 보고, 띄어쓰기·문장부호는 무시하며(norm),
+     * 조사·어미가 한두 글자 다른 정도(글자 수 10%까지 고침)는 같은 문장으로 본다. 숫자는 그대로여야 한다.
+     * 한 사실에 문장이 여럿이어도 문장마다 찾는다("
+"·"/" 로 이은 옛 설계도 대비)
+     */
+    static boolean containsLike(String corpus, String text) {
+        String all = norm(corpus);
+        List<String> corpusSentences = null;
+        for (String part : text == null ? new String[0] : text.split("\s/\s")) {
+            for (String sentence : TaskWritingService.sentences(part)) {
+                String n = norm(sentence);
+                if (n.isEmpty() || all.contains(n)) continue;
+                if (n.length() < MIN_FUZZY_CHARS) return false;
+                if (corpusSentences == null) corpusSentences = TaskWritingService.sentences(corpus);
+                if (corpusSentences.stream().noneMatch(c -> similar(n, norm(c)))) return false;
+            }
+        }
+        return true;
+    }
+
+    /** pattern 이 target 의 어떤 부분과 90% 이상 같고(고친 글자 수 기준) 숫자가 같으면 true */
+    private static boolean similar(String pattern, String target) {
+        if (target.length() < pattern.length() / 2) return false;
+        int allowed = (int) Math.floor(pattern.length() * (1 - SIMILAR));
+        if (Collections.indexOfSubList(digitRuns(target), digitRuns(pattern)) < 0) return false; // 숫자는 그대로여야 한다
+        // Sellers: 목표 글 안에서 pattern 과 가장 가까운 부분까지의 고친 횟수
+        int m = pattern.length();
+        int[] prev = new int[m + 1];
+        for (int i = 0; i <= m; i++) prev[i] = i;
+        int best = prev[m];
+        for (int j = 1; j <= target.length(); j++) {
+            int[] cur = new int[m + 1];
+            for (int i = 1; i <= m; i++) {
+                int sub = prev[i - 1] + (pattern.charAt(i - 1) == target.charAt(j - 1) ? 0 : 1);
+                cur[i] = Math.min(sub, Math.min(prev[i] + 1, cur[i - 1] + 1));
+            }
+            best = Math.min(best, cur[m]);
+            prev = cur;
+        }
+        return best <= allowed;
+    }
+
+    private static List<String> digitRuns(String s) {
+        List<String> out = new ArrayList<>();
+        Matcher m = Pattern.compile("\\d+").matcher(s);
+        while (m.find()) out.add(m.group());
+        return out;
     }
 
     /** 핵심어 중 text 에 들어 있는 것(대소문자·공백 무시). 입력 순서 유지, 중복 없음 */

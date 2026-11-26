@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.SoloAnswerDto;
@@ -56,12 +57,23 @@ public class SoloSolveService {
 
     /** 응시자가 AI 에 붙여 넣을 만한 글. 숨은 테스트, 정답, 오답, 함정 핵심어는 넣지 않는다 */
     static String prompt(DevDraftDto d) {
+        return prompt(d, null);
+    }
+
+    /** limits 가 있으면 파일을 앞에서부터 붙이되 첨부 개수·맥락 글자 한도까지만 붙인다(E6, 고르지 않는 풀이) */
+    static String prompt(DevDraftDto d, AiLimitsDto limits) {
         StringBuilder sb = new StringBuilder();
         sb.append("[설명]\n").append(String.join("\n", d.description())).append("\n\n");
         sb.append("[요구사항]\n");
         for (String r : d.requirements()) sb.append("- ").append(r).append('\n');
-        for (var f : d.files()) sb.append("\n[파일 ").append(f.path()).append("]\n").append(f.content()).append('\n');
+        for (var m : SoloLimitService.attach(materials(d), limits).attached()) sb.append("\n[파일 ").append(m.path()).append("]\n").append(m.text()).append('\n');
         return sb.append('\n').append(REQUEST).toString();
+    }
+
+    private static List<SoloLimitService.Material> materials(DevDraftDto d) {
+        List<SoloLimitService.Material> out = new ArrayList<>();
+        for (var f : d.files()) out.add(new SoloLimitService.Material(f.path(), f.content()));
+        return out;
     }
 
     /**
@@ -69,14 +81,19 @@ public class SoloSolveService {
      * 숨은 테스트까지 모두 통과하면 "잡음", 한 번이라도 실패하면 "지나침"(풀린 경우엔 어디를 고쳐 풀렸는지 검수용으로 적는다)
      */
     public Result run(DevDraftDto d) {
+        return run(d, null);
+    }
+
+    /** limits: 과제의 AI 제한(E6). null 이면 보이는 파일을 제한 없이 모두 붙인다 */
+    public Result run(DevDraftDto d, AiLimitsDto limits) {
         String model = props.soloModel() == null || props.soloModel().isBlank() ? pair.assistant().model() : props.soloModel();
         String system = pair.assistant().systemPrompt() == null ? "" : pair.assistant().systemPrompt();
-        String user = prompt(d);
+        String user = prompt(d, limits);
         int attempts = props.soloAttempts();
         Map<String, String> files = new LinkedHashMap<>();
         long in = 0, out = 0;
         int solved = 0, failedHidden = 0, callFailed = 0;
-        String firstFix = null;
+        String firstFix = null, failure = "";
 
         for (int n = 1; n <= attempts; n++) {
             TaskGenAiService.Output<SoloAnswerDto> o;
@@ -84,6 +101,7 @@ public class SoloSolveService {
                 o = ai.generate(model, system, user, SoloAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
             } catch (RuntimeException e) {
                 callFailed++;
+                failure = "모델 호출 실패: " + e.getMessage();
                 continue;
             }
             in += o.inputTokens();
@@ -98,6 +116,7 @@ public class SoloSolveService {
                 r = runner.run(sources);
             } catch (RuntimeException e) {
                 callFailed++;
+                failure = "풀이 실행 실패: " + e.getMessage();
                 continue;
             }
             if (!answer.isEmpty() && r.allPassed() && r.millis() < DevCheckService.TIME_LIMIT_MS) {
@@ -108,13 +127,13 @@ public class SoloSolveService {
 
         GenCheckResultDto check;
         if (failedHidden > 0) {
-            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요(" + attempts + "번 중 " + failedHidden
+            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요" + (limits == null ? "" : ". " + SoloLimitService.note(SoloLimitService.attach(materials(d), limits), limits).strip() + " ") + "(" + attempts + "번 중 " + failedHidden
                     + "번 숨은 테스트에서 실패). 검증이 필요한 과제입니다.", GenCheckResultDto.WARN);
         } else if (callFailed > 0) {
-            check = new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패)", GenCheckResultDto.WARN);
+            check = new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(" + failure + ")", GenCheckResultDto.WARN);
         } else {
             String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요(" + attempts + "번 모두 숨은 테스트 통과). 난이도가 낮거나 단서가 자료에 많이 드러났는지 검수하세요. "
-                    + sourcesNote(d)
+                    + SoloLimitService.note(SoloLimitService.attach(materials(d), limits), limits) + sourcesNote(d)
                     + (firstFix == null || firstFix.isBlank() ? "" : " AI 가 바로 고친 곳: " + firstFix + ".")
                     + clueNote(d, firstFix);
             check = new GenCheckResultDto(NAME, true, detail, GenCheckResultDto.WARN);

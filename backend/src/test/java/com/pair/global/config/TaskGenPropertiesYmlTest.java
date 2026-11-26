@@ -42,7 +42,7 @@ class TaskGenPropertiesYmlTest {
         assertThat(p.stage(false, "QUESTIONS").maxTokens()).isEqualTo(8000);
         assertThat(p.stage(true, "BLUEPRINT").maxTokens()).isEqualTo(24000);
         assertThat(p.stage(true, "ANSWER").maxTokens()).isEqualTo(32000);
-        assertThat(p.costCap()).isEqualTo(0.5);
+        assertThat(p.costCap()).isEqualTo(0.6);
         assertThat(p.cost("gpt-6.1-sol", 1_000_000, 1_000_000)).isEqualTo(12.0);
         assertThat(p.solverModel()).isEqualTo(sonnet);
         assertThat(p.solverEffort()).isEqualTo("medium");

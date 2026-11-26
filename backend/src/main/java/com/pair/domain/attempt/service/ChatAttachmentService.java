@@ -20,6 +20,7 @@ import com.pair.domain.attempt.entity.ChatAttachment;
 import com.pair.domain.attempt.repository.ChatAttachmentRepository;
 import com.pair.domain.attempt.entity.ChatTurn;
 import com.pair.domain.attempt.repository.ChatTurnRepository;
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.task.service.TaskMaterialService;
 
 /**
@@ -71,12 +72,28 @@ public class ChatAttachmentService {
         this.maxContextChars = maxContextChars;
     }
 
+    /** 과제에 AI 제한이 없을 때 쓰는 전역 한도(화면 표시용) */
+    public int defaultMaxFiles() {
+        return maxFiles;
+    }
+
+    public int defaultMaxChars() {
+        return maxChars;
+    }
+
     public static String systemNote() {
         return ATTACH_NOTE;
     }
 
     /** 요청의 첨부를 검증하고 글자를 읽어 온다. 하나라도 틀리면 AI 를 부르기 전에 거절한다. files: 응시 작업 파일(저장된 내용) */
     public List<Resolved> resolve(long attemptId, Map<String, String> files, List<Ref> refs) {
+        return resolve(attemptId, files, refs, null);
+    }
+
+    /** limits: 과제별 AI 제한(E6). null 이면 전역 설정(pair.assistant.*)을 쓴다 */
+    public List<Resolved> resolve(long attemptId, Map<String, String> files, List<Ref> refs, AiLimitsDto limits) {
+        int maxFiles = limits == null ? this.maxFiles : limits.maxAttach();
+        int maxChars = limits == null ? this.maxChars : limits.contextChars();
         if (refs == null || refs.isEmpty()) return List.of();
         if (refs.size() > maxFiles) throw new IllegalArgumentException("첨부는 한 번에 " + maxFiles + "개까지 붙일 수 있습니다.");
         List<Resolved> out = new ArrayList<>();

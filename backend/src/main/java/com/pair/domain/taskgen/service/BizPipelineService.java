@@ -4,7 +4,9 @@ import com.pair.domain.taskgen.dto.BizAnswerDto;
 import com.pair.domain.taskgen.dto.BizDraftDto;
 import com.pair.domain.taskgen.dto.BizQuestionsDto;
 import com.pair.domain.taskgen.dto.BizWritingDto;
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.taskgen.dto.BlueprintDto;
+import com.pair.domain.taskgen.dto.FillerDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.StageUsageDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
@@ -27,6 +29,8 @@ import com.pair.domain.taskgen.service.TaskPipelineService.Stage;
 public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
 
     private static final Set<Stage> ALL = EnumSet.of(Stage.BLUEPRINT, Stage.WRITING, Stage.QUESTIONS, Stage.ANSWER);
+    /** E6·M6(materialGate) 를 켜면 정답 쪽 뒤에 단계 4' 관련 적은 자료가 더 돈다 */
+    private static final Set<Stage> ALL_E6 = EnumSet.of(Stage.BLUEPRINT, Stage.WRITING, Stage.QUESTIONS, Stage.ANSWER, Stage.FILLER);
 
     private final TaskGenAiService ai;
     private final TaskGenProperties props;
@@ -38,7 +42,7 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
 
     @Override
     public Run<BizDraftDto> start(TaskGenRequest form) {
-        return new BizRun(form, new StageCallService(ai, props, false));
+        return new BizRun(form, new StageCallService(ai, props, false), props.materialGate());
     }
 
     /** 검사 이름 → 다시 돌릴 단계. 모르면 빈 집합 */
@@ -47,7 +51,10 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         if (gate != null) return gate;
         String n = c.name(), d = c.detail() == null ? "" : c.detail();
         if (n.equals(TaskPipelineService.BLUEPRINT_SENTENCE_CHECK)) return EnumSet.of(Stage.BLUEPRINT);
+        if (n.equals(TaskPipelineService.M6_TOTAL_CHECK)) return EnumSet.of(Stage.FILLER); // 자료 전체가 모자람: 관련 적은 자료를 다시(M6)
+        if (n.equals(TaskPipelineService.M6_NEEDED_CHECK)) return EnumSet.of(Stage.BLUEPRINT); // 필요한 묶음이 큼: 설계도를 다시(M6)
         if (n.equals(BizCheckService.SOLVE)) return EnumSet.of(Stage.WRITING); // 함정 값이 아닌 답이 나왔다 = 자료만으로 정답이 안 정해짐
+        if (n.equals(BizCheckService.TRAP_QUESTION) && d.contains(BizCheckService.CELL_SAME)) return EnumSet.of(Stage.BLUEPRINT); // 정답이 칸 값 그대로: 정의가 함정을 없앤 것
         if (n.equals(BizCheckService.CALC) || n.equals(BizCheckService.SOURCES) || n.equals(BizCheckService.WRONG_ANSWERS)
                 || n.equals(BizCheckService.HIDDEN_FLAW) || n.equals(BizCheckService.TRAP_QUESTION)) return EnumSet.of(Stage.ANSWER);
         if (n.equals(TaskPipelineService.MENTION_CHECK) || n.equals(TaskPipelineService.FILLER_CHECK)) return EnumSet.of(Stage.WRITING);
@@ -59,6 +66,7 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
             if (d.contains("[작성]")) s.add(Stage.WRITING);
             if (d.contains("[문항]")) s.add(Stage.QUESTIONS);
             if (d.contains("[정답]")) s.add(Stage.ANSWER);
+            if (d.contains("[관련 적은 자료]")) s.add(Stage.FILLER);
             return s;
         }
         if (n.equals(BizCheckService.TRAP) || n.equals(BizCheckService.LEAK) || n.equals(BizCheckService.JUDGMENT) || n.equals(TaskPipelineService.FACTS_CHECK)
@@ -80,13 +88,19 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         private BizWritingDto writing;
         private BizQuestionsDto questions;
         private BizAnswerDto answer;
+        private FillerDto filler;
+        private final boolean e6;
+        private final AiLimitsDto limits;
         private List<GenCheckResultDto> checks = List.of();
         private List<String> redone = List.of();
         private List<GenCheckResultDto> previous = List.of(); // 바로 앞 다시 만들기 때 실패한 검사
+        private boolean fillerSent; // 군더더기 반복으로 작성 단계에 되돌린 적이 있는가(한 번만)
 
-        BizRun(TaskGenRequest form, StageCallService calls) {
+        BizRun(TaskGenRequest form, StageCallService calls, boolean e6) {
             this.form = form;
             this.calls = calls;
+            this.e6 = e6;
+            this.limits = AiLimitsDto.forMinutes(form.minutes());
         }
 
         @Override
@@ -95,7 +109,7 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         }
 
         private StageRouteService.Plan plan(List<GenCheckResultDto> failed) {
-            return StageRouteService.plan(routed(failed), BizPipelineService::owners, ALL, EnumSet.of(Stage.WRITING));
+            return StageRouteService.plan(routed(failed), BizPipelineService::owners, e6 ? ALL_E6 : ALL, EnumSet.of(Stage.WRITING));
         }
 
         private List<GenCheckResultDto> routed(List<GenCheckResultDto> failed) {
@@ -105,6 +119,11 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         @Override
         public Set<String> kinds(List<GenCheckResultDto> failed) {
             return StageRouteService.kinds(routed(failed), BizPipelineService::owners);
+        }
+
+        @Override
+        public List<String> plannedStages(List<GenCheckResultDto> failed) {
+            return plan(failed).stages().stream().map(Enum::name).toList();
         }
 
         @Override
@@ -121,7 +140,7 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         }
 
         private BizDraftDto execute(StageRouteService.Plan plan, Consumer<String> onStep) {
-            Set<Stage> st = plan == null ? ALL : plan.stages();
+            Set<Stage> st = plan == null ? (e6 ? ALL_E6 : ALL) : plan.stages();
             boolean restart = plan == null || plan.fromBlueprint();
             if (st.contains(Stage.BLUEPRINT)) {
                 onStep.accept(STEP_BLUEPRINT);
@@ -130,6 +149,11 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
             if (st.contains(Stage.WRITING)) {
                 onStep.accept(STEP_WRITING);
                 writing = write(restart ? "" : TaskWritingService.writerFeedback(plan.byStage().get(Stage.WRITING), visibleText()));
+                List<String> filler = fillerNarration();
+                if (!fillerSent && !filler.isEmpty()) { // 같은 꼴의 군더더기 문장이 3개 이상: 작성 단계에 한 번만 되돌린다
+                    fillerSent = true;
+                    writing = write(TaskWritingService.fillerFeedback(filler));
+                }
             }
             if (st.contains(Stage.QUESTIONS)) {
                 onStep.accept(STEP_QUESTIONS);
@@ -139,21 +163,50 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
                 onStep.accept(STEP_ANSWER);
                 answer = answer(restart ? "" : StageRouteService.feedback(plan.byStage().get(Stage.ANSWER)));
             }
+            if (e6 && st.contains(Stage.FILLER)) {
+                onStep.accept(STEP_FILLER);
+                filler = fill(restart ? "" : StageRouteService.feedback(plan.byStage().get(Stage.FILLER)));
+            }
             List<BizDraftDto.QuestionDraft> assembled = BizQuestionService.assemble(bp, questions, answer);
-            checks = preChecks(assembled);
-            return TaskAssemblyService.biz(form, bp, writing, assembled, answer);
+            BizDraftDto draft = TaskAssemblyService.biz(form, bp, writing, assembled, answer, filler);
+            checks = preChecks(assembled, draft);
+            return draft;
+        }
+
+        /** E6·M6 단계 4': 결함을 모르는 싼 모델이 관련 적은 문서·CSV 를 쓴다. 자료 전체가 맥락 한도의 2.3배가 되도록 파일당 분량을 알려 준다 */
+        private FillerDto fill(String feedback) {
+            if (bp.fillers().isEmpty()) return new FillerDto(List.of());
+            int neededChars = MaterialGateService.chars(materials(TaskAssemblyService.biz(form, bp, writing, List.of(), answer, null)), bp.neededFiles());
+            int per = MaterialGateService.perFillerChars(bp, neededChars, limits);
+            FillerDto raw = calls.call(Stage.FILLER, TaskPromptService.filler(true), FillerService.input(bp, per, feedback), FillerDto.class);
+            return FillerService.sanitized(raw, bp);
+        }
+
+        /** 응시자가 첨부할 수 있는 파일(경로 → 글): 문서(쪽을 이은 글), CSV */
+        private static java.util.Map<String, String> materials(BizDraftDto d) {
+            java.util.Map<String, String> m = new java.util.LinkedHashMap<>();
+            for (var doc : d.documents()) m.put(doc.path(), String.join("\n", doc.pages()));
+            for (var f : d.csvFiles()) m.put(f.path(), f.content() == null ? "" : f.content());
+            return m;
+        }
+
+        /** 설계도 코드 검사 + (E6·M6 켜짐) 필요한 묶음·관련 적은 자료 목록 검사 */
+        private List<String> blueprintProblems(BlueprintDto b) {
+            List<String> problems = new ArrayList<>(BlueprintService.problems(b, true));
+            if (e6) problems.addAll(BlueprintService.materialProblems(b, true, form.minutes()));
+            return problems;
         }
 
         private BlueprintDto blueprint(String feedback) {
-            String system = TaskPromptService.blueprint(true, form.minutes(), BizTaskGeneratorService.depth(form.minutes()));
+            String system = TaskPromptService.blueprint(true, form.minutes(), BizTaskGeneratorService.depth(form.minutes()), e6);
             String user = "제한 시간: " + form.minutes() + "분\n주제: " + form.topic() + "\n함정: " + form.trap() + (feedback.isEmpty() ? "" : "\n\n" + feedback);
             BlueprintDto b = BlueprintService.normalized(calls.call(Stage.BLUEPRINT, system, user, BlueprintDto.class), true);
-            List<String> problems = BlueprintService.problems(b, true);
+            List<String> problems = blueprintProblems(b);
             if (problems.isEmpty()) problems = earlyReview(b); // 코드 검사를 통과하면 글에 들어갈 문장만 싸게 한 번 더 본다
             for (int retry = 0; !problems.isEmpty() && retry < 2; retry++) { // 코드 검사에 걸리면 최대 2번, 다시 받은 것도 검사한다
                 b = BlueprintService.normalized(calls.call(Stage.BLUEPRINT, system,
                         user + "\n\n설계도가 아래 문제로 걸렸습니다. 고쳐서 다시 내세요:\n- " + String.join("\n- ", problems), BlueprintDto.class), true);
-                problems = BlueprintService.problems(b, true);
+                problems = blueprintProblems(b);
             }
             return b;
         }
@@ -167,11 +220,17 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         }
 
         private BizWritingDto write(String feedback) {
-            BizWritingDto w = calls.call(Stage.WRITING, TaskPromptService.writingBiz(form.minutes()), TaskWritingService.input(bp, true, form.minutes(), feedback), BizWritingDto.class);
+            BizWritingDto w = calls.call(Stage.WRITING, TaskPromptService.writingBiz(form.minutes(), e6), TaskWritingService.input(bp, true, form.minutes(), feedback), BizWritingDto.class);
             return new BizWritingDto(nz(w.description()), nz(w.requirements()),
                     nz(w.documents()).stream().map(d -> new BizDraftDto.DocDraft(d.path(), nz(d.pages()))).collect(java.util.stream.Collectors.toMap(
                             BizDraftDto.DocDraft::path, d -> d, (a, b) -> a, java.util.LinkedHashMap::new)).values().stream().toList(), // 같은 경로 문서는 첫 번째만
                     w.taskFollowUp() == null ? "" : w.taskFollowUp());
+        }
+
+        private List<String> fillerNarration() {
+            StringBuilder sb = new StringBuilder();
+            writing.documents().forEach(d -> d.pages().forEach(p -> sb.append(p).append('\n')));
+            return TaskWritingService.repeatedFiller(sb.toString());
         }
 
         private BizQuestionsDto questions(String feedback) {
@@ -210,8 +269,8 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
             return sb.toString();
         }
 
-        private List<GenCheckResultDto> preChecks(List<BizDraftDto.QuestionDraft> assembled) {
-            List<String> problems = BlueprintService.problems(bp, true);
+        private List<GenCheckResultDto> preChecks(List<BizDraftDto.QuestionDraft> assembled, BizDraftDto draft) {
+            List<String> problems = blueprintProblems(bp);
             List<GenCheckResultDto> out = new ArrayList<>();
             out.add(problems.isEmpty() ? new GenCheckResultDto(BLUEPRINT_CHECK, true, "설계도와 숫자표가 정합합니다.")
                     : new GenCheckResultDto(BLUEPRINT_CHECK, false, String.join(" / ", problems)));
@@ -233,6 +292,7 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
             han.put("[작성]", StageCallService.json(writing));
             han.put("[문항]", StageCallService.json(questions));
             han.put("[정답]", StageCallService.json(answer));
+            if (e6 && filler != null) han.put("[관련 적은 자료]", StageCallService.json(filler));
             out.add(TaskWritingService.hanCheck(han));
             out.add(BizNumbersService.documentsCheck(bp, writing.documents()));
             out.add(BizQuestionService.check(bp, questions));
@@ -240,6 +300,11 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
             List<String> badSources = TaskAssemblyService.bizSourceProblems(bp, writing, assembled);
             out.add(badSources.isEmpty() ? new GenCheckResultDto(SOURCE_PATH_CHECK, true, "문항 근거 경로가 모두 실제 자료입니다.")
                     : new GenCheckResultDto(SOURCE_PATH_CHECK, false, String.join(" / ", badSources)));
+            if (e6) { // E6·M6: 필요한 묶음은 한도의 70% 이하, 자료 전체는 한도의 2배 이상
+                var mats = materials(draft);
+                out.add(MaterialGateService.needed(bp, mats, limits));
+                out.add(MaterialGateService.total(bp, mats, limits));
+            }
             return out;
         }
 

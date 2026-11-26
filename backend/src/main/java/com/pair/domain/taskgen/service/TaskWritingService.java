@@ -57,10 +57,9 @@ final class TaskWritingService {
 
     /** 사실 목록의 문장과 예의 입력·기대 출력이 글에 그대로 들어갔는지(M4). examplesText 는 요구사항(DEV)에서 찾는다 */
     static GenCheckResultDto factsCheck(BlueprintDto b, String corpus, String examplesText) {
-        String all = GenTextService.norm(corpus);
         String ex = GenTextService.norm(examplesText);
         List<String> missing = new ArrayList<>();
-        for (var f : b.facts()) if (!all.contains(GenTextService.norm(f.text()))) missing.add(f.text());
+        for (var f : b.facts()) if (!GenTextService.containsLike(corpus, f.text())) missing.add(f.text());
         for (var e : b.examples()) {
             if (!ex.contains(GenTextService.norm(e.input())) || !ex.contains(GenTextService.norm(e.expected()))) missing.add(e.input() + " → " + e.expected());
         }
@@ -73,11 +72,10 @@ final class TaskWritingService {
      * 없으면 그 사례의 기대 결과를 응시자가 자료로 알 수 없다(M2): 작성 단계를 다시 돌려 문장을 넣게 한다
      */
     static GenCheckResultDto basisCheck(BlueprintDto b, String visibleText) {
-        String all = GenTextService.norm(visibleText);
         List<String> missing = new ArrayList<>();
         for (var c : b.cases()) {
             if (c.basis() == null || c.basis().isBlank()) missing.add(c.name() + ": 근거 문장(basis)이 없음");
-            else if (!all.contains(GenTextService.norm(c.basis()))) missing.add(c.name() + ": " + c.basis());
+            else if (!GenTextService.containsLike(visibleText, c.basis())) missing.add(c.name() + ": " + c.basis());
         }
         if (missing.isEmpty()) return new GenCheckResultDto(TaskPipelineService.BASIS_CHECK, true, "사례 " + b.cases().size() + "개의 근거 문장이 모두 글에 그대로 있습니다.");
         return new GenCheckResultDto(TaskPipelineService.BASIS_CHECK, false, "사례의 근거 문장이 글에 없습니다: " + String.join(" / ", missing.subList(0, Math.min(5, missing.size()))));
@@ -198,13 +196,38 @@ final class TaskWritingService {
 
     private static final Pattern FILLER = Pattern.compile("(펼쳤|펼쳐 (놓|두)|정돈했|정리해 (놓|두)|묶어 (두|놓)|옮겨 (적|놓)|옮겼|꺼내 (놓|두)|훑어보았|넘겨 보았|올려 (놓|두))[가-힣 ]{0,6}[.]?$");
 
-    /** 경고만: 사람의 동작만 서술하는 문장(서류를 펼쳤다, 메모에 옮겼다 …)이 문서에 있으면 알린다(사실·숫자·판단·요청이 없는 군더더기) */
+    private static final Pattern PERSON_SUBJECT = Pattern.compile("(담당자|팀장|[가-힣]{0,6}팀)(은|는|이|가|에서는)\\s");
+    private static final Pattern STATUS_END = Pattern.compile("(중이다|중입니다|요청한다|요청했다|요청하였다|요청합니다|않다|않았다|않습니다|했다|하였다|했습니다|한다|합니다)[.]?$");
+    private static final int REPEAT_LIMIT = 3;
+
+    /** 담당자·팀이 주어이고 숫자 없이 동작·상태로만 끝나는 문장("담당자는 … 검토 중이다")이 3개 이상이면 그 문장들. 아니면 빈 목록 */
+    static List<String> repeatedFiller(String documentText) {
+        List<String> hits = new ArrayList<>();
+        for (String s : sentences(documentText)) {
+            String t = s.strip();
+            if (!t.matches(".*\\d.*") && PERSON_SUBJECT.matcher(t).find() && STATUS_END.matcher(t).find()) hits.add(s);
+        }
+        return hits.size() >= REPEAT_LIMIT ? hits : List.of();
+    }
+
+    /**
+     * 경고만: 사람의 동작만 서술하는 문장(서류를 펼쳤다, 메모에 옮겼다 …)이나, 사실·숫자 없이 "담당자는 … 중이다/요청한다" 꼴이 3개 이상 되풀이되면 알린다.
+     * 반복은 BizPipelineService 가 작성 단계에 한 번 되돌려 보낸다
+     */
     static GenCheckResultDto fillerCheck(String documentText) {
         List<String> hits = new ArrayList<>();
         for (String s : sentences(documentText)) if (FILLER.matcher(s.strip()).find()) hits.add(s);
+        List<String> repeated = repeatedFiller(documentText);
+        repeated.stream().filter(r -> !hits.contains(r)).forEach(hits::add);
         if (hits.isEmpty()) return new GenCheckResultDto(TaskPipelineService.FILLER_CHECK, true, "동작만 서술하는 문장이 없습니다.");
-        return new GenCheckResultDto(TaskPipelineService.FILLER_CHECK, false, "문서에 사람의 동작만 서술하는 문장이 있습니다(" + hits.size() + "개): "
+        return new GenCheckResultDto(TaskPipelineService.FILLER_CHECK, false, "문서에 사람의 동작만 서술하거나 같은 꼴로 되풀이되는 문장이 있습니다(" + hits.size() + "개): "
                 + String.join(" / ", hits.subList(0, Math.min(3, hits.size()))), GenCheckResultDto.WARN);
+    }
+
+    /** 반복 군더더기를 작성 단계에 되돌릴 때 붙이는 안내(결함 정보 없이 이전 글의 문장만 인용) */
+    static String fillerFeedback(List<String> repeated) {
+        return "앞서 쓴 글에 담당자·팀이 한 일이나 상태만 말하는 문장이 되풀이됩니다. 그런 문장은 빼고, 모든 문장이 사실·숫자·판단·요청 중 하나를 담도록 같은 사실 목록으로 처음부터 다시 쓰세요. 고칠 문장:\n- "
+                + String.join("\n- ", repeated.subList(0, Math.min(5, repeated.size())));
     }
 
     static List<String> sentences(String text) {
