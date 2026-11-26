@@ -131,6 +131,11 @@ public class AuthAccount {
         this.onboardingMailStatus = status;
     }
 
+    /** 온보딩 메일로 보낼 임시 비밀번호. 발급할 때 이미 세션과 토큰을 무효화했으므로 tokenVersion 은 그대로 둔다. */
+    public void setTemporaryPassword(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
     public void changeRole(CurrentUser.Role role) {
         this.role = role;
         this.tokenVersion++;

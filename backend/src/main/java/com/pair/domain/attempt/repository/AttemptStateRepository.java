@@ -4,6 +4,7 @@ import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -56,6 +57,36 @@ public interface AttemptStateRepository {
 
     /** 없으면 null */
     JsonNode readReport(String id);
+
+    /**
+     * 여러 응시의 점수(version, total, max, items 의 key·name·max·score)를 읽는다. 돌려주는 JSON 에서 점수 밖의 내용은 쓰지 않는다.
+     * 리포트가 없거나 읽지 못하는 응시는 결과에서 뺀다.
+     */
+    default Map<String, JsonNode> readScores(List<String> ids) {
+        Map<String, JsonNode> out = new java.util.HashMap<>();
+        for (String id : ids) {
+            try {
+                JsonNode report = readReport(id);
+                if (report != null) out.put(id, report);
+            } catch (RuntimeException e) {
+                // 이 응시만 뺀다
+            }
+        }
+        return out;
+    }
+
+    /** ids 중 AI 대화가 있거나 시작(start) 말고 다른 작업 기록이 있는 응시. 읽지 못하는 응시는 결과에서 뺀다 */
+    default Set<String> activeIds(List<String> ids) {
+        Set<String> out = new java.util.HashSet<>();
+        for (String id : ids) {
+            try {
+                if (!turns(id).isEmpty() || events(id).stream().anyMatch(e -> !"start".equals(e.path("type").asText()))) out.add(id);
+            } catch (RuntimeException e) {
+                // 이 응시만 뺀다
+            }
+        }
+        return out;
+    }
 
     /** 응시자가 고칠 수 없는 경로: 로그와 과제 자료. 화면(RealExam 의 readOnlyPath)과 같은 규칙이다 */
     static boolean readOnlyPath(String path) {

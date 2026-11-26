@@ -1,5 +1,8 @@
 package com.pair.domain.credit.service;
 
+import com.pair.domain.credit.dto.ConfirmationDto;
+import com.pair.domain.credit.dto.ProductResponse;
+import com.pair.domain.credit.dto.PurchaseResponse;
 import com.pair.domain.credit.entity.CreditPurchase;
 import com.pair.domain.credit.repository.CreditPurchaseRepository;
 import com.pair.infra.payment.PaymentRejectedException;
@@ -22,20 +25,11 @@ import com.pair.global.error.ConflictException;
 
 @Service
 public class CreditPurchaseService {
-    public record Product(int credits, int amountKrw) {}
-    public record PurchaseView(Long purchaseId, String orderId, int credits, int amountKrw, CreditPurchase.Status status,
-                               Instant createdAt, Instant paidAt, Instant refundedAt) {
-        static PurchaseView from(CreditPurchase p) {
-            return new PurchaseView(p.getId(), p.getOrderId(), p.getCredits(), p.getAmountKrw(), p.getStatus(),
-                    p.getCreatedAt(), p.getPaidAt(), p.getRefundedAt());
-        }
-    }
-    private record Confirmation(String orderId, String paymentKey, int amount, String key, Instant startedAt, boolean paid) {}
     /** 토스에서 끝났고 더 승인될 수 없는 결제 상태 */
     private static final Set<String> ENDED_STATUSES = Set.of("ABORTED", "EXPIRED", "CANCELED");
-    private static final List<Product> PRODUCTS = List.of(
-            new Product(1000, 4990), new Product(2200, 9990),
-            new Product(4600, 19990), new Product(15000, 49990));
+    private static final List<ProductResponse> PRODUCTS = List.of(
+            new ProductResponse(1000, 4990), new ProductResponse(2200, 9990),
+            new ProductResponse(4600, 19990), new ProductResponse(15000, 49990));
 
     private final CreditPurchaseRepository purchases;
     private final CreditService credits;
@@ -50,42 +44,42 @@ public class CreditPurchaseService {
         this.transactions = transactions;
     }
 
-    public List<Product> products() { return PRODUCTS; }
+    public List<ProductResponse> products() { return PRODUCTS; }
 
     @Transactional
-    public PurchaseView create(Long userId, int creditAmount) {
-        Product product = PRODUCTS.stream().filter(p -> p.credits() == creditAmount).findFirst()
+    public PurchaseResponse create(Long userId, int creditAmount) {
+        ProductResponse product = PRODUCTS.stream().filter(p -> p.credits() == creditAmount).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("없는 크레딧 상품입니다."));
-        return PurchaseView.from(purchases.save(new CreditPurchase(userId, product.credits(), product.amountKrw(), uuid())));
+        return PurchaseResponse.from(purchases.save(new CreditPurchase(userId, product.credits(), product.amountKrw(), uuid())));
     }
 
     @Transactional(readOnly = true)
-    public Page<PurchaseView> history(Long userId, int page, int size) {
-        return purchases.findByUserIdOrderByIdDesc(userId, PageRequest.of(page, size)).map(PurchaseView::from);
+    public Page<PurchaseResponse> history(Long userId, int page, int size) {
+        return purchases.findByUserIdOrderByIdDesc(userId, PageRequest.of(page, size)).map(PurchaseResponse::from);
     }
 
     @Transactional
-    public PurchaseView cancelReady(Long userId, String orderId) {
+    public PurchaseResponse cancelReady(Long userId, String orderId) {
         CreditPurchase purchase = owned(userId, orderId);
-        if (purchase.getStatus() == CreditPurchase.Status.CANCELED) return PurchaseView.from(purchase);
+        if (purchase.getStatus() == CreditPurchase.Status.CANCELED) return PurchaseResponse.from(purchase);
         if (purchase.getStatus() != CreditPurchase.Status.READY) throw new ConflictException("결제 전 주문만 취소할 수 있습니다.");
         purchase.cancel();
-        return PurchaseView.from(purchase);
+        return PurchaseResponse.from(purchase);
     }
 
-    public PurchaseView confirm(Long userId, String orderId, String paymentKey, int amount) {
+    public PurchaseResponse confirm(Long userId, String orderId, String paymentKey, int amount) {
         toss.requireKey();
-        Confirmation info = transactions.execute(status -> {
+        ConfirmationDto info = transactions.execute(status -> {
             CreditPurchase p = owned(userId, orderId);
             if (p.getAmountKrw() != amount) throw new IllegalArgumentException("주문 금액이 일치하지 않습니다.");
             if (p.getStatus() == CreditPurchase.Status.PAID && paymentKey.equals(p.getPaymentKey())) {
-                return new Confirmation(orderId, paymentKey, amount, p.getConfirmationKey(), p.getConfirmationStartedAt(), true);
+                return new ConfirmationDto(orderId, paymentKey, amount, p.getConfirmationKey(), p.getConfirmationStartedAt(), true);
             }
             if (p.getStatus() == CreditPurchase.Status.READY) p.beginConfirmation(paymentKey, uuid());
             else if (p.getStatus() != CreditPurchase.Status.CONFIRMING || !paymentKey.equals(p.getPaymentKey())) {
                 throw new ConflictException("승인할 수 없는 주문입니다.");
             }
-            return new Confirmation(orderId, paymentKey, amount, p.getConfirmationKey(), p.getConfirmationStartedAt(), false);
+            return new ConfirmationDto(orderId, paymentKey, amount, p.getConfirmationKey(), p.getConfirmationStartedAt(), false);
         });
         if (info.paid()) return view(userId, orderId);
         TossPaymentClient.Payment result;
@@ -116,23 +110,23 @@ public class CreditPurchaseService {
         verify(result, info.orderId(), info.paymentKey(), info.amount(), "DONE");
         return transactions.execute(status -> {
             CreditPurchase p = owned(userId, orderId);
-            if (p.getStatus() == CreditPurchase.Status.PAID) return PurchaseView.from(p);
+            if (p.getStatus() == CreditPurchase.Status.PAID) return PurchaseResponse.from(p);
             if (p.getStatus() != CreditPurchase.Status.CONFIRMING || !paymentKey.equals(p.getPaymentKey())) {
                 throw new ConflictException("주문 상태가 변경되었습니다.");
             }
             credits.addPurchase(userId, p.getCredits(), p.getId());
             p.paid();
-            return PurchaseView.from(p);
+            return PurchaseResponse.from(p);
         });
     }
 
-    public PurchaseView recover(Long userId, String orderId) {
-        Confirmation info = transactions.execute(status -> {
+    public PurchaseResponse recover(Long userId, String orderId) {
+        ConfirmationDto info = transactions.execute(status -> {
             CreditPurchase p = owned(userId, orderId);
             if (p.getStatus() != CreditPurchase.Status.CONFIRMING && p.getStatus() != CreditPurchase.Status.PAID) {
                 throw new ConflictException("확인할 수 없는 주문입니다.");
             }
-            return new Confirmation(orderId, p.getPaymentKey(), p.getAmountKrw(), p.getConfirmationKey(),
+            return new ConfirmationDto(orderId, p.getPaymentKey(), p.getAmountKrw(), p.getConfirmationKey(),
                     p.getConfirmationStartedAt(), p.getStatus() == CreditPurchase.Status.PAID);
         });
         if (info.paid()) return view(userId, orderId);
@@ -140,16 +134,16 @@ public class CreditPurchaseService {
     }
 
     @Transactional
-    public PurchaseView refund(Long userId, String orderId) {
+    public PurchaseResponse refund(Long userId, String orderId) {
         CreditPurchase p = owned(userId, orderId);
-        if (p.getStatus() == CreditPurchase.Status.REFUNDED) return PurchaseView.from(p);
+        if (p.getStatus() == CreditPurchase.Status.REFUNDED) return PurchaseResponse.from(p);
         if (p.getStatus() != CreditPurchase.Status.PAID) throw new ConflictException("환불할 수 없는 주문입니다.");
         credits.refundPurchase(userId, p.getCredits(), p.getId());
         p.refunded();
-        return PurchaseView.from(p);
+        return PurchaseResponse.from(p);
     }
 
-    private void markFailed(Long userId, Confirmation info) {
+    private void markFailed(Long userId, ConfirmationDto info) {
         transactions.executeWithoutResult(status -> {
             CreditPurchase p = owned(userId, info.orderId());
             if (p.getStatus() == CreditPurchase.Status.CONFIRMING && info.key().equals(p.getConfirmationKey())) p.failed();
@@ -160,8 +154,8 @@ public class CreditPurchaseService {
         return payment.status() != null && ENDED_STATUSES.contains(payment.status());
     }
 
-    private PurchaseView view(Long userId, String orderId) {
-        return transactions.execute(status -> PurchaseView.from(owned(userId, orderId)));
+    private PurchaseResponse view(Long userId, String orderId) {
+        return transactions.execute(status -> PurchaseResponse.from(owned(userId, orderId)));
     }
 
     private CreditPurchase owned(Long userId, String orderId) {

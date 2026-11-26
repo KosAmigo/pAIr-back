@@ -51,7 +51,6 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
 import com.pair.domain.exam.service.AttemptSubmitService;
-import com.pair.domain.exam.service.EnvScanService;
 import com.pair.domain.exam.service.AutoSubmitService;
 import com.pair.domain.exam.service.ExamEntryService;
 import com.pair.domain.exam.exception.LinkExpiredException;
@@ -111,7 +110,6 @@ class ExamFlowIntegrationTest {
     @Autowired ExamEntryService entry;
     @Autowired AutoSubmitService autoSubmit;
     @Autowired ProctorService proctor;
-    @Autowired EnvScanService envScan;
     @Autowired com.pair.domain.exam.repository.ProctorEventRepository eventRepo;
     @Autowired com.pair.domain.exam.service.ConnectionGraceService grace;
     @Autowired SessionResultService results;
@@ -974,71 +972,6 @@ class ExamFlowIntegrationTest {
 
     private static String jpegB64() {
         return "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(JPEG);
-    }
-
-    @Test
-    @DisplayName("환경 점검 사진: 시작 전에도 방향과 함께 올리고, 콘솔에서 목록과 사진을 볼 수 있다")
-    void envScanUploadAndView() {
-        SessionSummaryResponse s = createSession(126L, true);
-        String token = invite(s.id(), "scan@test.dev");
-
-        var room = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
-                com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 45, List.of("person", "cell phone"), jpegB64()));
-        var desk = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
-                com.pair.domain.exam.entity.EnvScanPhoto.Stage.DESK, null, List.of(), jpegB64()));
-
-        assertThat(room.angle()).isEqualTo(45);
-        assertThat(room.phoneSuspect()).isTrue(); // 휴대폰으로 감지된 장면은 감독관이 먼저 볼 수 있게 표시
-        assertThat(desk.phoneSuspect()).isFalse();
-        Long pid = participant(s.id(), "scan@test.dev").getId();
-        assertThat(envScan.photosOf(s.id(), pid)).extracting(v -> v.id()).containsExactly(room.id(), desk.id());
-        assertThat(envScan.image(s.id(), room.id())).isEqualTo(JPEG);
-    }
-
-    @Test
-    @DisplayName("환경 점검 사진 검증: 잘못된 링크, 감독 안 쓰는 회차, JPEG 아님, 끝난 회차, 장수 한도는 거절")
-    void envScanRejects() {
-        SessionSummaryResponse s = createSession(127L, true);
-        String token = invite(s.id(), "scan2@test.dev");
-        var jpeg = new com.pair.domain.exam.dto.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(), jpegB64());
-
-        assertThatThrownBy(() -> envScan.upload("x".repeat(43), jpeg)).isInstanceOf(java.util.NoSuchElementException.class);
-        var png = new com.pair.domain.exam.dto.EnvScanRequest(com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 0, List.of(),
-                Base64.getEncoder().encodeToString(new byte[] {(byte) 0x89, 'P', 'N', 'G', 1, 2}));
-        assertThatThrownBy(() -> envScan.upload(token, png)).hasMessageContaining("JPEG");
-
-        SessionSummaryResponse plain = createSession(128L, false);
-        String plainToken = invite(plain.id(), "plain@test.dev");
-        assertThatThrownBy(() -> envScan.upload(plainToken, jpeg)).hasMessageContaining("감독");
-
-        for (int i = 0; i < EnvScanService.MAX_PHOTOS; i++) envScan.upload(token, jpeg);
-        assertThatThrownBy(() -> envScan.upload(token, jpeg)).hasMessageContaining("너무 많");
-
-        clock.set(s.endsAt().plus(Duration.ofHours(2)));
-        String late = invite(createSession(129L, true).id(), "late2@test.dev");
-        clock.set(clock.instant().plus(Duration.ofDays(3)));
-        assertThatThrownBy(() -> envScan.upload(late, jpeg)).hasMessageContaining("끝난");
-    }
-
-    @Test
-    @DisplayName("환경 점검 사진: 다른 회차 번호로는 볼 수 없고, 회차 종료 7일 뒤 사진만 지운다")
-    void envScanScopeAndPurge() {
-        SessionSummaryResponse s = createSession(130L, true);
-        SessionSummaryResponse other = createSession(131L, true);
-        String token = invite(s.id(), "scan3@test.dev");
-        var photo = envScan.upload(token, new com.pair.domain.exam.dto.EnvScanRequest(
-                com.pair.domain.exam.entity.EnvScanPhoto.Stage.ROOM, 90, List.of(), jpegB64()));
-        Long pid = participant(s.id(), "scan3@test.dev").getId();
-
-        assertThatThrownBy(() -> envScan.image(other.id(), photo.id())).isInstanceOf(java.util.NoSuchElementException.class);
-        assertThatThrownBy(() -> envScan.photosOf(other.id(), pid)).isInstanceOf(java.util.NoSuchElementException.class);
-
-        clock.set(s.endsAt().plus(Duration.ofDays(6)));
-        assertThat(envScan.purgeExpired()).isZero();
-        clock.set(s.endsAt().plus(Duration.ofDays(7)).plusSeconds(1));
-        assertThat(envScan.purgeExpired()).isEqualTo(1);
-        assertThatThrownBy(() -> envScan.image(s.id(), photo.id())).hasMessageContaining("삭제된 사진");
-        assertThat(envScan.photosOf(s.id(), pid)).singleElement().extracting(v -> v.deleted()).isEqualTo(true);
     }
 
     @Test

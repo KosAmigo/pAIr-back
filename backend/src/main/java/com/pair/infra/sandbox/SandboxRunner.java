@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -13,10 +14,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +58,8 @@ public class SandboxRunner implements CodeRunner {
     private final String image;
     /** 동시 실행 상한. 공정(fair)이라 먼저 온 순서대로 자리가 난다. */
     private final Semaphore slots;
+    /** 실행 중인 요청 수 (지표용). Prometheus 가 읽는 값이라 자리 대기 중인 요청은 포함하지 않는다. */
+    private final AtomicInteger running = new AtomicInteger();
     private final int queueWaitSeconds;
     private final String containerPrefix;
 
@@ -69,6 +76,9 @@ public class SandboxRunner implements CodeRunner {
         this.image = props.run().dockerImage();
         this.slots = new Semaphore(props.run().maxConcurrent(), true);
         this.queueWaitSeconds = props.run().queueWaitSeconds();
+        Gauge.builder("pair_sandbox_running", running, AtomicInteger::get)
+                .description("지금 컨테이너에서 실행 중인 요청 수")
+                .register(Metrics.globalRegistry);
     }
 
     /** 실행 대기열이 너무 길어 자리를 못 얻었다. 잠시 뒤 다시 시도하면 된다. */
@@ -93,7 +103,7 @@ public class SandboxRunner implements CodeRunner {
         int passed = (int) tests.stream().filter(TestCase::passed).count();
         int failed = tests.size() - passed;
         if (e.timedOut) {
-            lines.add("[TIMEOUT] " + timeoutSeconds + "초 안에 끝나지 않아 실행을 중단했습니다. 교착 상태일 수 있습니다.");
+            lines.add("[TIMEOUT] 실행 제한 시간 " + timeoutSeconds + "초(컨테이너 준비 시간 별도)를 넘겨 실행을 중단했습니다. 교착 상태일 수 있습니다.");
             failed = Math.max(1, failed);
         } else if (tests.isEmpty() && (e.exitCode != 0 || e.junitExit == null || e.junitExit != 0)) {
             // 리포트 없이 끝남: 테스트 실행기가 죽었다 (메모리 초과, 디스크 가득 참 등)
@@ -118,16 +128,25 @@ public class SandboxRunner implements CodeRunner {
 
     private Exec exec(String mode, Map<String, String> sources) {
         acquireSlot();
+        running.incrementAndGet();
+        long started = System.nanoTime();
         try {
             return execInContainer(mode, sources);
         } finally {
+            running.decrementAndGet();
             slots.release();
+            Timer.builder("pair_sandbox_run_seconds")
+                    .description("샌드박스 컨테이너 실행 시간(자리 대기 제외)")
+                    .tag("mode", mode)
+                    .register(Metrics.globalRegistry)
+                    .record(Duration.ofNanos(System.nanoTime() - started));
         }
     }
 
     private void acquireSlot() {
         try {
             if (!slots.tryAcquire(queueWaitSeconds, TimeUnit.SECONDS)) {
+                Metrics.counter("pair_sandbox_busy_total").increment();
                 throw new BusyException("실행 요청이 많아 " + queueWaitSeconds + "초 안에 자리를 얻지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
             }
         } catch (InterruptedException e) {

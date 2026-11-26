@@ -1,5 +1,6 @@
 package com.pair.domain.company.service;
 
+import com.pair.domain.auth.exception.EmailVerificationException;
 import com.pair.domain.company.dto.InviteAcceptRequest;
 import com.pair.domain.company.dto.InviteInfoResponse;
 import com.pair.domain.company.entity.Company;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.pair.global.security.InviteTokenService;
 import com.pair.domain.auth.repository.AuthAccountRepository;
@@ -36,11 +38,12 @@ public class CompanyInviteService {
     private final CompanyAccountMailService mailer;
     private final EmailVerificationService emailVerification;
     private final AuthService auth;
+    private final TransactionTemplate tx;
     private final String inviteBaseUrl;
 
     public CompanyInviteService(CompanyInviteRepository invites, CompanyRepository companies, AuthAccountRepository accounts,
             CorporateAccountService corporateAccounts, CompanyAccountMailService mailer, EmailVerificationService emailVerification,
-            AuthService auth, @Value("${pair.company.invite-url:https://localhost:5173/company-invite}") String inviteBaseUrl) {
+            AuthService auth, TransactionTemplate tx, @Value("${pair.company.invite-url:https://localhost:5173/company-invite}") String inviteBaseUrl) {
         this.invites = invites;
         this.companies = companies;
         this.accounts = accounts;
@@ -48,11 +51,24 @@ public class CompanyInviteService {
         this.mailer = mailer;
         this.emailVerification = emailVerification;
         this.auth = auth;
+        this.tx = tx;
         this.inviteBaseUrl = inviteBaseUrl;
     }
 
-    @Transactional
+    /** 초대 저장(짧은 트랜잭션) → 메일 발송(트랜잭션 밖). 발송이 실패하면 방금 만든 초대를 취소한다. */
     public void inviteProctor(CurrentUser manager, String rawEmail) {
+        Invited invited = tx.execute(status -> createInvite(manager, rawEmail));
+        try {
+            mailer.sendProctorInvite(invited.email(), invited.email(), inviteUrl(invited.token()));
+        } catch (RuntimeException e) {
+            tx.executeWithoutResult(status -> invites.findById(invited.id()).ifPresent(i -> i.revoke(Instant.now())));
+            throw e;
+        }
+    }
+
+    private record Invited(Long id, String email, String token) {}
+
+    private Invited createInvite(CurrentUser manager, String rawEmail) {
         if (manager.role() != CurrentUser.Role.MANAGER || manager.companyId() == null) {
             throw new com.pair.global.error.ForbiddenException("감독관 초대 권한이 없습니다.");
         }
@@ -71,12 +87,12 @@ public class CompanyInviteService {
         invites.flush();
         String token = InviteTokenService.next();
         try {
-            invites.saveAndFlush(new CompanyInvite(company.getId(), email, CurrentUser.Role.PROCTOR, InviteTokenService.hash(token),
-                    manager.userId(), now.plus(INVITE_LIFETIME), now));
+            CompanyInvite saved = invites.saveAndFlush(new CompanyInvite(company.getId(), email, CurrentUser.Role.PROCTOR,
+                    InviteTokenService.hash(token), manager.userId(), now.plus(INVITE_LIFETIME), now));
+            return new Invited(saved.getId(), email, token);
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException("이 이메일로 이미 초대가 진행 중입니다.");
         }
-        mailer.sendProctorInvite(email, email, inviteUrl(token));
     }
 
     @Transactional(readOnly = true)
@@ -87,20 +103,20 @@ public class CompanyInviteService {
         return new InviteInfoResponse(invite.getEmail(), invite.getRole().name(), companyName, invite.getExpiresAt());
     }
 
-    @Transactional
+    /** 읽기만 하고 메일을 보내므로 트랜잭션을 걸지 않는다. */
     public void requestSignupCode(String token) {
         CompanyInvite invite = findUsable(token);
         if (accounts.existsByEmailIgnoreCase(invite.getEmail())) throw new ConflictException("이미 가입된 이메일입니다.");
         emailVerification.sendCode(invite.getEmail());
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = EmailVerificationException.class)
     public com.pair.domain.auth.dto.AuthResponse accept(InviteAcceptRequest request) {
         CompanyInvite invite = findUsableForUpdate(request.token());
         if (accounts.existsByEmailIgnoreCase(invite.getEmail())) throw new ConflictException("이미 가입된 이메일입니다.");
         var result = emailVerification.consume(invite.getEmail(), request.code());
         if (result != EmailVerificationService.ConsumeResult.CONSUMED) {
-            throw new IllegalArgumentException(result.message());
+            throw new EmailVerificationException(result.message());
         }
         var account = corporateAccounts.signupProctor(invite.getEmail(), request.name(), request.password(), invite.getCompanyId());
         invite.accept(account.getId(), Instant.now());

@@ -22,6 +22,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.pair.infra.ai.AssistantClient;
+import com.pair.domain.attempt.dto.ChatTurnStateDto;
+import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.repository.AttemptRepository;
+import com.pair.domain.attempt.repository.CheckpointRepository;
 import com.pair.domain.attempt.service.ChatAttachmentService.Ref;
 import com.pair.domain.attempt.entity.ChatAttachment;
 import com.pair.domain.task.repository.TaskFileRepository;
@@ -48,6 +52,8 @@ class ReportQueryCostTest extends BearerIntegrationTest {
     @Autowired TaskFileRepository taskFiles;
     @Autowired TaskQuestionRepository taskQuestions;
     @Autowired MockMvc mvc;
+    @Autowired AttemptRepository records;
+    @Autowired CheckpointRepository checkpoints;
 
     String token;
     String devId;
@@ -85,7 +91,66 @@ class ReportQueryCostTest extends BearerIntegrationTest {
     }
 
     @Test
-    void 대시보드가_부르는_목록과_리포트는_응시_수에_비례해_쿼리가_늘어도_응시당_몇_번으로_제한된다() throws Exception {
+    void 풀이_중_응시가_많아도_목록_쿼리는_일정하고_빈_응시는_빠진다() throws Exception {
+        var signup = AuthTestSupport.signup(auth, mail, "풀이중", UUID.randomUUID() + "@pair.test");
+        Long taskId = taskRecords.findByCode(TestTasks.SELF_DEV).orElseThrow().getId();
+        var now = java.time.Instant.now();
+        List<String> shown = new java.util.ArrayList<>();
+        List<String> hidden = new java.util.ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            String nothing = String.valueOf(records.save(Attempt.self(signup.user().id(), taskId, "m", now)).getId());
+            String startOnly = String.valueOf(records.save(Attempt.self(signup.user().id(), taskId, "m", now)).getId());
+            store.appendEvent(startOnly, "start", Map.of());
+            String saved = String.valueOf(records.save(Attempt.self(signup.user().id(), taskId, "m", now)).getId());
+            store.appendEvent(saved, "start", Map.of());
+            store.appendEvent(saved, "save", Map.of());
+            String asked = String.valueOf(records.save(Attempt.self(signup.user().id(), taskId, "m", now)).getId());
+            store.appendTurn(asked, new ChatTurnStateDto(1, "user", now, "질문", null, null, null, null, null, null));
+            hidden.addAll(List.of(nothing, startOnly));
+            shown.addAll(List.of(saved, asked));
+        }
+        Statistics stats = emf.unwrap(SessionFactory.class).getStatistics();
+        stats.clear();
+        String body = mvc.perform(get("/api/attempts").header("Authorization", "Bearer " + signup.token()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long list = stats.getPrepareStatementCount();
+        System.out.println("[solving cost] attempts=12, list statements=" + list);
+
+        List<String> listed = com.jayway.jsonpath.JsonPath.read(body, "$[*].id");
+        assertThat(listed).containsExactlyInAnyOrderElementsOf(shown).doesNotContainAnyElementsOf(hidden);
+        assertThat(list).as("풀이 중 응시 12개의 목록 쿼리 수").isLessThanOrEqualTo(10L);
+    }
+
+    @Test
+    void 복기_트리는_갈래_수와_상관없이_쿼리가_일정하다() throws Exception {
+        var signup = AuthTestSupport.signup(auth, mail, "트리", UUID.randomUUID() + "@pair.test");
+        String root = attempts.startSelf(TestTasks.SELF_DEV, signup.user().id()).id();
+        attempts.chat(root, "질문", List.of(), null);
+        Long checkpointId = checkpoints.findByAttemptIdOrderByTurnNoAsc(Long.valueOf(root)).get(0).getId();
+        Long taskId = taskRecords.findByCode(TestTasks.SELF_DEV).orElseThrow().getId();
+        List<String> ids = new java.util.ArrayList<>(List.of(root));
+        for (int i = 0; i < 5; i++) {
+            ids.add(String.valueOf(records.save(Attempt.forkedSelf(signup.user().id(), taskId, "m", checkpointId, java.time.Instant.now())).getId()));
+        }
+        for (String id : ids) {
+            store.writeReport(id, Map.of("version", 2, "total", 80, "max", 100,
+                    "items", List.of(Map.of("key", "usage", "name", "활용", "max", 20, "score", 10))));
+            var t = java.time.Instant.now();
+            store.save(store.load(id).withSubmitted(t).withFollowUps(List.of(), List.of(), t).withStatus(AttemptStateDto.Status.DONE));
+        }
+        Statistics stats = emf.unwrap(SessionFactory.class).getStatistics();
+        stats.clear();
+        mvc.perform(get("/api/attempts/{id}/tree", root).header("Authorization", "Bearer " + signup.token())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(6))
+                .andExpect(jsonPath("$[5].score.total").value(80))
+                .andExpect(jsonPath("$[5].score.items[0].name").value("활용"));
+        long tree = stats.getPrepareStatementCount();
+        System.out.println("[tree cost] nodes=6, statements=" + tree);
+        assertThat(tree).as("갈래 6개의 트리 쿼리 수").isLessThanOrEqualTo(12L);
+    }
+
+    @Test
+    void 목록은_응시_수와_상관없이_쿼리가_일정하고_리포트는_응시당_몇_번으로_제한된다() throws Exception {
         int n = 5;
         var signup = AuthTestSupport.signup(auth, mail, "대시보드", UUID.randomUUID() + "@pair.test");
         String bearer = signup.token();
@@ -106,8 +171,8 @@ class ReportQueryCostTest extends BearerIntegrationTest {
         for (String id : ids) mvc.perform(get("/api/attempts/{id}/report", id).header("Authorization", "Bearer " + bearer)).andExpect(status().isOk());
         long reports = stats.getPrepareStatementCount();
         System.out.println("[dashboard cost] attempts=" + n + ", list statements=" + list + ", report statements(" + n + " calls)=" + reports);
-        // 같은 과제의 정의를 응시마다 다시 읽던 때는 목록만 응시당 6~7번(5개에 33번)이었다. 응시당 4번 이내로 고정한다
-        assertThat(list).as("목록 쿼리 수").isLessThanOrEqualTo(4L * n + 3);
+        // 채점이 끝난 응시의 점수는 한꺼번에 읽는다. 응시마다 리포트를 만들면 원격 DB 에서 응시 수만큼 느려진다
+        assertThat(list).as("채점이 끝난 응시 " + n + "개의 목록 쿼리 수").isLessThanOrEqualTo(10L);
         assertThat(reports).as("리포트 5번 조회의 쿼리 수").isLessThanOrEqualTo(8L * n);
     }
 }

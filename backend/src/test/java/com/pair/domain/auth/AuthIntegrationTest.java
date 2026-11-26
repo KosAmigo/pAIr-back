@@ -25,12 +25,18 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Connection;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
+import javax.sql.DataSource;
+
+import com.zaxxer.hikari.HikariDataSource;
 import jakarta.mail.internet.MimeMessage;
 
 import org.junit.jupiter.api.DisplayName;
@@ -60,6 +66,7 @@ class AuthIntegrationTest extends BearerIntegrationTest {
     @Autowired AuthAccountRepository accounts;
     @Autowired CompanyRepository companies;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired DataSource dataSource;
 
     @Test
     void signupLoginMeAndLogout() throws Exception {
@@ -239,6 +246,71 @@ class AuthIntegrationTest extends BearerIntegrationTest {
                 .andExpect(status().isCreated());
         mvc.perform(signup("인증 사용자", "verified@example.com", "secure-pass-123", code))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    @DisplayName("가입 때 틀린 코드의 실패 횟수가 남고, 5회를 넘기면 맞는 코드도 거절한다")
+    void wrongSignupCodesAreCountedAndLocked() throws Exception {
+        String email = "signup-locked@example.com";
+        String code = requestVerificationCode(email);
+        String wrong = "000000".equals(code) ? "000001" : "000000";
+        for (int i = 1; i <= 5; i++) {
+            mvc.perform(signup("사용자", email, "secure-pass-123", wrong)).andExpect(status().isBadRequest());
+            assertThat(jdbc.queryForObject("select failed_attempts from email_verifications where email = ?",
+                    Integer.class, email)).isEqualTo(i);
+        }
+        mvc.perform(signup("사용자", email, "secure-pass-123", code)).andExpect(status().isBadRequest());
+        assertThat(accounts.existsByEmailIgnoreCase(email)).isFalse();
+    }
+
+    @Test
+    @DisplayName("남은 DB 커넥션이 1개여도 가입할 수 있다")
+    void signupNeedsOnlyOneConnection() throws Exception {
+        String email = "one-connection@example.com";
+        String code = requestVerificationCode(email);
+        HikariDataSource pool = dataSource.unwrap(HikariDataSource.class);
+        List<Connection> held = new ArrayList<>();
+        try {
+            for (int i = 1; i < pool.getMaximumPoolSize(); i++) held.add(pool.getConnection());
+            mvc.perform(signup("사용자", email, "secure-pass-123", code)).andExpect(status().isCreated());
+        } finally {
+            for (Connection connection : held) connection.close();
+        }
+    }
+
+    @Test
+    @DisplayName("인증 메일을 보내는 동안 DB 커넥션을 쥐지 않는다")
+    void verificationMailIsSentWithoutHoldingConnection() throws Exception {
+        HikariDataSource pool = dataSource.unwrap(HikariDataSource.class);
+        int[] activeWhileSending = { -1 };
+        AuthTestSupport.prepareMail(mail);
+        org.mockito.Mockito.doAnswer(inv -> {
+            activeWhileSending[0] = pool.getHikariPoolMXBean().getActiveConnections();
+            return null;
+        }).when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest("no-conn@example.com"))))
+                .andExpect(status().isAccepted());
+        assertThat(activeWhileSending[0]).isZero();
+    }
+
+    @Test
+    @DisplayName("인증 메일 발송이 실패하면 코드를 지워 바로 다시 요청할 수 있다")
+    void failedVerificationMailDiscardsCodeAndAllowsImmediateRetry() throws Exception {
+        String email = "mail-fail@example.com";
+        AuthTestSupport.prepareMail(mail);
+        org.mockito.Mockito.doThrow(new org.springframework.mail.MailSendException("smtp down"))
+                .when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest(email))))
+                .andExpect(status().is5xxServerError());
+        assertThat(jdbc.queryForObject("select count(*) from email_verifications where email = ?",
+                Integer.class, email)).isZero();
+
+        org.mockito.Mockito.doNothing().when(mail).send(org.mockito.ArgumentMatchers.any(MimeMessage.class));
+        mvc.perform(post("/api/auth/email-verifications").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(new EmailVerificationRequest(email))))
+                .andExpect(status().isAccepted());
     }
 
     @Test

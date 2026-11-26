@@ -4,6 +4,7 @@ import com.pair.global.config.ExamIntegrationTest;
 
 import com.pair.domain.credit.entity.CreditPurchase;
 import com.pair.domain.credit.repository.CreditLedgerRepository;
+import com.pair.domain.credit.dto.ProductResponse;
 import com.pair.domain.credit.service.CreditPurchaseService;
 import com.pair.domain.credit.service.CreditService;
 import com.pair.domain.credit.exception.InsufficientCreditException;
@@ -55,8 +56,8 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
     void pricesAreServerControlledAndPaymentIsCreditedOnce() {
         long user = user();
         assertThat(purchases.products()).containsExactly(
-                new CreditPurchaseService.Product(1000, 4990), new CreditPurchaseService.Product(2200, 9990),
-                new CreditPurchaseService.Product(4600, 19990), new CreditPurchaseService.Product(15000, 49990));
+                new ProductResponse(1000, 4990), new ProductResponse(2200, 9990),
+                new ProductResponse(4600, 19990), new ProductResponse(15000, 49990));
         String id = purchases.create(user, 1000).orderId();
         String key = "pay-" + id;
         assertThatThrownBy(() -> purchases.confirm(user, id, key, 1)).isInstanceOf(IllegalArgumentException.class);

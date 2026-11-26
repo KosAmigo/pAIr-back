@@ -6,10 +6,13 @@ import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.domain.attempt.dto.ChatTurnStateDto;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -175,6 +178,18 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
         return out;
     }
 
+    /** 대화·작업 기록 내용은 읽지 않고, 있는 응시 ID 만 한 번씩 묻는다 */
+    @Override
+    @Transactional(readOnly = true)
+    public Set<String> activeIds(List<String> ids) {
+        if (ids.isEmpty()) return Set.of();
+        List<Long> keys = ids.stream().map(DbAttemptStateRepository::key).toList();
+        Set<String> out = new HashSet<>();
+        turns.findAttemptIdsWithTurns(keys).forEach(id -> out.add(String.valueOf(id)));
+        events.findAttemptIdsWithEventsOtherThan(keys, dbType("start")).forEach(id -> out.add(String.valueOf(id)));
+        return out;
+    }
+
     // ── 리포트 ─────────────────────────
 
     @Override
@@ -195,6 +210,24 @@ public class DbAttemptStateRepository implements AttemptStateRepository {
         Long attemptId = key(id);
         JsonNode stored = reports.findById(attemptId).map(r -> readTree(r.getReport())).orElse(null);
         return scoringReports.overlay(attemptId, stored);
+    }
+
+    /** 응시마다 리포트를 만들지 않는다: 점수는 채점 표에서 한꺼번에, 채점 표에 없는 응시만 저장된 JSON 을 한 번에 읽는다 */
+    @Override
+    @Transactional(readOnly = true)
+    public Map<String, JsonNode> readScores(List<String> ids) {
+        List<Long> keys = ids.stream().map(DbAttemptStateRepository::key).toList();
+        Map<String, JsonNode> out = new HashMap<>();
+        scoringReports.scores(keys).forEach((id, report) -> out.put(String.valueOf(id), report));
+        List<Long> rest = keys.stream().filter(k -> !out.containsKey(String.valueOf(k))).toList();
+        for (AttemptReport r : reports.findAllById(rest)) {
+            try {
+                out.put(String.valueOf(r.getAttemptId()), readTree(r.getReport()));
+            } catch (IllegalStateException e) {
+                // 깨진 리포트는 이 응시만 뺀다
+            }
+        }
+        return out;
     }
 
     // ── 내부 ───────────────────────────

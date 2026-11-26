@@ -1,0 +1,80 @@
+name: Release
+
+# main 에 푸시되면 테스트 → 이미지 빌드·푸시 → 서버 배포 순서로 이어서 돈다.
+# 앞 단계가 실패하면 뒤 단계는 실행하지 않는다 (테스트가 깨진 커밋은 이미지도 만들지 않고 서버에도 가지 않는다).
+# 손으로 다시 돌리려면 Actions 탭 > Release > Run workflow (main 에서만 배포까지 간다).
+# 특정 이전 버전으로 되돌리려면 Deploy 워크플로를 backend_tag 에 이전 sha-xxxxxxx 를 넣어 실행한다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 배포가 겹쳐 서버가 꼬이지 않게 한 번에 하나만 돌린다. 진행 중인 배포는 취소하지 않고 다음 것이 기다린다.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/backend-ci.yml
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # 이미지 이름은 소문자여야 한다 (조직 이름 KosAmigo 를 그대로 쓸 수 없다)
+      - name: Image name and tag
+        id: tag
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/pair-back" >> "$GITHUB_ENV"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      # 빌드 컨텍스트는 backend/ 이고 Dockerfile 은 docker/ 에 있다 (docker-compose.yml 의 backend 서비스와 같다)
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: docker/backend.Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    # 다른 브랜치에서 손으로 실행했을 때는 이미지까지만 만들고 배포하지 않는다
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      backend_tag: ${{ needs.image.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: read
