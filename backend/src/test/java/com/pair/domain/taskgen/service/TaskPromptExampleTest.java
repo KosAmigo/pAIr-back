@@ -127,6 +127,28 @@ class TaskPromptExampleTest {
     }
 
     @Test
+    @DisplayName("g14 묶음 크기: 코드 단계 src 범위는 작성 단계가 쓴 NOTES.md 길이를 빼서 잡고, 묶음이 크면 설계도가 아니라 코드(NOTES 가 크면 작성도)를 다시 쓴다")
+    void bundleBudgetUsesActualNotes() {
+        // 20분: 맥락 8000자, 상한 5600자, 하한 3200자
+        assertThat(TaskPromptService.srcRange(20, 1000)).containsExactly(2200, 4300);
+        assertThat(TaskPromptService.srcRange(20, 2500)).containsExactly(1500, 2800);
+        assertThat(TaskPromptService.srcRange(20, 5000)).containsExactly(1500, 1500); // NOTES 가 너무 크면 코드는 최소로(작성이 줄여야 함)
+        assertThat(TaskPromptService.code("x", true, 20, 2500)).contains("1500–2800 characters");
+        assertThat(TaskPromptService.code("x", true, 20)).contains("2200–4300 characters"); // NOTES 를 모르면 1000자로 가정(예전과 같음)
+
+        String bigNotes = "필요한 묶음 6800자가 맥락 한도 8000자의 70%(5600자)를 넘습니다. 필요한 묶음 파일을 줄이거나 더 작은 파일로 나눠 고르세요(공개 테스트는 세지 않음). 파일: src/receipt/ReceptionLedger.java 2369자, src/receipt/ReceptionDatePolicy.java 1902자, NOTES.md 2529자";
+        String bigCode = "필요한 묶음 6200자가 맥락 한도 8000자의 70%(5600자)를 넘습니다. 파일: src/a/A.java 3800자, src/a/B.java 1500자, NOTES.md 900자";
+        var fail = new com.pair.domain.taskgen.dto.GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, bigNotes);
+        assertThat(DevPipelineService.notesTooLarge(bigNotes)).isTrue();
+        assertThat(DevPipelineService.notesTooLarge(bigCode)).isFalse();
+        assertThat(DevPipelineService.owners(fail, List.of(), List.of())).containsExactlyInAnyOrder(TaskPipelineService.Stage.WRITING, TaskPipelineService.Stage.CODE);
+        assertThat(DevPipelineService.owners(new com.pair.domain.taskgen.dto.GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, bigCode), List.of(), List.of()))
+                .containsExactly(TaskPipelineService.Stage.CODE);
+        assertThat(TaskWritingService.writerFeedback(List.of(fail), "")).contains("notes 가 너무 길다").doesNotContain("5600"); // 작성 단계에 글자 수 같은 생성기 정보는 안 준다
+        assertThat(TaskPromptService.WRITING_DEV).contains("Keep it compact");
+    }
+
+    @Test
     @DisplayName("g13 Q2: 설명에 요구사항과 똑같은 예 줄이 있으면 뺀다(띄어쓰기·문장부호 무시). 다른 문장과 빈 문단은 건드리지 않는다")
     void descriptionDropsRepeatedExamples() {
         List<String> req = List.of("addItem(\"노트\", 10000, 2) 뒤 payable(500) → 19500", "addItem(\"펜\", 3000, 1) 뒤 points() → 30");

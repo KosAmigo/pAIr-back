@@ -56,6 +56,9 @@ class TaskGenBatchLiveTest {
         r.add("pair.data-dir", () -> OUT.resolve("data").toString());
         r.add("pair.taskgen.file-storage", () -> "local");
         r.add("pair.taskgen.max-concurrent", () -> String.valueOf(CONCURRENT));
+        // 테스트 공통 설정(application-examtest.yml)은 대기열 워커를 끈다. 워커가 꺼지면 tick() 도 아무것도 안 해서
+        // 작업이 QUEUED 에서 영영 안 움직인다(2026-11-27 g14 첫 실행이 1시간 멈춤). 실제 생성을 돌리는 이 테스트만 켠다
+        r.add("pair.taskgen.worker.enabled", () -> "true");
         r.add("spring.ai.openai.api-key", () -> "${OPENAI_API_KEY:}");
         r.add("spring.ai.anthropic.api-key", () -> "${ANTHROPIC_API_KEY:}");
     }

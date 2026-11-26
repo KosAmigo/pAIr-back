@@ -162,6 +162,7 @@ final class TaskWritingService {
     }
 
     private static String rule(String check) {
+        if (check.equals(TaskPipelineService.M6_NEEDED_CHECK)) return "notes 가 너무 길다. 제목 한 줄과 주어진 기록만 한 줄씩 쓰고, 배경 문단·요약·덧붙인 기록은 빼서 지난번의 절반 정도로 짧게 쓴다.";
         if (check.equals(TaskPipelineService.BASIS_CHECK)) return "사실 목록의 문장을 하나도 빼지 말고 그대로 넣는다(사례의 근거 문장도 사실 목록에 있다).";
         if (check.equals(FeatureCheckService.NAME)) return "시작 코드에 이미 있는 메서드는 추가·구현하라고 쓰지 않는다. 공개 API 목록에서 '추가:' 로 적힌 것만 새로 만들라고 쓴다.";
         if (check.equals(DevCheckService.FOLLOW_UP)) return "후속 질문에는 이 과제 고유의 명사·용어·값을 쓰지 말고, 무엇을 어떻게 검증했는지 묻는 일반 틀로만 쓴다.";
