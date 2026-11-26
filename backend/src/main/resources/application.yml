@@ -14,6 +14,16 @@ management:
     web:
       exposure:
         include: health,prometheus
+  endpoint:
+    health:
+      # 채점 큐가 꺼져 있으면(기본·테스트) redis 점검 빈이 없어서, 아래 exclude: redis 가 "없는 점검"이라며 시작을 막는다. 검사를 끈다
+      validate-group-membership: false
+      group:
+        # 배포 확인(deploy.yml)이 보는 핵심 상태: Redis 를 뺀 전부(DB, 디스크 등). /actuator/health/core
+        # Redis(채점 큐)가 잠깐 죽어도 제출·채점은 서버 안에서 계속되므로 배포를 막지 않는다. 전체 /actuator/health 는 Redis 까지 본다
+        core:
+          include: "*"
+          exclude: redis
   health:
     # /health 를 부를 때마다 SMTP 서버에 접속하지 않는다. 테스트에서는 메일 발송기가 가짜라 이 점검 빈이 만들어지지도 않는다
     mail:

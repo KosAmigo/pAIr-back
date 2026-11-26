@@ -6,9 +6,13 @@ import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Metrics;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +43,8 @@ public class ScoringWorkerService {
     private ScheduledExecutorService maintenance;
     private final Duration shutdownWait;
     private volatile boolean running;
+    /** 마지막으로 Redis 에서 작업을 꺼내 본 결과. 1 = 됨, 0 = 연결 안 됨 (지표 pair_scoring_queue_up) */
+    private final AtomicInteger queueUp = new AtomicInteger(1);
 
     public ScoringWorkerService(ScoringQueueService queue, ScoringService scoring, ScoringQueueProperties props,
                                 @Value("${pair.scoring.shutdown-wait:90s}") Duration shutdownWait) {
@@ -50,6 +56,11 @@ public class ScoringWorkerService {
 
     @PostConstruct
     void start() {
+        // 전체 /actuator/health 는 Redis 가 죽으면 DOWN 이지만, 배포 확인은 Redis 를 뺀 core 그룹을 본다.
+        // 그래서 Redis 장애는 이 지표와 경고(monitoring/alerts.yml ScoringQueueDown)로 따로 알린다
+        Gauge.builder("pair_scoring_queue_up", queueUp, AtomicInteger::get)
+                .description("채점 큐(Redis)에서 작업을 꺼낼 수 있는지 (1 = 됨, 0 = 안 됨)")
+                .register(Metrics.globalRegistry);
         // 작업자 이름은 프로세스마다 새로 정해지므로, 지금 처리 중 목록에 있는 작업은 모두 이전 프로세스(재시작·강제 종료)가 남긴 것이다.
         // staleAfter 를 기다리지 않고 바로 되살린다. 서버가 하나라는 전제(두 서버가 겹쳐 돌면 다시 검토)
         guarded(() -> {
@@ -102,14 +113,29 @@ public class ScoringWorkerService {
 
     private void loop() {
         while (running) {
-            try {
-                queue.take(POLL).ifPresent(this::process);
-            } catch (RuntimeException e) {
-                // Redis 에 연결할 수 없는 동안에는 쉬었다가 다시 시도한다 (제출은 그대로 받는다)
-                log.warn("채점 큐에서 작업을 꺼내지 못했습니다 ({})", e.getClass().getSimpleName());
-                pause(REDIS_DOWN_PAUSE);
-            }
+            if (!pollOnce()) pause(REDIS_DOWN_PAUSE);
         }
+    }
+
+    /**
+     * 작업 하나를 꺼내 처리한다. Redis 에 연결할 수 없으면 false (쉬었다가 다시 시도한다. 제출은 그대로 받는다).
+     * 결과를 queueUp 에 남겨 지표로 보인다.
+     */
+    boolean pollOnce() {
+        try {
+            queue.take(POLL).ifPresent(this::process);
+            queueUp.set(1);
+            return true;
+        } catch (RuntimeException e) {
+            if (queueUp.getAndSet(0) == 1) log.warn("채점 큐(Redis)에 연결할 수 없습니다. 연결될 때까지 서버 안에서 바로 채점합니다");
+            log.warn("채점 큐에서 작업을 꺼내지 못했습니다 ({})", e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /** 지표 값(테스트용) */
+    int queueUp() {
+        return queueUp.get();
     }
 
     void process(ScoringJobDto job) {
