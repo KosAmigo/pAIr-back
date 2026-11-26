@@ -36,10 +36,12 @@ public class ExamEntryController {
     private final com.pair.domain.exam.service.NoticeService notices;
     private final Clock clock;
     private final com.pair.domain.exam.service.EvidenceClipService clips;
+    private final com.pair.domain.exam.service.EnvCheckPhotoService envPhotos;
 
     public ExamEntryController(ExamEntryService entry, ProctorService proctor, Clock clock,
             com.pair.domain.exam.service.EnvCheckService envCheck, com.pair.domain.exam.service.NoticeService notices,
-            com.pair.domain.exam.service.EvidenceClipService clips) {
+            com.pair.domain.exam.service.EvidenceClipService clips, com.pair.domain.exam.service.EnvCheckPhotoService envPhotos) {
+        this.envPhotos = envPhotos;
         this.clips = clips;
         this.envCheck = envCheck;
         this.notices = notices;
@@ -97,6 +99,14 @@ public class ExamEntryController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void envProgress(@PathVariable String token, @Valid @RequestBody EnvProgressRequest req) {
         envCheck.saveProgress(token, req.result());
+    }
+
+    /** 환경 점검 사진(귀 왼쪽·오른쪽, 손목) 올리기. 단계마다 한 장이고 다시 올리면 덮어쓴다. 감독관이 사진으로 이어폰·스마트워치를 확인한다 */
+    @PostMapping("/api/entry/{token}/env-check/photos")
+    @ResponseStatus(HttpStatus.CREATED)
+    public com.pair.domain.exam.dto.EnvCheckPhotoResponse envCheckPhoto(@PathVariable String token,
+            @Valid @RequestBody com.pair.domain.exam.dto.EnvCheckPhotoRequest req) {
+        return envPhotos.upload(token, req);
     }
 
     /** 콘솔이 보낸 안내 메시지 (읽음 여부 포함). 입장 대기 화면과 시험 화면이 주기적으로 가져간다 */
