@@ -12,7 +12,8 @@
 #     ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 <사용자>@<서버>   →  Grafana http://localhost:3000, Prometheus http://localhost:9090
 #   Grafana 관리자 비밀번호는 서버의 ~/pair/.env 의 GRAFANA_ADMIN_PASSWORD 로 넣는다 (배포 워크플로가 시크릿으로 만든다). 없으면 시작하지 않는다.
 #   모니터링이 성능에 영향을 주면: docker compose stop prometheus grafana
-# - Redis 는 채점 큐를 켤 때만 쓴다: docker compose --profile redis up -d (그리고 application-secret.yml 에 PAIR_SCORING_QUEUE_ENABLED: true, PAIR_REDIS_HOST: redis)
+# - Redis(채점 큐)도 항상 같이 뜬다. 백엔드가 쓰려면 application-secret.yml 에 PAIR_SCORING_QUEUE_ENABLED: true, PAIR_REDIS_HOST: redis 가 있어야 한다.
+#   손으로 Redis 만 다시 띄울 때: docker compose up -d redis (서비스 이름을 붙여야 백엔드·프런트가 latest 태그로 다시 만들어지지 않는다)
 name: pair
 services:
   backend:
@@ -110,8 +111,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # 채점 큐(Redis 스트림). 운영에서 큐를 켰으므로(2026-11-26) 프로필 없이 항상 띄운다. 배포의 up --no-recreate 가 없으면 만든다.
+  # 이 서버 안에서만 쓰고 포트를 열지 않는다. Redis 가 잠시 없어도 백엔드는 서버 안에서 바로 채점한다(제출은 막히지 않음)
   redis:
-    profiles: ["redis"]
     image: redis:7-alpine
     restart: unless-stopped
     # 재시작해도 대기 중인 채점 작업이 남도록 AOF 를 켠다
