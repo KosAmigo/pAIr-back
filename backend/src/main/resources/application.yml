@@ -290,6 +290,9 @@ pair:
   # (docker compose --profile redis up -d). workers, max-attempts, retry-delay, stale-after 는 ScoringQueueProperties 참고
   scoring-queue:
     enabled: ${PAIR_SCORING_QUEUE_ENABLED:false}
+  # 서버를 켤 때 SCORING 에 남은 응시(재시작으로 끊긴 채점)를 다시 채점에 맡긴다 (ScoringRecoveryService)
+  scoring:
+    recover-on-startup: ${PAIR_SCORING_RECOVER_ON_STARTUP:true}
 
   # 다시 채점: 응시 하나를 24시간에 채점할 수 있는 횟수(첫 채점과 채점 큐의 자동 재시도 포함). 넘으면 429
   rescore:
