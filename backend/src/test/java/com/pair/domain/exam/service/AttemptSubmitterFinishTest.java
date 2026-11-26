@@ -85,4 +85,14 @@ class AttemptSubmitterFinishTest {
         assertThat(failed).isEqualTo(1);
         verify(service).followUps("6", List.of());
     }
+
+    @Test
+    @DisplayName("마무리하는 사이 응시자가 먼저 후속 질문을 마쳤으면 실패로 세지 않는다")
+    void finishAll_racedByCandidate_isNotFailure() {
+        when(store.load("7")).thenReturn(attempt("7", AttemptStateDto.Status.FOLLOWUP), attempt("7", AttemptStateDto.Status.FOLLOWUP),
+                attempt("7", AttemptStateDto.Status.SCORING));
+        doThrow(new IllegalStateException("이미 제출한 후속 질문입니다.")).when(service).followUps("7", List.of());
+
+        assertThat(submitter.finishAll(List.of("7"))).isZero();
+    }
 }

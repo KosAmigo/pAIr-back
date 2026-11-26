@@ -376,9 +376,16 @@ public class AttemptService {
         return next;
     }
 
+    /**
+     * 후속 질문을 마치고 채점을 시작한다. 상태 확인과 변경(FOLLOWUP → SCORING)을 DB 에서 한 번에 해서,
+     * 동시에 여러 번 불려도 하나만 답을 저장하고 채점을 맡긴다. 나머지는 IllegalStateException.
+     */
     public AttemptStateDto followUps(String id, List<String> answers) {
         AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.FOLLOWUP);
         AttemptStateDto next = a.withFollowUps(answers == null ? List.of() : List.copyOf(answers), tasks.get(a.taskId()).followUps(), Instant.now());
+        if (!registry.startScoring(id, next.followupsDoneAt())) {
+            throw new IllegalStateException("이미 제출한 후속 질문입니다.");
+        }
         store.save(next);
         store.appendEvent(id, "followups", Map.of("count", next.followUpAnswers().size()));
         scoring.scoreAsync(id);
