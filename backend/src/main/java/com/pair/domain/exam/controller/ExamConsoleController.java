@@ -99,7 +99,7 @@ public class ExamConsoleController {
     @ResponseStatus(HttpStatus.CREATED)
     public SessionSummaryResponse create(CurrentUser user, @Valid @RequestBody ExamSessionRequest req) {
         access.requireSessionCreation(user);
-        return sessions.create(req.withCompany(access.companyFor(user, req.companyId())), user.userId());
+        return sessions.create(req.withCompany(access.companyFor(user, req.companyId())), user.userId(), user.isAdmin());
     }
 
     @GetMapping("/{sessionId}")
@@ -112,7 +112,7 @@ public class ExamConsoleController {
     public SessionSummaryResponse update(CurrentUser user, @PathVariable Long sessionId, @Valid @RequestBody ExamSessionRequest req) {
         access.requireManager(user);
         access.requireSession(user, sessionId);
-        return sessions.update(sessionId, req.withCompany(access.companyFor(user, req.companyId())));
+        return sessions.update(sessionId, req.withCompany(access.companyFor(user, req.companyId())), user.isAdmin());
     }
 
     /** 시작 전 취소. 지우지 않고 canceled_at 을 남기며 대상자에게 안내 메일을 보낸다 */
@@ -215,6 +215,7 @@ public class ExamConsoleController {
     @GetMapping("/{sessionId}/events/{eventId}/clip")
     public ClipResponse clip(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long eventId) {
         access.requireSession(user, sessionId);
+        clips.promoteIfDue(sessionId, eventId); // 서버 추론 회차: 승격 시각이 지났으면 지금 승격한다
         return clips.clipOf(sessionId, eventId);
     }
 

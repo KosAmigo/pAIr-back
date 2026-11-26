@@ -131,6 +131,34 @@ pair:
   # 응시 기록을 쌓는 폴더 (bootRun 은 저장소 루트에서 실행되므로 pAIr/pilot-data)
   data-dir: pilot-data
 
+  # 서버 추론 감독 (웹캠·휴대폰 사진을 추론 서버로 보내 분석). 기본 꺼짐. 회차별 플래그(exam_sessions.server_vision)도 켜야 한다.
+  # 키·비밀은 환경 변수로만 받는다 (코드·로그·git 에 넣지 말 것).
+  vision:
+    enabled: ${PAIR_SERVER_VISION_ENABLED:false}
+    inference-url: ${PAIR_VISION_INFERENCE_URL:}
+    inference-key: ${PAIR_VISION_INFERENCE_KEY:}
+    # 이벤트 콜백 서명 비밀. 키 번호 k1, k2 가 동시에 유효하다 (교체용)
+    event-hmac-secret: ${PAIR_VISION_EVENT_HMAC_SECRET:}
+    event-hmac-secret-next: ${PAIR_VISION_EVENT_HMAC_SECRET_NEXT:}
+    readyz-interval-ms: 5000
+    failure-threshold: 3
+    # 프레임은 오는데 추론 서버 생존 신호가 이만큼 없으면 감독 중단 (임시값)
+    no-state-ms: 10000
+    # 상시 저장분(웹캠·휴대폰) 보관일: 시험 종료 뒤, 연장 없음
+    stream-retention-days: 3
+    # 이벤트 구간 보관일, 연장 1회 일수, 최대 연장 횟수, 삭제 예정 며칠 전부터 연장 가능 (연장 횟수·시점은 기존 규칙을 따르는 가정)
+    clip-retention-days: 3
+    extension-days: 3
+    max-extensions: 2
+    extend-window-days: 1
+    # 휴대폰 사진을 감독관이 이벤트 구간·감독 중단 구간에서 볼 수 있는지 (확인 대기 중인 가정이라 끌 수 있게 둔다)
+    phone-viewable: ${PAIR_VISION_PHONE_VIEWABLE:true}
+    # 클라이언트에 알려 주는 전송 값 (임시, 실측 뒤 조정)
+    rate-fps: 1
+    webcam-max-edge: 400
+    webcam-quality: 0.55
+    phone-max-edge: 512
+
   # 실전 시험 회차 (팀원 4)
   exam:
     # 초대 메일 속 입장 링크 앞부분. 뒤에 /entry?invite={초대 토큰} 이 붙는다

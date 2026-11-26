@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 public interface SnapshotStorage {
 
     /** 서버가 만든 키 모양. 경로 조작을 막는 데도 쓴다 */
-    Pattern KEY = Pattern.compile("exam-clips/\\d{1,19}/\\d{1,19}/\\d{1,19}\\.jpg|exam-snapshots/\\d{1,19}/\\d{1,19}\\.jpg|participant-csv/\\d{1,19}/\\d{1,19}\\.csv");
+    Pattern KEY = Pattern.compile("exam-clips/\\d{1,19}/\\d{1,19}/\\d{1,19}\\.jpg|exam-snapshots/\\d{1,19}/\\d{1,19}\\.jpg|exam-stream/\\d{1,19}/\\d{1,19}/(?:webcam|phone)/\\d{1,19}\\.pack|participant-csv/\\d{1,19}/\\d{1,19}\\.csv");
 
     void put(String key, byte[] bytes);
 
@@ -30,12 +30,17 @@ public interface SnapshotStorage {
         return "exam-clips/" + sessionId + "/" + eventId + "/" + frameId + ".jpg";
     }
 
+    /** 사진 상시 저장 묶음 (채널 webcam|phone, 10초 정렬 구간 시작 ms) */
+    static String streamKeyOf(long sessionId, long participantId, String channel, long startMs) {
+        return "exam-stream/" + sessionId + "/" + participantId + "/" + channel + "/" + startMs + ".pack";
+    }
+
     static String csvKeyOf(long sessionId, long uploadedAtMillis) {
         return "participant-csv/" + sessionId + "/" + uploadedAtMillis + ".csv";
     }
 
     static String contentType(String key) {
-        return key.endsWith(".csv") ? "text/csv" : "image/jpeg";
+        return key.endsWith(".csv") ? "text/csv" : key.endsWith(".pack") ? "application/octet-stream" : "image/jpeg";
     }
 
     static void requireValid(String key) {

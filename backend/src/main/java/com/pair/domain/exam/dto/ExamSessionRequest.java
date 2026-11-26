@@ -14,9 +14,15 @@ public record ExamSessionRequest(
         @NotNull Instant startsAt,
         @NotNull Instant endsAt,
         boolean proctoring,
-        @NotEmpty @Size(max = 10) List<@NotBlank @Size(max = 64) String> taskIds) {
+        @NotEmpty @Size(max = 10) List<@NotBlank @Size(max = 64) String> taskIds,
+        /** 서버 추론 감독 회차 여부. 비우면 바꾸지 않는다(새 회차는 꺼짐). 값을 바꾸는 것은 관리자만, 시작 전에만 된다 */
+        Boolean serverVision) {
+
+    public ExamSessionRequest(Long companyId, String title, Instant startsAt, Instant endsAt, boolean proctoring, List<String> taskIds) {
+        this(companyId, title, startsAt, endsAt, proctoring, taskIds, null);
+    }
 
     public ExamSessionRequest withCompany(Long company) {
-        return new ExamSessionRequest(company, title, startsAt, endsAt, proctoring, taskIds);
+        return new ExamSessionRequest(company, title, startsAt, endsAt, proctoring, taskIds, serverVision);
     }
 }

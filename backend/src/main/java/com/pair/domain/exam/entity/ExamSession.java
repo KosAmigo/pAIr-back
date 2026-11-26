@@ -44,6 +44,10 @@ public class ExamSession {
     @Column(nullable = false)
     private boolean proctoring;
 
+    /** 서버 추론 감독 사용 회차인지. 백엔드 스위치(pair.vision.enabled)도 켜져 있어야 실제로 쓴다 */
+    @Column(name = "server_vision", nullable = false)
+    private boolean serverVision;
+
     /** 만든 회원 (같은 회사 MANAGER 또는 관리자) */
     @Column(name = "created_by", nullable = false)
     private Long createdBy;
@@ -122,6 +126,11 @@ public class ExamSession {
     public Instant getStartsAt() { return startsAt; }
     public Instant getEndsAt() { return endsAt; }
     public boolean isProctoring() { return proctoring; }
+    public boolean isServerVision() { return serverVision; }
+
+    public void changeServerVision(boolean enabled) {
+        this.serverVision = enabled;
+    }
     public Long getCreatedBy() { return createdBy; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getClosedAt() { return closedAt; }

@@ -15,6 +15,22 @@ public interface ProctorEventRepository extends JpaRepository<ProctorEvent, Long
 
     List<ProctorEvent> findByParticipantIdOrderByStartedAtAsc(Long participantId);
 
+    /** 대상자의 이벤트 수 (서버 추론 이벤트 수신 한도 확인용) */
+    long countByParticipantId(Long participantId);
+
+    /**
+     * 서버 추론 회차에서 받은 지 얼마 안 된 카메라 이벤트 중 아직 증거 구간 사진이 없는 것 (백그라운드 승격 후보).
+     * 승격 예정 시각 전의 것은 서비스가 걸러낸다.
+     */
+    @Query("""
+            select e from ProctorEvent e
+            where e.receivedAt >= :since and e.type in :types
+              and not exists (select 1 from ProctorEventFrame f where f.eventId = e.id)
+              and e.participantId in (select p.id from ExamParticipant p where p.session.serverVision = true)
+            order by e.receivedAt
+            """)
+    List<ProctorEvent> findUnpromoted(@Param("since") Instant since, @Param("types") Collection<ProctorEvent.Type> types, Pageable page);
+
     /** 재전송으로 온 같은 이벤트 찾기 (브라우저가 만든 고유값) */
     java.util.Optional<ProctorEvent> findByParticipantIdAndClientId(Long participantId, String clientId);
 

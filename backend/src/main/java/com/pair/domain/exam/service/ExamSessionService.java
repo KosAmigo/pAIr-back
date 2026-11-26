@@ -35,6 +35,7 @@ import com.pair.domain.exam.dto.SessionSummaryResponse;
 import com.pair.domain.task.service.TaskCatalogService;
 import com.pair.domain.task.service.TaskConsoleService;
 import com.pair.domain.auth.repository.AuthAccountRepository;
+import com.pair.global.error.ForbiddenException;
 import com.pair.global.error.UnauthorizedException;
 
 /** 기업 콘솔: 회차 생성·수정·취소와 대상자 등록. */
@@ -80,6 +81,13 @@ public class ExamSessionService {
     /** createdBy: 만든 회원 (같은 회사 MANAGER 또는 관리자) */
     @Transactional
     public SessionSummaryResponse create(ExamSessionRequest req, Long createdBy) {
+        return create(req, createdBy, false);
+    }
+
+    /** admin: 관리자만 서버 추론 감독(serverVision)을 켤 수 있다 */
+    @Transactional
+    public SessionSummaryResponse create(ExamSessionRequest req, Long createdBy, boolean admin) {
+        if (Boolean.TRUE.equals(req.serverVision()) && !admin) throw new ForbiddenException("서버 추론 감독 설정은 관리자만 바꿀 수 있습니다.");
         Instant now = clock.instant();
         if (req.companyId() == null) throw new IllegalArgumentException("회사를 알 수 없습니다.");
         validateSchedule(req, now);
@@ -93,6 +101,7 @@ public class ExamSessionService {
         try {
             s = sessions.save(new ExamSession(req.companyId(), req.title().trim(), req.startsAt(), req.endsAt(),
                     req.proctoring(), taskIds, createdBy, now));
+            if (Boolean.TRUE.equals(req.serverVision())) s.changeServerVision(true);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             // companies 외래 키 위반: 관리자가 없는 회사 번호를 넣은 경우
             throw new IllegalArgumentException("없는 회사 번호입니다: " + req.companyId());
@@ -140,15 +149,25 @@ public class ExamSessionService {
         long entered = ps.stream().filter(p -> p.getEnteredAt() != null).count();
         long submitted = states.values().stream().filter(ParticipantProgressService.Progress::finished).count();
         SessionSummaryResponse sum = new SessionSummaryResponse(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(),
-                s.phase(now), tasks.codesInOrder(s.getTaskIds()), ps.size(), entered, submitted, s.getCanceledAt(), 0, s.getCreatedAt());
+                s.phase(now), tasks.codesInOrder(s.getTaskIds()), ps.size(), entered, submitted, s.getCanceledAt(), 0, s.getCreatedAt(), s.isServerVision());
         return new SessionDetailResponse(sum, now, s.getClosedAt(), ps.stream().map(p -> ParticipantResponse.from(p, states.get(p.getId()), now)).toList());
     }
 
     /** 시작 전에만 고칠 수 있다 (진행 중에 시각을 바꾸면 응시자마다 조건이 달라진다). 바뀌면 대상자에게 안내 메일 */
     @Transactional
     public SessionSummaryResponse update(Long sessionId, ExamSessionRequest req) {
+        return update(sessionId, req, false);
+    }
+
+    /** admin: 관리자만 서버 추론 감독(serverVision) 값을 바꿀 수 있다. 시작 전 회차만 고칠 수 있으므로 시험 중에는 바뀌지 않는다 */
+    @Transactional
+    public SessionSummaryResponse update(Long sessionId, ExamSessionRequest req, boolean admin) {
         Instant now = clock.instant();
         ExamSession s = requireUpcoming(sessionId, now, "고칠");
+        if (req.serverVision() != null && req.serverVision() != s.isServerVision()) {
+            if (!admin) throw new ForbiddenException("서버 추론 감독 설정은 관리자만 바꿀 수 있습니다.");
+            s.changeServerVision(req.serverVision());
+        }
         if (!s.getCompanyId().equals(req.companyId())) throw new IllegalArgumentException("다른 회사의 회차로 옮길 수 없습니다.");
         validateSchedule(req, now);
         List<Long> taskIds = liveTaskIds(req.taskIds());
@@ -356,6 +375,6 @@ public class ExamSessionService {
     private SessionSummaryResponse summary(ExamSession s, ExamParticipantRepository.SessionCounts c, long submitted, long open, Instant now) {
         return new SessionSummaryResponse(s.getId(), s.getCompanyId(), s.getTitle(), s.getStartsAt(), s.getEndsAt(), s.isProctoring(), s.phase(now),
                 tasks.codesInOrder(s.getTaskIds()), c == null ? 0 : c.getTotal(), c == null ? 0 : c.getEntered(), submitted,
-                s.getCanceledAt(), open, s.getCreatedAt());
+                s.getCanceledAt(), open, s.getCreatedAt(), s.isServerVision());
     }
 }
