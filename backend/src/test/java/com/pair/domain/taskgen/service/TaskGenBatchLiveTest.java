@@ -32,7 +32,6 @@ import com.pair.domain.task.repository.TaskFileRepository;
 import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
-import com.pair.domain.taskgen.exception.TooManyJobsException;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.infra.storage.TaskFileStorage;
 
@@ -236,7 +235,8 @@ class TaskGenBatchLiveTest {
             t = System.nanoTime(); // 자리가 나서 실제로 시작한 때부터 잰다
             TaskGenJobService.JobStatus st;
             String lastStep = "";
-            while ((st = jobs.status(jobId)).status() == TaskGenJobService.State.RUNNING) {
+            while ((st = jobs.status(jobId)).status() == TaskGenJobService.State.RUNNING || st.status() == TaskGenJobService.State.QUEUED) {
+                jobs.tick(); // 워커가 꺼진 테스트 설정에서도 대기 작업을 줍는다
                 if (!st.step().equals(lastStep)) {
                     lastStep = st.step();
                     System.out.println("[batch " + nn + "] " + lastStep);
@@ -277,15 +277,9 @@ class TaskGenBatchLiveTest {
         }
     }
 
-    /** 동시 실행 상한(429)에 걸리면 자리가 날 때까지 기다렸다가 다시 넣는다 */
-    private String startWhenFree(TaskGenRequest form, String nn) throws InterruptedException {
-        while (true) {
-            try {
-                return jobs.start(form, ADMIN_ID);
-            } catch (TooManyJobsException full) {
-                Thread.sleep(3000);
-            }
-        }
+    /** 대기열에 넣는다(상한을 넘으면 서비스가 알아서 기다리게 한다) */
+    private String startWhenFree(TaskGenRequest form, String nn) {
+        return jobs.start(form, ADMIN_ID);
     }
 
     private static String names(List<GenCheckResultDto> checks, boolean warn) {

@@ -11,6 +11,7 @@ final class StageCallService {
     private final TaskGenAiService ai;
     private final TaskGenProperties props;
     private final boolean dev;
+    private final JobCallService saved = JobCallService.current(); // 작업이 이어 가기를 켰으면(작업 스레드에 묶여 있음) 호출을 저장·재사용한다
     private final List<StageUsageDto> usage = java.util.Collections.synchronizedList(new ArrayList<>());
 
     /** dev: DEV 직군이면 true, BIZ 면 false (직군마다 단계 모델이 다르다) */
@@ -51,6 +52,23 @@ final class StageCallService {
         long started = System.nanoTime();
         TaskGenAiService.Output<T> out;
         String name = label == null ? stage.name() : stage.name() + ":" + label;
+        String hash = null;
+        int nth = 0;
+        if (saved != null) { // 이어 가기: 같은 입력의 nth 번째 호출이 저장돼 있으면 모델을 부르지 않는다
+            hash = JobCallService.hash(cfg.model(), cfg.effort(), cfg.maxTokens(), system, user, type.getName());
+            nth = saved.nextNth(hash);
+            var stored = saved.find(hash, nth);
+            if (stored.isPresent()) {
+                var value = saved.read(stored.get(), type);
+                if (value.isPresent()) {
+                    var c = stored.get();
+                    usage.add(new StageUsageDto(name, cfg.model(), cfg.effort(), c.getInputTokens(), c.getOutputTokens(), 0));
+                    saved.addCost(props.cost(cfg.model(), c.getInputTokens(), c.getOutputTokens()));
+                    saved.markReused();
+                    return value.get();
+                }
+            }
+        }
         try {
             out = ai.generate(cfg.model(), system, user, type, cfg.maxTokens(), cfg.effort());
         } catch (com.pair.infra.ai.OutputLimitException e) {
@@ -69,6 +87,10 @@ final class StageCallService {
         }
         usage.add(new StageUsageDto(name, cfg.model(), cfg.effort(), out.inputTokens(), out.outputTokens(),
                 Math.round((System.nanoTime() - started) / 1e9), out.effortLowered() ? OUTPUT_LIMIT_LOWERED : ""));
+        if (saved != null) {
+            saved.addCost(props.cost(cfg.model(), out.inputTokens(), out.outputTokens()));
+            saved.save(hash, nth, stage.name(), label, cfg.model(), out.value(), out.inputTokens(), out.outputTokens());
+        }
         return out.value();
     }
 

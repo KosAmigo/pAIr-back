@@ -509,6 +509,8 @@ public abstract class TaskGeneratorService<D> {
             cost.put("capUsd", cap);
             cost.put("attempts", attempts);
             cost.put("stoppedByCap", capStopped);
+            JobCallService saved = JobCallService.current();
+            cost.put("reusedCalls", saved == null ? 0 : saved.reusedCount()); // 끊긴 작업을 이어 가며 저장된 결과를 다시 쓴 호출 수(그 비용은 위 합계에 한 번만 들어 있다)
             cost.put("estimates", costEstimates);
             cost.put("byStageUsd", byStageCost);
             detail.put("cost", cost);
