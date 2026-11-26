@@ -163,6 +163,9 @@ tasks.named('classes') {
 
 tasks.named('bootJar') {
     dependsOn archTest
+    // 편집기 진단(javac)과 local 실행 모드는 이 jar 의 파일 경로가 필요하다. app.jar 안에 그대로 두면 경로가 '/' 로 나와
+    // org.junit 을 못 찾으므로(test 파일에만 빨간줄), 앱이 뜰 때 임시 폴더에 풀어 쓴다.
+    requiresUnpack '**/junit-platform-console-standalone-*.jar'
 }
 
 // 샌드박스 서버(코드 실행 전용, DB·API 키 없이 켜짐). 환경변수 PAIR_RUN_REMOTE_TOKEN 이 필요하다. 앱 서버는 PAIR_RUN_MODE=remote 로 붙인다.
