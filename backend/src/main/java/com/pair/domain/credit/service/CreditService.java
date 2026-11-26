@@ -9,7 +9,12 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.pair.domain.auth.repository.AuthAccountRepository;
+import com.pair.global.security.CurrentUser;
 
+/**
+ * 크레딧 지급·차감. 관리자는 자가진단·AI 채팅·롤백을 확인용으로 무제한 쓴다(검사도 차감도 하지 않고 원장에도 남기지 않는다).
+ * 구매·환불은 관리자도 일반 규칙을 따른다.
+ */
 @Service
 public class CreditService {
     private final AuthAccountRepository accounts;
@@ -38,6 +43,12 @@ public class CreditService {
         this.rollbackCost = rollbackCost;
     }
 
+    /** 크레딧 제한이 없는 회원인지 (관리자) */
+    @Transactional(readOnly = true)
+    public boolean isUnlimited(Long userId) {
+        return accounts.findById(userId).map(a -> a.getRole() == CurrentUser.Role.ADMIN).orElse(false);
+    }
+
     @Transactional(readOnly = true)
     public int balance(Long userId) {
         return ledger.findFirstByUserIdOrderByIdDesc(userId).map(CreditLedger::getBalanceAfter).orElse(0);
@@ -54,11 +65,13 @@ public class CreditService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void checkAttempt(Long userId) {
+        if (isUnlimited(userId)) return;
         check(userId, attemptCost);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void chargeAttempt(Long userId, Long attemptId) {
+        if (isUnlimited(userId)) return;
         charge(userId, attemptCost, "ATTEMPT_START", attemptId, null);
     }
 
@@ -75,6 +88,7 @@ public class CreditService {
 
     @Transactional(readOnly = true)
     public void checkChat(Long userId, int newAttachments) {
+        if (isUnlimited(userId)) return;
         int need = chatTotal(newAttachments);
         int current = balance(userId);
         if (current < need) {
@@ -89,16 +103,19 @@ public class CreditService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void chargeChat(Long userId, Long turnId, int newAttachments) {
+        if (isUnlimited(userId)) return;
         charge(userId, chatTotal(newAttachments), "CHAT_TURN", null, turnId);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void checkRollback(Long userId) {
+        if (isUnlimited(userId)) return;
         check(userId, rollbackCost);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void chargeRollback(Long userId, Long attemptId) {
+        if (isUnlimited(userId)) return;
         charge(userId, rollbackCost, "ROLLBACK", attemptId, null);
     }
 

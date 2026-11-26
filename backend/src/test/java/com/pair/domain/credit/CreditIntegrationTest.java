@@ -79,7 +79,7 @@ class CreditIntegrationTest extends BearerIntegrationTest {
         long userId = user.user().id();
         assertThat(credits.balance(userId)).isEqualTo(200);
         mvc.perform(get("/api/credits").header("Authorization", "Bearer " + user.token()))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(200));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.balance").value(200)).andExpect(jsonPath("$.unlimited").value(false));
         String id = attempts.startSelf(TestTasks.SELF_DEV, userId).id();
         assertThat(credits.balance(userId)).isEqualTo(190);
         CreditLedger start = ledger.findFirstByUserIdOrderByIdDesc(userId).orElseThrow();
@@ -204,6 +204,25 @@ class CreditIntegrationTest extends BearerIntegrationTest {
         attempts.chat(id, "hello");
         assertThat(store.turns(id)).hasSize(2);
         assertThat(ledger.count()).isEqualTo(before);
+    }
+
+    @Test
+    void adminUsesSelfDiagnosisWithoutCredits() {
+        // 잔액 0 인 관리자: 응시 시작·AI 채팅을 몇 번이든 하고, 원장에는 아무것도 남지 않는다
+        AuthAccount admin = new AuthAccount(UUID.randomUUID() + "@example.com", "Admin", "unused");
+        admin.changeRole(com.pair.global.security.CurrentUser.Role.ADMIN);
+        long adminId = accounts.saveAndFlush(admin).getId();
+        assertThat(credits.isUnlimited(adminId)).isTrue();
+        when(assistant.send(any())).thenReturn(new AssistantClient.Reply("answer", "test", 10, 20, 0, "stop", 1));
+
+        String id = null;
+        for (int i = 0; i < 25; i++) id = attempts.startSelf(TestTasks.SELF_DEV, adminId).id();
+        attempts.chat(id, "hello");
+        attempts.chat(id, "again");
+
+        assertThat(credits.balance(adminId)).isZero();
+        assertThat(ledger.findFirstByUserIdOrderByIdDesc(adminId)).isEmpty();
+        assertThat(store.turns(id)).hasSize(4);
     }
 
     @Test
