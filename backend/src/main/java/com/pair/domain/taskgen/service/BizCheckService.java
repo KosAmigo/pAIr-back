@@ -29,35 +29,32 @@ public final class BizCheckService {
     static final String TRAP = "함정 근거가 자료에 있음"; // E3, Q3(함정의 근거가 자료에 사실로 있다)
     static final String LEAK = "정답 노출 없음"; // M5(3장 경계: 설명·요구사항에 정답 수치)
     static final String SOLVE = "다른 회사 모델이 풀기"; // M1(풀 수 있는지)
-    static final String TRAP_WORDS = "함정 핵심어 노출 없음"; // M5
     static final String WRONG_ANSWERS = "단답 오답이 인정 답안과 다름"; // M2(인정 답안), M3(오답이 함정 값)
     static final String FOLLOW_UP = "후속 질문이 과제에 맞음"; // E5, M5
-    static final String EVIDENCE_STYLE = "함정 근거가 사실 진술임"; // M5, 5장 BIZ(사실 진술, 해석 지시 금지)
     static final String CONCLUSION = "함정이 결론을 바꿈"; // M3
     static final String JUDGMENT = "판단 지점과 근거가 자료에 있음"; // E2, M4(존재·근거 위치만 자동 확인, 적절성은 검수)
     static final String HIDDEN_FLAW = "숨은 결함이 답·결론을 가름"; // E3, M3
-    static final String NO_PROCEDURE = "정의·문항에 계산 절차 없음"; // M5 (지표 정의는 무엇을 세는지까지만)
     static final String TRAP_QUESTION = "함정 문항이 자료 대조를 요구함"; // E3, M3 (단순 조회·같은 계산 반복 금지)
 
     /** 근거 문장이 응시자에게 해석을 지시하는 말투 */
-    static final Pattern DIRECTIVE = Pattern.compile("판단하지\\s*않|해서는\\s*안|하면\\s*안\\s*된|혼동하지|만으로.*하지\\s*않"
+    private static final Pattern DIRECTIVE = Pattern.compile("판단하지\\s*않|해서는\\s*안|하면\\s*안\\s*된|혼동하지|만으로.*하지\\s*않"
             + "|(잡히|합산되|포함되|반영되|인정되)지\\s*않(는다|습니다|음)" // 규칙 문장("실적으로 잡히지 않는다")
             + "|원인(은|이)|때문에[^.\\n]{0,30}(과대|과소|부풀|왜곡)|서로\\s*다른\\s*관측값"); // 원인 설명
 
     /** 지표·용어 정의나 문항이 값을 합치는 방법(차이, 곱, 가중, 비율의 금액)을 알려 주는 말 */
-    static final Pattern PROCEDURE = Pattern.compile("(차이|곱|합산|가중\\s*(평균|합))(을|를|이|가)?\\s*(뜻|의미|말합|가리킵|해당)"
+    private static final Pattern PROCEDURE = Pattern.compile("(차이|곱|합산|가중\\s*(평균|합))(을|를|이|가)?\\s*(뜻|의미|말합|가리킵|해당)"
             + "|비율에\\s*해당하는\\s*(금액|값|수)|각각\\s*곱해|(를|을)\\s*(빼서|빼고|나누어|나눠|곱해|곱하여)\\s*(구|계산)"
             + "|(뺀|나눈|곱한|더한)\\s*(값|것)(을|이|으로)?\\s*(뜻|의미|말합|합니다)");
 
     // M5: 정의에 계산 방법("A 대비 B의 상대적 증가 정도를 뜻한다", "A를 B로 나눈 값")
-    static final Pattern DEFINITION_CALC = Pattern.compile("[은는][^.\\n]{0,80}(기준으로\\s*(본|하여|해)|대비)[^.\\n]{0,60}(뜻|의미|말합|가리킵)"
+    private static final Pattern DEFINITION_CALC = Pattern.compile("[은는][^.\\n]{0,80}(기준으로\\s*(본|하여|해)|대비)[^.\\n]{0,60}(뜻|의미|말합|가리킵)"
             + "|(을|를)[^.\\n]{0,30}(으로|로)\\s*나눈\\s*(값|비율|몫)");
     // M5: 두 대상의 차이를 직접 말하는 문장("A와 B는 (서로) 다르다")
-    static final Pattern DIFFERENCE = Pattern.compile("(과|와)[^.\\n]{1,40}(은|는|이|가)\\s*(서로\\s*)?(다릅니다|다르다|다르며|다르지만)");
+    private static final Pattern DIFFERENCE = Pattern.compile("(과|와)[^.\\n]{1,40}(은|는|이|가)\\s*(서로\\s*)?(다릅니다|다르다|다르며|다르지만)");
     // M5: 원인 표지, 지시 말투. 결과물 쓰기 안내("작성해야 한다")는 제외
-    static final Pattern CAUSE_LABEL = Pattern.compile("원인\\s*[:：]");
-    static final Pattern MUST = Pattern.compile("해야\\s*(한다|합니다)");
-    static final Pattern MUST_OK = Pattern.compile("(제출|작성|포함|기재|표시|명시|선택|설명|구분|담|답|입력|기록|정리)(해야|하여야)");
+    private static final Pattern CAUSE_LABEL = Pattern.compile("원인\\s*[:：]");
+    private static final Pattern MUST = Pattern.compile("해야\\s*(한다|합니다)");
+    private static final Pattern MUST_OK = Pattern.compile("(제출|작성|포함|기재|표시|명시|선택|설명|구분|담|답|입력|기록|정리)(해야|하여야)");
 
     private static final Pattern NAME = Pattern.compile("자료/[\\p{L}\\p{N}_ ()\\-]+\\.(csv|pdf)");
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -78,7 +75,7 @@ public final class BizCheckService {
     static List<GenCheckService<BizDraftDto>> forDraft(PdfService pdf, TaskGenSolverService solver, String solverModel, BizDraftDto draft, int minutes, TaskGenRequest form) {
         Ctx ctx = new Ctx(pdf, draft, minutes);
         return List.of(
-                check(FORMAT, d -> ctx.problem == null ? ok("필수 항목과 경로가 모두 맞습니다.") : fail(ctx.problem)),
+                check(FORMAT, d -> ctx.problem != null ? fail(ctx.problem) : ctx.soft != null ? fail(ctx.soft) : ok("필수 항목과 경로가 모두 맞습니다.")),
                 check(CSV, d -> {
                     if (ctx.problem != null) return skipped();
                     for (var e : ctx.tables.all().entrySet()) {
@@ -129,9 +126,12 @@ public final class BizCheckService {
                     // 시험 시간 안내("60분 동안")는 정답이 아니므로 빼고 본다
                     String brief = String.join(" ", d.description()) + " " + String.join(" ", d.requirements());
                     brief = brief.replaceAll("\\d+분\\s*동안", "");
+                    // 작성 단계가 반드시 쓰는 문구("근거 3개 이상", "1페이지")의 숫자도 정답이 아니다
+                    brief = brief.replaceAll("\\d+\\s*(개|가지|페이지|쪽|문단|줄|건)\\s*(이상|이내|이하|씩)?", "");
                     for (var q : d.questions()) {
                         if (q.type() != BizDraftDto.Type.SHORT) continue;
                         String a = q.accepted().get(0).strip();
+                        if (a.matches("\\d{1,2}") && Integer.parseInt(a) <= 10) continue; // 10 이하 작은 정수는 일반 문장에 흔해 정답 노출로 보지 않는다
                         if (Pattern.compile("(?<![\\d.])" + Pattern.quote(a) + "(?![\\d.])").matcher(brief).find()) {
                             return fail("설명·요구사항에 단답형 정답 수치 '" + a + "' 가 들어 있습니다.");
                         }
@@ -149,25 +149,32 @@ public final class BizCheckService {
                     List<String> answers = parseAnswers(text);
                     if (answers == null) return fail("풀이 모델 답변에서 answers JSON 을 찾지 못했습니다.");
                     List<String> wrong = new ArrayList<>();
+                    List<String> trapWorked = new ArrayList<>();
+                    java.util.Set<Integer> trapQs = trapQuestionNumbers(d);
                     for (int i = 0; i < d.questions().size(); i++) {
                         var q = d.questions().get(i);
                         String a = i < answers.size() ? answers.get(i) : null;
                         boolean right;
                         if (q.type() == BizDraftDto.Type.SINGLE) {
-                            int want = 0;
-                            for (int j = 0; j < q.choices().size(); j++) if (q.choices().get(j).correct()) want = j + 1;
-                            right = a != null && a.strip().equals(String.valueOf(want));
+                            int pick = a == null || !a.strip().matches("\\d+") ? 0 : Integer.parseInt(a.strip());
+                            right = pick >= 1 && pick <= q.choices().size() && q.choices().get(pick - 1).correct(); // 판단 지점 문항은 어느 보기도 정답
                         } else {
                             Double got = BizTableService.num(a);
                             right = q.accepted().stream().anyMatch(x -> close(got, BizTableService.num(x)));
                         }
-                        if (!right) wrong.add("Q" + (i + 1) + "(풀이 " + a + ")");
+                        if (!right) {
+                            // 함정 문항에서 함정에 빠진 답(흔한 오답 값, 함정 문항의 오답 보기)을 냈으면 함정이 작동한 것이다
+                            Double got = q.type() == BizDraftDto.Type.SHORT ? BizTableService.num(a) : null;
+                            boolean trapValue = q.type() == BizDraftDto.Type.SHORT
+                                    ? q.commonWrongAnswers() != null && q.commonWrongAnswers().stream().anyMatch(w -> close(got, BizTableService.num(w.value())))
+                                    : trapQs.contains(i + 1);
+                            if (trapValue) trapWorked.add("Q" + (i + 1) + "(풀이 " + a + ")");
+                            else wrong.add("Q" + (i + 1) + "(풀이 " + a + ")");
+                        }
                     }
-                    return wrong.isEmpty() ? ok("풀이 모델이 문항 " + d.questions().size() + "개를 모두 맞혔습니다.") : fail("풀이 모델이 틀린 문항: " + String.join(", ", wrong));
-                }),
-                check(TRAP_WORDS, d -> {
-                    if (ctx.problem != null) return skipped();
-                    return trapWords(d, form);
+                    String note = trapWorked.isEmpty() ? "" : " (함정 값을 낸 문항 " + String.join(", ", trapWorked) + " 은 함정이 작동한 것으로 봄)";
+                    return wrong.isEmpty() ? ok("풀이 모델이 함정이 아닌 문항을 모두 맞혔습니다." + note)
+                            : fail("풀이 모델이 함정 값이 아닌 답을 낸 문항: " + String.join(", ", wrong) + ". 자료만으로 정답이 정해지지 않을 수 있습니다(자료 보강 필요)." + note);
                 }),
                 check(WRONG_ANSWERS, d -> {
                     if (ctx.problem != null) return skipped();
@@ -176,10 +183,6 @@ public final class BizCheckService {
                 check(FOLLOW_UP, d -> {
                     if (ctx.problem != null) return skipped();
                     return followUp(d);
-                }),
-                check(EVIDENCE_STYLE, d -> {
-                    if (ctx.problem != null) return skipped();
-                    return evidenceStyle(d);
                 }),
                 check(CONCLUSION, d -> {
                     if (ctx.problem != null) return skipped();
@@ -194,10 +197,6 @@ public final class BizCheckService {
                     if (ctx.problem != null) return skipped();
                     return hiddenFlaws(d);
                 }),
-                check(NO_PROCEDURE, d -> {
-                    if (ctx.problem != null) return skipped();
-                    return noProcedure(d);
-                }),
                 check(TRAP_QUESTION, d -> {
                     if (ctx.problem != null) return skipped();
                     return trapQuestions(d, ctx.corpus());
@@ -206,31 +205,17 @@ public final class BizCheckService {
 
     // ── 새 검사들 ─────────────────────────────
 
-    /** 함정 핵심어가 설명, 요구사항, 자료 파일 이름에 있으면 실패 (자료 본문에는 함정 근거가 있어야 하므로 보지 않는다) */
-    private static GenCheckResultDto trapWords(BizDraftDto d, TaskGenRequest form) {
-        List<String> keywords = GenTextService.clean(d.trapKeywords());
-        if (keywords.size() < 2) return fail("함정 핵심어(trapKeywords)가 2~5개 있어야 합니다 (지금 " + keywords.size() + "개).");
-        List<String> words = new ArrayList<>(keywords);
-        if (form != null) {
-            for (String w : GenTextService.formWords(form.trap(), form.topic())) if (!words.contains(w)) words.add(w);
+    /** 숨은 결함이 잡힌다고 한 문항 번호들(Q2 → 2) */
+    private static java.util.Set<Integer> trapQuestionNumbers(BizDraftDto d) {
+        java.util.Set<Integer> trap = new java.util.HashSet<>();
+        if (d.hiddenFlaws() != null) {
+            for (var f : d.hiddenFlaws()) {
+                if (f == null || f.caughtBy() == null) continue;
+                Matcher m = Pattern.compile("(?:Q|문항" + "\\s*)(\\d+)", Pattern.CASE_INSENSITIVE).matcher(f.caughtBy());
+                while (m.find()) trap.add(Integer.parseInt(m.group(1)));
+            }
         }
-        StringBuilder paths = new StringBuilder();
-        d.csvFiles().forEach(f -> paths.append(f.path()).append(' '));
-        d.documents().forEach(f -> paths.append(f.path()).append(' '));
-        Map<String, List<String>> found = new LinkedHashMap<>();
-        // 자료의 문서·파일 이름과 문서 제목(예: 비교표)을 부른 것은 노출이 아니다. 자료 파일 이름 검사에는 그대로 쓴다
-        List<String> names = new ArrayList<>(d.csvFiles().stream().map(DevDraftDto.FileDraft::path).toList());
-        d.documents().forEach(f -> { names.add(f.path()); names.addAll(GenTextService.headings(f.pages())); });
-        List<String> textWords = GenTextService.exceptNames(words, names);
-        found.put("설명", GenTextService.hits(textWords, String.join(" ", d.description())));
-        found.put("요구사항", GenTextService.hits(textWords, String.join(" ", d.requirements())));
-        found.put("자료 파일 이름", GenTextService.hits(words, paths.toString()));
-        List<String> parts = new ArrayList<>();
-        found.forEach((where, hit) -> {
-            if (!hit.isEmpty()) parts.add(where + "에 " + hit.stream().map(h -> "'" + h + "'").toList());
-        });
-        return parts.isEmpty() ? ok("함정 핵심어 " + keywords.size() + "개가 설명·요구사항·자료 이름에 없습니다.")
-                : fail("응시자에게 보이는 곳에 함정 핵심어가 드러납니다: " + String.join(" / ", parts) + ". 이 말을 쓰지 말고 현상만 설명하세요.");
+        return trap;
     }
 
     /** 단답형마다 흔한 오답이 있어야 하고, 오답이 인정 답안과 같거나 0.5% 안이면 실패 */
@@ -257,20 +242,6 @@ public final class BizCheckService {
         return bad.isEmpty() ? ok("단답형 " + n + "개의 흔한 오답이 모두 인정 답안과 다릅니다.") : fail(String.join(" / ", bad));
     }
 
-    /** 함정 근거 문장과 자료 글(문서 쪽 글, 설명, 요구사항)에 해석 지시·규칙 문장·원인 설명이 있으면 경고(warn) */
-    static GenCheckResultDto evidenceStyle(BizDraftDto d) {
-        Matcher m = DIRECTIVE.matcher(d.trap().evidence());
-        if (m.find()) return warnResult("함정 근거 문장이 사실 진술이 아니라 해석 지시처럼 쓰였어요: '" + m.group() + "'. 측정 범위나 집계 정의 같은 사실로 쓰고 다른 내용 속에 섞으세요");
-        for (String t : texts(d)) {
-            for (String sentence : DevCheckService.sentences(t)) {
-                if (DIRECTIVE.matcher(sentence).find()) {
-                    return warnResult("자료 글에 규칙 문장이나 원인 설명이 있어요: '" + shorten(sentence) + "'. 측정 범위나 집계 정의 같은 사실만 쓰세요");
-                }
-            }
-        }
-        return ok("함정 근거 문장과 자료 글에 해석 지시·규칙·원인 문장이 없습니다.");
-    }
-
     /** 설명, 요구사항, 문서 쪽 글, 문항 문구 */
     private static List<String> texts(BizDraftDto d) {
         List<String> out = new ArrayList<>(d.description());
@@ -288,23 +259,6 @@ public final class BizCheckService {
         // 자료(문서) 속 "~해야 한다"는 판단 지점 근거 같은 사실 서술이 많아 보지 않는다(AI 판정이 본다). 설명·요구사항·문항만 본다
         if (candidateText && MUST.matcher(sentence).find() && !MUST_OK.matcher(sentence).find()) return "지시 말투";
         return null;
-    }
-
-    /** M5: 지표·용어 정의와 문항 문구가 값을 합치는 방법(차이, 곱, 가중, 비율의 금액)을 말하면 fail */
-    static GenCheckResultDto noProcedure(BizDraftDto d) {
-        List<String> found = new ArrayList<>();
-        List<String> docs = new ArrayList<>();
-        d.documents().forEach(x -> docs.addAll(x.pages()));
-        for (String t : texts(d)) {
-            boolean candidateText = !docs.contains(t);
-            for (String sentence : DevCheckService.sentences(t)) {
-                String why = m5Reason(sentence, candidateText); // M5
-                if (why != null) found.add("'" + shorten(sentence) + "'(" + why + ")");
-            }
-        }
-        return found.isEmpty() ? ok("정의·문항에 값을 합치는 방법이 없습니다.")
-                : fail("정의나 문항이 계산 절차·차이·원인·지시를 알려 줍니다: " + String.join(", ", found.stream().limit(3).toList())
-                        + ". 정의는 무엇을 세는지(대상과 범위)까지만 쓰고, 합치는 방법과 두 대상이 다르다는 말은 빼서 자료를 대조해야 드러나게 하세요.");
     }
 
     /**
@@ -456,7 +410,6 @@ public final class BizCheckService {
             if (q.type() == BizDraftDto.Type.SINGLE) {
                 singles++;
                 if (q.choices() == null || q.choices().size() != 4 || q.choices().stream().anyMatch(c -> c == null || blank(c.content()))) return "객관식은 보기가 4개여야 합니다: " + shorten(q.content());
-                if (q.choices().stream().filter(BizDraftDto.Choice::correct).count() != 1) return "객관식은 정답 보기가 1개여야 합니다: " + shorten(q.content());
             } else {
                 shorts++;
                 if (isEmpty(q.accepted()) || q.accepted().stream().anyMatch(BizCheckService::blank)) return "단답형에 인정 답안이 없습니다: " + shorten(q.content());
@@ -482,13 +435,17 @@ public final class BizCheckService {
                 if (blank(s.pages())) return "근거 쪽 번호가 없습니다: " + s.path();
                 for (String p : s.pages().split("[,\\s]+")) {
                     if (p.isEmpty()) continue;
-                    int n;
-                    try {
-                        n = Integer.parseInt(p);
-                    } catch (NumberFormatException e) {
-                        return "쪽 번호가 숫자가 아닙니다: " + s.path() + " " + s.pages();
+                    // "1-2" 같은 범위는 양 끝이 있는 쪽이면 된다
+                    String[] ends = p.split("[-~–]", -1);
+                    for (String e : ends.length == 2 ? ends : new String[] {p}) {
+                        int n;
+                        try {
+                            n = Integer.parseInt(e.strip());
+                        } catch (NumberFormatException ex) {
+                            return "쪽 번호가 숫자가 아닙니다: " + s.path() + " " + s.pages();
+                        }
+                        if (n < 1 || n > pageCount) return "없는 쪽입니다: " + s.path() + " " + n + "쪽 (전체 " + pageCount + "쪽)";
                     }
-                    if (n < 1 || n > pageCount) return "없는 쪽입니다: " + s.path() + " " + n + "쪽 (전체 " + pageCount + "쪽)";
                 }
             }
             distinct.add(s.path());
@@ -537,7 +494,19 @@ public final class BizCheckService {
     // ── 공통 ─────────────────────────────
 
     /** 한 Draft 의 공통 계산: 형식 검사 결과, CSV 표, 문서 쪽 수 */
+    /** 객관식 정답 보기 개수 같은, 다른 검사를 막지 않는 형식 문제(형식 검사만 실패시키고 나머지 검사는 계속 돈다) */
+    static String softProblem(BizDraftDto d) {
+        if (d == null || d.questions() == null) return null;
+        for (var q : d.questions()) {
+            if (q != null && q.type() == BizDraftDto.Type.SINGLE && q.choices() != null && q.choices().stream().filter(c -> c != null && c.correct()).count() != 1) {
+                return "객관식은 정답 보기가 1개여야 합니다: " + shorten(q.content());
+            }
+        }
+        return null;
+    }
+
     private static final class Ctx {
+        final String soft;
         final String problem;
         final BizTableService tables;
         final Map<String, Integer> pageCounts = new LinkedHashMap<>();
@@ -546,6 +515,7 @@ public final class BizCheckService {
         Ctx(PdfService pdf, BizDraftDto d, int minutes) {
             this.draft = d;
             this.problem = formatProblem(d, pdf, minutes);
+            this.soft = problem == null ? softProblem(d) : null;
             this.tables = new BizTableService(d == null ? null : d.csvFiles());
             if (problem == null) d.documents().forEach(x -> pageCounts.put(x.path(), x.pages().size()));
         }

@@ -119,19 +119,12 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
     }
 
     /**
-     * 참고 지표(DEV): 다른 fail 검사가 모두 통과한 Draft 에만 "AI 단독 풀이" 를 1회 돌려 숨은 결함을 잡았는지 기록한다(비용 절약).
+     * 참고 지표(DEV): 검수까지 통과한 Draft 에 "AI 단독 풀이" 를 1회(항상) 돌려 숨은 결함을 잡았는지 기록한다(비용 절약).
      * 결과는 항상 ok(warn 등급)라 다시 생성을 일으키지 않는다. 호출이 실패해도 warn.
      */
     @Override
     protected Extra afterChecks(TaskGenRequest form, DevDraftDto draft, List<GenCheckResultDto> results) {
-        if (results.stream().anyMatch(GenCheckResultDto::needsRegeneration)) return soloExtra(draft, results);
-        // M5: 다른 검사가 모두 통과한 뒤에만 답 노출 AI 판정을 돌린다. 위반이면 다시 생성하므로 단독 풀이는 건너뛴다
-        List<GenCheckResultDto> judged = leakJudge.judgeAll(AnswerLeakJudgeService.visible(draft), AnswerLeakJudgeService.flaws(draft)); // M5 + M1 숫자 모순
-        if (judged.stream().anyMatch(GenCheckResultDto::needsRegeneration)) return new Extra(judged, Map.of(), Map.of());
-        Extra solo = soloExtra(draft, results);
-        List<GenCheckResultDto> all = new java.util.ArrayList<>(judged);
-        all.addAll(solo.checks());
-        return new Extra(all, solo.details(), solo.files());
+        return soloExtra(draft, results);
     }
 
     private Extra soloExtra(DevDraftDto draft, List<GenCheckResultDto> results) {
@@ -177,5 +170,62 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
     @Override
     protected String save(TaskGenRequest form, DevDraftDto draft, GenReport report, long adminId, Map<String, String> extraFiles) {
         return writer.saveDev(form, draft, report, adminId, extraFiles);
+    }
+
+    // ── 관문 검사(AI) 연결 ─────────────────────────────
+
+    @Override
+    protected boolean devTrack() {
+        return true;
+    }
+
+    @Override
+    protected boolean reviewable() {
+        return true;
+    }
+
+    @Override
+    protected String checkInput(TaskReviewService.Check check, TaskGenRequest form, com.pair.domain.taskgen.dto.BlueprintDto bp, DevDraftDto draft) {
+        return TaskReviewService.devInput(check, form, bp, draft);
+    }
+
+    /**
+     * 검수자가 쓴 "정답과 다른 방식의 올바른 풀이"를 공개·숨은 테스트로 실제로 돌린다(M2).
+     * 테스트가 떨어지면 숨은 테스트가 너무 엄격한 것이라 고칠 대상(위반)으로 돌려준다. 컴파일이 안 되면 검수자 풀이의 문제라 위반으로 치지 않고 기록만 한다
+     */
+    @Override
+    protected ReviewExtra altRun(DevDraftDto draft, List<DevDraftDto.FileDraft> alt) {
+        if (alt == null || alt.isEmpty() || alt.stream().anyMatch(f -> f == null || f.path() == null || f.content() == null || !f.path().startsWith("src/"))) {
+            return new ReviewExtra(List.of(), Map.of("altSolution", "검수자가 다른 풀이를 내지 않아 돌리지 않음"));
+        }
+        Map<String, String> sources = DevRunService.toMap(draft.files());
+        sources.putAll(DevRunService.toMap(alt));
+        sources.putAll(DevRunService.toMap(draft.hiddenTests()));
+        com.pair.infra.sandbox.CodeRunner.RunResult r = runner.run(sources);
+        Map<String, Object> notes = new LinkedHashMap<>();
+        notes.put("altSolutionCompiled", r.compiled());
+        notes.put("altSolutionPassed", r.passed());
+        notes.put("altSolutionFailed", r.failed());
+        notes.put("altSolutionFiles", alt);
+        if (!r.compiled() || r.failed() == 0) return new ReviewExtra(List.of(), notes);
+        // 검수자 풀이 자체의 버그는 숨은 테스트 탓이 아니다: 공개 테스트에서 떨어지거나, 숨은 결함을 고치지 않아(결함을 잡는 테스트에서만) 떨어진 것은 위반으로 치지 않는다
+        List<String> hiddenClasses = new java.util.ArrayList<>();
+        for (var f : draft.hiddenTests()) hiddenClasses.add(f.path().substring(f.path().lastIndexOf('/') + 1).replaceAll("\\.java$", ""));
+        List<String> flawTests = draft.hiddenFlaws() == null ? List.of() : draft.hiddenFlaws().stream().filter(x -> x != null && x.caughtBy() != null)
+                .map(x -> x.caughtBy().strip().replaceAll("\\(\\)$", "")).toList();
+        var failed = r.tests().stream().filter(t -> !t.passed()).toList();
+        if (failed.stream().anyMatch(t -> hiddenClasses.stream().noneMatch(c -> t.name().contains(c)))) {
+            notes.put("altSolutionIgnored", "검수자 풀이가 공개 테스트에서 떨어져 풀이 쪽 문제로 보고 위반으로 치지 않음");
+            return new ReviewExtra(List.of(), notes);
+        }
+        var strict = failed.stream().filter(t -> flawTests.stream().noneMatch(n -> t.name().endsWith("." + n) || t.name().endsWith("." + n + "()") || t.name().equals(n))).toList();
+        if (strict.isEmpty()) {
+            notes.put("altSolutionIgnored", "검수자 풀이가 숨은 결함을 고치지 않아 결함을 잡는 테스트에서만 떨어짐(풀이 쪽 문제)");
+            return new ReviewExtra(List.of(), notes);
+        }
+        List<String> names = strict.stream().limit(3).map(t -> t.name() + (t.message() == null ? "" : " (" + t.message() + ")")).toList();
+        String quote = "검수자의 다른 풀이(" + String.join(", ", alt.stream().map(DevDraftDto.FileDraft::path).toList()) + ")가 테스트 " + strict.size() + "개에서 실패: " + String.join("; ", names);
+        return new ReviewExtra(List.of(new com.pair.domain.taskgen.dto.ReviewResultDto.Violation("M2", quote, "hiddenTest",
+                "실패한 숨은 테스트가 특정 구현 구조·내부 API 를 전제하지 않고 자료에 근거한 결과만 단정하게 완화한다(결함을 놓친 풀이는 여전히 실패해야 함)", "BLUEPRINT")), notes);
     }
 }

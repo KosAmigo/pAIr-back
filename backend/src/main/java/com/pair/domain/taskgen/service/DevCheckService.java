@@ -24,15 +24,13 @@ final class DevCheckService {
     static final String HIDDEN_CATCHES = "숨은 테스트가 버그를 잡음"; // E4, M3 (숨은 테스트는 시작 코드에서 실패: 아직 고치지·만들지 않은 부분)
     static final String SOLVED_PASSES = "정답은 전부 통과"; // M1 (정답으로 풀 수 있다)
     static final String TIME = "각 실행 30초 안"; // M2 (맞는 풀이를 시간 초과로 떨어뜨리지 않음)
-    static final String TRAP_WORDS = "함정 핵심어 노출 없음"; // M5
     static final String WRONG_FIXES = "숨은 결함을 놓친 풀이를 숨은 테스트가 걸러냄"; // M3 (옛 이름: 그럴듯한 오답을 숨은 테스트가 걸러냄)
     static final String AMOUNT = "분량 대비 시간"; // Q1 (6장 표)
-    static final String MATERIALS = "과제 종류별 필수 자료"; // M1, E4 (장애 분석 과제의 재현 자료)
     static final String FOLLOW_UP = "후속 질문이 과제에 맞음"; // E5, M5
     static final String ALT_SOLUTIONS = "다른 방식의 올바른 풀이도 통과"; // M2
-    static final String NO_SOLUTION_TEXT = "요구사항·메모에 해법 문장 없음"; // M5, 3장 경계 (요구사항·메모는 줘도 되는 것만)
     static final String JUDGMENT = "판단 지점과 근거가 자료에 있음"; // E2, M4(존재·근거 위치만 자동 확인, 적절성은 검수)
     static final String HIDDEN_FLAW = "숨은 결함을 숨은 테스트가 잡음"; // E3, M3
+    static final String FAKE_IMPL = "추가한 메서드를 상수로 바꾸면 숨은 테스트가 실패함"; // M3: 구현을 검증하는 테스트가 있다
 
     static final long TIME_LIMIT_MS = 30_000;
 
@@ -43,7 +41,6 @@ final class DevCheckService {
     static final Map<Integer, Integer> MIN_CHANGED_LINES = Map.of(20, 2, 40, 6, 60, 12);
 
     private static final int MIN_FOLLOW_UP_TEST_NAME = 4;
-    private static final int MIN_MATERIAL_CHARS = 200;
     private static final Pattern HINT = Pattern.compile(
             "(//|/\\*|\\*).*(버그|bug|TODO|FIXME|함정|일부러|잘못된|문제가 있)", Pattern.CASE_INSENSITIVE);
 
@@ -94,7 +91,6 @@ final class DevCheckService {
                     }
                     return ok("src 주석에 힌트가 없습니다.");
                 }),
-                check(TRAP_WORDS, d -> trapWords(d, form)),
                 check(START_PASSES, d -> {
                     if (!runs.formatOk()) return skipped();
                     RunResult r = runs.start();
@@ -129,15 +125,19 @@ final class DevCheckService {
                     return Math.max(Math.max(a, b), Math.max(c, w)) < TIME_LIMIT_MS ? ok(detail) : fail(detail);
                 }),
                 warn(AMOUNT, d -> amount(d, form == null ? 60 : form.minutes())),
-                check(MATERIALS, DevCheckService::materials),
                 check(FOLLOW_UP, DevCheckService::followUp),
                 // 다른 방식의 올바른 풀이가 없으면 warn(옛 형식 호환), 있는데 떨어지면 fail 이라 결과마다 등급이 다르다
                 checkOwnLevel(ALT_SOLUTIONS, d -> {
                     if (!runs.formatOk()) return skipped();
                     return altSolutions(d, runs);
                 }),
-                warn(NO_SOLUTION_TEXT, DevCheckService::solutionText),
                 checkOwnLevel(JUDGMENT, d -> GenTextService.judgmentPoints(d.judgmentPoints(), visibleCorpus(d), true)),
+                check(FAKE_IMPL, d -> {
+                    if (!runs.formatOk()) return skipped();
+                    List<String> bad = FakeImplService.problems(runner, d);
+                    return bad.isEmpty() ? ok("추가한 메서드를 상수 반환으로 바꾸면 숨은 테스트가 실패합니다(확인할 수 있는 메서드만).")
+                            : fail(String.join(" / ", bad) + ". 그 메서드의 결과가 다른(반대 값) 사례가 설계도에 있어야 합니다.");
+                }),
                 checkOwnLevel(HIDDEN_FLAW, d -> {
                     if (!runs.formatOk()) return skipped();
                     return hiddenFlaws(d, runs);
@@ -182,22 +182,6 @@ final class DevCheckService {
 
     private static String noSpace(String s) {
         return s == null ? "" : s.replaceAll("\\s+", "");
-    }
-
-    /** 요구사항과 접수 메모(NOTES.md·INCIDENT.md)에 해법·계산식을 말로 푼 문장이 있으면 warn */
-    private static GenCheckResultDto solutionText(DevDraftDto d) {
-        List<String> found = new ArrayList<>();
-        for (String req : d.requirements() == null ? List.<String>of() : d.requirements()) {
-            for (String sentence : sentences(req)) if (REQ_HINT.matcher(sentence).find()) found.add("요구사항: " + clip(sentence, 80));
-        }
-        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
-            if (f == null || f.path() == null || f.content() == null) continue;
-            if (!f.path().equals("NOTES.md") && !f.path().equals("INCIDENT.md")) continue;
-            for (String sentence : sentences(f.content())) if (NOTES_HINT.matcher(sentence).find()) found.add(f.path() + ": " + clip(sentence, 80));
-        }
-        if (found.isEmpty()) return ok("요구사항·메모에 해법을 말하는 문장이 없습니다.");
-        return fail("해법이나 계산식을 말로 푼 문장이 있습니다(" + found.size() + "개): " + found.stream().limit(4).map(x -> "'" + x + "'").toList()
-                + ". 요구사항은 입력→기대 출력 예·불변식만, 메모는 현상과 재현 값만 적으세요.");
     }
 
     /** 글을 문장(또는 줄) 단위로 나눈다. 비어 있는 조각은 뺀다 */
@@ -297,40 +281,6 @@ final class DevCheckService {
         return f.path().endsWith(".java") && f.content() != null;
     }
 
-    /** 함정 핵심어가 응시자에게 보이는 곳(설명, 요구사항, 보이는 파일 경로, 보이는 코드 주석, 보이는 메모·로그)에 있으면 실패 */
-    private static GenCheckResultDto trapWords(DevDraftDto d, TaskGenRequest form) {
-        List<String> keywords = GenTextService.clean(d.trapKeywords());
-        if (keywords.size() < 2) return fail("함정 핵심어(trapKeywords)가 2~5개 있어야 합니다 (지금 " + keywords.size() + "개).");
-        List<String> words = new ArrayList<>(keywords);
-        if (form != null) {
-            for (String w : GenTextService.formWords(form.trap(), form.topic())) if (!words.contains(w)) words.add(w);
-        }
-        StringBuilder paths = new StringBuilder();
-        StringBuilder comments = new StringBuilder();
-        StringBuilder extras = new StringBuilder();
-        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
-            if (f == null || f.path() == null) continue;
-            paths.append(f.path()).append('\n');
-            if (isCode(f)) comments.append(GenTextService.comments(f.content()));
-            else if (f.content() != null) extras.append(f.content()).append('\n');
-        }
-        Map<String, List<String>> found = new LinkedHashMap<>();
-        // 보이는 파일 이름을 부른 것은 노출이 아니다. 경로 검사에는 그대로 쓴다
-        List<String> textWords = GenTextService.exceptNames(words, (d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()).stream().map(DevDraftDto.FileDraft::path).toList());
-        found.put("설명", GenTextService.hits(textWords, join(d.description())));
-        found.put("요구사항", GenTextService.hits(textWords, join(d.requirements())));
-        found.put("보이는 파일 경로", GenTextService.hits(words, paths.toString()));
-        found.put("보이는 코드 주석", GenTextService.hits(words, comments.toString()));
-        // 메모·로그는 모델이 직접 정한 핵심어로만 본다(폼에서 뽑은 말은 로그에 자연스럽게 나올 수 있어 과탐이 난다)
-        found.put("메모·로그", GenTextService.hits(keywords, extras.toString()));
-        List<String> parts = new ArrayList<>();
-        found.forEach((where, hit) -> {
-            if (!hit.isEmpty()) parts.add(where + "에 " + hit.stream().map(h -> "'" + h + "'").toList());
-        });
-        return parts.isEmpty() ? ok("함정 핵심어 " + keywords.size() + "개가 응시자에게 보이는 곳에 없습니다.")
-                : fail("응시자에게 보이는 곳에 함정 핵심어가 드러납니다: " + String.join(" / ", parts) + ". 이 말을 쓰지 말고 현상만 설명하세요.");
-    }
-
     /** 오답마다 숨은 테스트가 1개 이상 실패해야 통과 */
     private static GenCheckResultDto wrongFixes(DevDraftDto d, List<DevRunService.WrongRun> runs) {
         List<String> hiddenClasses = new ArrayList<>();
@@ -408,23 +358,6 @@ final class DevCheckService {
             for (String l : s.split("\\R")) if (!l.isBlank()) out.add(l.strip());
         }
         return out;
-    }
-
-    /** 장애 과제는 재현 로그나 접수 메모(공백 뺀 200자 이상)를 응시자 파일로 넣어야 한다 */
-    private static GenCheckResultDto materials(DevDraftDto d) {
-        if (d.category() == null || !d.category().contains("장애")) return ok("장애 과제가 아니라 필수 자료를 따로 확인하지 않습니다.");
-        int chars = 0;
-        int count = 0;
-        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
-            if (f == null || f.path() == null || f.content() == null) continue;
-            if (f.path().startsWith("logs/") || f.path().equals("NOTES.md") || f.path().equals("INCIDENT.md")) {
-                count++;
-                chars += f.content().replaceAll("\\s+", "").length();
-            }
-        }
-        return chars >= MIN_MATERIAL_CHARS ? ok("재현 자료 " + count + "개, 공백 뺀 " + chars + "자")
-                : fail("장애 분석 과제인데 재현 자료가 부족합니다 (logs/ 파일이나 NOTES.md·INCIDENT.md, 공백 뺀 " + MIN_MATERIAL_CHARS
-                        + "자 이상 필요, 지금 " + chars + "자). 재현 로그나 접수 메모를 응시자 파일로 넣으세요.");
     }
 
     /** E5: 3번째 후속 질문(과제 맞춤)이 있어야 하고, 함정 핵심어나 숨은 테스트 이름이 들어 있으면 안 된다 */

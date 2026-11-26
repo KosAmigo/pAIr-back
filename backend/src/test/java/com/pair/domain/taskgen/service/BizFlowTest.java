@@ -88,8 +88,6 @@ class BizFlowTest {
         @Override
         @SuppressWarnings("unchecked")
         public synchronized <T> Output<T> generate(String model, String system, String user, Class<T> type) {
-            if (type == com.pair.domain.taskgen.dto.LeakVerdictDto.class) // M5 답 노출 AI 판정: 위반 없음
-                return new Output<>((T) new com.pair.domain.taskgen.dto.LeakVerdictDto(List.of()), 10, 5);
             if (type == com.pair.domain.taskgen.dto.SoloBizAnswerDto.class) {
                 soloUsers.add(user);
                 Object s = soloScript.poll();
@@ -180,7 +178,7 @@ class BizFlowTest {
 
         assertThat(o.passed()).isTrue();
         assertThat(o.attempts()).isEqualTo(1);
-        assertThat(o.checks()).hasSize(19);
+        assertThat(o.checks()).hasSize(14);
         assertThat(steps).containsExactly("생성 중", "확인 중", "저장 중");
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
 
@@ -242,7 +240,7 @@ class BizFlowTest {
 
         // report.json: 함정, 검사 7개
         var report = json.readTree(writer.report("biz-pass"));
-        assertThat(report.get("checks")).hasSize(19);
+        assertThat(report.get("checks")).hasSize(14);
         assertThat(report.get("details").get("trap").get("evidence").asText()).isEqualTo(BizFixtures.EVIDENCE);
         assertThat(report.get("details").get("solverModel").asText()).isEqualTo("claude-sonnet-5-5");
         assertThat(report.get("form").get("track").asText()).isEqualTo("BIZ");
@@ -409,7 +407,7 @@ class BizFlowTest {
         var j = json.readTree(done);
         assertThat(j.get("status").asText()).as(done).isEqualTo("DONE");
         assertThat(j.get("taskCode").asText()).isEqualTo("biz-api");
-        assertThat(j.get("checks")).hasSize(19);
+        assertThat(j.get("checks")).hasSize(14);
         assertThat(records.findByCode("biz-api").orElseThrow().getTrack()).isEqualTo("BIZ");
         assertThat(pdfFilesOnDisk()).isPositive();
     }

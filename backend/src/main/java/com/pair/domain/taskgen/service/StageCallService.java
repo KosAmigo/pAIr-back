@@ -10,18 +10,26 @@ final class StageCallService {
 
     private final TaskGenAiService ai;
     private final TaskGenProperties props;
+    private final boolean dev;
     private final List<StageUsageDto> usage = new ArrayList<>();
 
-    StageCallService(TaskGenAiService ai, TaskGenProperties props) {
+    /** dev: DEV 직군이면 true, BIZ 면 false (직군마다 단계 모델이 다르다) */
+    StageCallService(TaskGenAiService ai, TaskGenProperties props, boolean dev) {
         this.ai = ai;
         this.props = props;
+        this.dev = dev;
     }
 
     <T> T call(TaskPipelineService.Stage stage, String system, String user, Class<T> type) {
-        TaskGenProperties.Stage cfg = props.stage(stage.name());
+        return call(stage, null, system, user, type);
+    }
+
+    /** label 이 있으면 기록 이름이 "REVIEW:LEAK" 처럼 된다(검수 점검별 토큰) */
+    <T> T call(TaskPipelineService.Stage stage, String label, String system, String user, Class<T> type) {
+        TaskGenProperties.Stage cfg = props.stage(dev, stage.name());
         long started = System.nanoTime();
         TaskGenAiService.Output<T> out = ai.generate(cfg.model(), system, user, type, cfg.maxTokens(), cfg.effort());
-        usage.add(new StageUsageDto(stage.name(), cfg.model(), cfg.effort(), out.inputTokens(), out.outputTokens(),
+        usage.add(new StageUsageDto(label == null ? stage.name() : stage.name() + ":" + label, cfg.model(), cfg.effort(), out.inputTokens(), out.outputTokens(),
                 Math.round((System.nanoTime() - started) / 1e9)));
         return out.value();
     }
@@ -35,6 +43,19 @@ final class StageCallService {
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    /** 지금까지 부른 호출의 비용($) */
+    double cost() {
+        return cost(props, usage);
+    }
+
+    static double cost(TaskGenProperties props, List<StageUsageDto> usage) {
+        return usage.stream().mapToDouble(u -> props.cost(u.model(), u.inputTokens(), u.outputTokens())).sum();
+    }
+
+    void record(StageUsageDto u) {
+        usage.add(u);
     }
 
     List<StageUsageDto> usage() {

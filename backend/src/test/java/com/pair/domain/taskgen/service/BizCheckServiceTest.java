@@ -36,10 +36,10 @@ class BizCheckServiceTest {
     }
 
     @Test
-    @DisplayName("정상 Draft 는 검사 16개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
+    @DisplayName("정상 Draft 는 검사 13개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
     void allPass() {
         var results = run(BizFixtures.good("c"));
-        assertThat(results).hasSize(16).allMatch(GenCheckResultDto::ok, results.toString());
+        assertThat(results).hasSize(13).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
         assertThat(solver.lastPrompt).contains("자료/설문 요약.pdf (2쪽)").contains("34%가 라이트").contains("1) 34%").contains("월,요금제,가입자 수");
         assertThat(solver.calls.get()).isEqualTo(1);
@@ -205,7 +205,7 @@ class BizCheckServiceTest {
         var threeChoices = BizFixtures.single("q", List.of("a", "b", "c"), 1, DOC1 + "|1", DOC2 + "|1");
         assertThat(BizCheckService.formatProblem(edit(d, b -> b.questions(replaceQuestion(d, 0, threeChoices))), pdf)).contains("보기가 4개");
         var noCorrect = BizFixtures.single("q", List.of("a", "b", "c", "d"), 9, DOC1 + "|1", DOC2 + "|1");
-        assertThat(BizCheckService.formatProblem(edit(d, b -> b.questions(replaceQuestion(d, 0, noCorrect))), pdf)).contains("정답 보기가 1개");
+        assertThat(BizCheckService.softProblem(edit(d, b -> b.questions(replaceQuestion(d, 0, noCorrect))))).contains("정답 보기가 1개"); // 형식 검사는 실패시키되 다른 검사를 막지 않는 문제
         assertThat(BizCheckService.formatProblem(edit(d, b -> b.questions(d.questions().subList(0, 3))), pdf)).contains("단답형이 2개");
         BizDraftDto noList = new BizDraftDto(d.title(), d.summary(), d.code(), d.category(), d.description(), d.requirements(),
                 List.of("하나"), d.documents(), d.csvFiles(), d.checklist(), d.trap(), d.questions());
@@ -233,55 +233,6 @@ class BizCheckServiceTest {
     }
 
     @Test
-    @DisplayName("M5: 지표 정의가 값을 합치는 방법(차이, 비율의 금액)을 말하면 '정의·문항에 계산 절차 없음' 만 실패한다")
-    void noProcedure() {
-        BizDraftDto d = BizFixtures.good("c");
-        assertThat(result(d, BizCheckService.NO_PROCEDURE).ok()).isTrue();
-        // 리뷰에서 나온 문장: 가격 효과를 증가율의 차이로 정의함
-        var diff = edit(d, b -> b.description(List.of("가격 효과는 인상 구역 매출 증가율과 비교 구역 매출 증가율의 차이를 뜻하며 자료를 봅니다.")));
-        assertThat(failed(diff)).containsExactly(BizCheckService.NO_PROCEDURE);
-        var share = edit(d, b -> b.requirements(List.of("기준 기간 매출액 중 가격 효과의 비율에 해당하는 금액을 구한다.")));
-        assertThat(failed(share)).containsExactly(BizCheckService.NO_PROCEDURE);
-        // 무엇을 세는지만 쓴 정의는 통과
-        var count = edit(d, b -> b.description(List.of("가격 효과는 가격 인상이 매출에 미친 영향을 가리킵니다.")));
-        assertThat(result(count, BizCheckService.NO_PROCEDURE).ok()).isTrue();
-    }
-
-    @Test
-    @DisplayName("M5: v5 07의 정의 문장(계산 방법)과 차이 문장은 '정의·문항에 계산 절차 없음' 만 실패한다")
-    void noProcedureDefinitionAndDifference() {
-        BizDraftDto d = BizFixtures.good("c");
-        var def = edit(d, b -> b.description(List.of("여기서 전분기 대비 증가율은 직전 분기의 만족도 점유율을 기준으로 본 해당 분기 점유율의 상대적 증가 정도를 뜻한다.")));
-        assertThat(failed(def)).containsExactly(BizCheckService.NO_PROCEDURE);
-        var diff = edit(d, b -> b.description(List.of("점유율과 증가율은 모두 퍼센트로 표현하지만 가리키는 대상은 서로 다르다.")));
-        assertThat(failed(diff)).containsExactly(BizCheckService.NO_PROCEDURE);
-        var diff2 = edit(d, b -> b.requirements(List.of("방문 고객과 등록 고객은 다르다.")));
-        assertThat(failed(diff2)).containsExactly(BizCheckService.NO_PROCEDURE);
-        var cause = edit(d, b -> b.requirements(List.of("원인: 집계 기간이 달랐다.")));
-        assertThat(failed(cause)).containsExactly(BizCheckService.NO_PROCEDURE);
-        var must = edit(d, b -> b.requirements(List.of("반품률은 판매 건수로 가중해서 계산해야 한다.")));
-        assertThat(failed(must)).containsExactly(BizCheckService.NO_PROCEDURE);
-        // 결과물 쓰기 안내와 무엇을 세는지만 쓴 정의는 통과
-        var ok = edit(d, b -> b.requirements(List.of("결론과 근거 3개를 기획안에 담아 제출해야 한다.", "증가율은 분기별 만족도 점유율의 변화를 가리킨다.")));
-        assertThat(result(ok, BizCheckService.NO_PROCEDURE).ok()).isTrue();
-    }
-
-    @Test
-    @DisplayName("M5 오탐 방지(v7 04): 자료 문서 속 판단 지점 근거 사실('~확보해야 한다')은 통과하고, 설명·문항의 지시 말투는 계속 실패한다")
-    void noProcedureFactInDocument() {
-        BizDraftDto d = BizFixtures.good("c");
-        String fact = "일괄 납품은 검수 인력을 하루만 배치하지만 보관 공간을 한 번에 넓게 확보해야 한다.";
-        var docs = new ArrayList<>(d.documents());
-        var first = docs.get(0);
-        var pages = new ArrayList<>(first.pages());
-        pages.set(0, pages.get(0) + "\n" + fact);
-        docs.set(0, new BizDraftDto.DocDraft(first.path(), pages));
-        assertThat(result(edit(d, b -> b.documents(docs)), BizCheckService.NO_PROCEDURE).ok()).isTrue();
-        var must = edit(d, b -> b.requirements(List.of(fact)));
-        assertThat(failed(must)).containsExactly(BizCheckService.NO_PROCEDURE);
-    }
-
-    @Test
     @DisplayName("M4 오탐 방지(v7 06): 근거 한 줄에 선택지 둘의 근거가 함께 있으면 통과하고, 한 선택지의 근거가 없으면 실패한다")
     void judgmentEvidenceOneLine() {
         BizDraftDto d = BizFixtures.good("c");
@@ -297,34 +248,6 @@ class BizCheckServiceTest {
         docs.set(0, new BizDraftDto.DocDraft(f.path(), pg));
         var ok = new DevDraftDto.JudgmentPoint("정할 것", List.of("시범 출시", "전면 출시"), shown, List.of(line));
         assertThat(result(edit(d, b -> b.documents(docs).judgmentPoints(List.of(ok))), BizCheckService.JUDGMENT).ok()).isTrue();
-    }
-
-    @Test
-    @DisplayName("M5: v5 에서 위반 없다고 검수한 과제(01·03·04·05·09)의 응시자 글은 통과한다")
-    void noProcedurePassesCleanV5Tasks() throws Exception {
-        for (String name : List.of("01-monthly-period", "03-score-ledger", "04-option-summary", "05-regional-returns", "09-shipment-review")) {
-            String text;
-            try (var in = getClass().getResourceAsStream("/task-fixtures/m5-clean/" + name + ".txt")) {
-                text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            }
-            var d = edit(BizFixtures.good("c"), b -> b.description(text.lines().filter(l -> !l.isBlank()).toList()));
-            assertThat(result(d, BizCheckService.NO_PROCEDURE).detail()).as(name).startsWith("정의·문항에 값을 합치는");
-        }
-    }
-
-    @Test
-    @DisplayName("M5: 자료 글의 규칙 문장·원인 설명은 '함정 근거가 사실 진술임' warn 으로 알린다")
-    void ruleSentenceWarn() {
-        BizDraftDto d = BizFixtures.good("c");
-        assertThat(result(d, BizCheckService.EVIDENCE_STYLE).ok()).isTrue();
-        var rule = edit(d, b -> b.documents(List.of(new BizDraftDto.DocDraft(DOC1, List.of("이탈 고객 설문 결과입니다. 한 구간의 남는 처리 여력은 다른 구간의 실적으로 잡히지 않는다.",
-                "현재 이용자 설문입니다.\n" + BizFixtures.EVIDENCE)), d.documents().get(1))));
-        var r = result(rule, BizCheckService.EVIDENCE_STYLE);
-        assertThat(r.ok()).isFalse();
-        assertThat(r.level()).isEqualTo(GenCheckResultDto.WARN);
-        assertThat(r.detail()).contains("규칙 문장");
-        var cause = edit(d, b -> b.description(List.of("광고를 보지 않았어도 구매했을 고객이 있어 서로 다른 관측값입니다.")));
-        assertThat(result(cause, BizCheckService.EVIDENCE_STYLE).level()).isEqualTo(GenCheckResultDto.WARN);
     }
 
     @Test
@@ -352,33 +275,6 @@ class BizCheckServiceTest {
         var flaws = List.of(new DevDraftDto.HiddenFlaw("결함", "문서 대조", "Q2, Q3"));
         var lookupSingle = edit(d, b -> b.questions(replaceQuestion(d, 1, copied)).hiddenFlaws(flaws));
         assertThat(result(lookupSingle, BizCheckService.TRAP_QUESTION).detail()).contains("Q2 의 정답 보기가 자료 문장 그대로");
-    }
-
-    @Test
-    @DisplayName("핵심어가 설명·요구사항·자료 파일 이름에 있으면 '함정 핵심어 노출 없음' 만 실패한다 (공백 무시, 자료 본문은 보지 않음)")
-    void trapWordExposed() {
-        BizDraftDto d = BizFixtures.good("c");
-        var hit = edit(d, b -> b.description(List.of("의향  보정 없이 계산하면 틀립니다.")));
-        assertThat(failed(hit)).containsExactly(BizCheckService.TRAP_WORDS);
-        assertThat(result(hit, BizCheckService.TRAP_WORDS).detail()).contains("설명").contains("의향 보정");
-        var inReq = edit(d, b -> b.requirements(List.of("전환율을 반드시 쓴다.")));
-        assertThat(result(inReq, BizCheckService.TRAP_WORDS).detail()).contains("요구사항").contains("전환율");
-        // 자료 본문에 있는 말은 괜찮다 (함정 근거 문장이 거기 있어야 하므로). 설문 요약 문서에 "의향" 이 있어도 통과한다
-        assertThat(failed(d)).isEmpty();
-        assertThat(failed(edit(d, b -> b.trapKeywords(List.of("전환율"))))).containsExactly(BizCheckService.TRAP_WORDS);
-    }
-
-    @Test
-    @DisplayName("설명·요구사항에서 자료의 문서 이름을 언급한 것은 핵심어 노출이 아니다 (06 비교표 오탐), 이름 밖의 핵심어는 그대로 걸린다")
-    void trapWordInDocumentName() {
-        BizDraftDto base = BizFixtures.good("c");
-        var docs = new ArrayList<>(base.documents());
-        docs.set(0, new BizDraftDto.DocDraft(DOC1, List.of("# 시범 비교표\n이탈 고객 설문 결과입니다. 응답자의 38%가 라이트 요금제 이용 의향을 밝혔습니다.")));
-        BizDraftDto d = edit(base, b -> b.documents(docs).trapKeywords(List.of("비교표", "보정")));
-        var named = edit(d, b -> b.description(List.of("구매팀이 작성한 비교표를 살펴봅니다.")));
-        assertThat(result(named, BizCheckService.TRAP_WORDS).ok()).isTrue();
-        var both = edit(d, b -> b.description(List.of("비교표를 보고 보정 없이 계산합니다.")));
-        assertThat(result(both, BizCheckService.TRAP_WORDS).detail()).contains("보정").doesNotContain("비교표");
     }
 
     @Test
@@ -415,20 +311,6 @@ class BizCheckServiceTest {
         assertThat(result(keyword, BizCheckService.FOLLOW_UP).detail()).contains("전환율");
         var same = edit(d, b -> b.followUps(List.of("직접 확인한 것은?", "채택하지 않은 제안은?", "채택하지 않은 제안은?")));
         assertThat(failed(same)).containsExactly(BizCheckService.FOLLOW_UP);
-    }
-
-    @Test
-    @DisplayName("함정 근거가 '~만으로 판단하지 않는다' 같은 지시문이면 경고(warn)만 하고 다시 생성하지는 않는다")
-    void evidenceDirective() {
-        var r = BizCheckService.evidenceStyle(edit(BizFixtures.good("c"), x -> x.trap(new BizDraftDto.Trap("함정",
-                "이 값만으로 하루 인력 충족 여부를 판단하지 않는다."))));
-        assertThat(r.ok()).isFalse();
-        assertThat(r.needsRegeneration()).isFalse();
-        for (String ev : List.of("두 값을 더해서는 안 된다는 점", "혼동하지 말 것")) {
-            assertThat(BizCheckService.evidenceStyle(edit(BizFixtures.good("c"), b -> b.trap(new BizDraftDto.Trap("함정", ev))))
-                    .ok()).isFalse();
-        }
-        assertThat(BizCheckService.evidenceStyle(BizFixtures.good("c")).ok()).isTrue();
     }
 
     @Test

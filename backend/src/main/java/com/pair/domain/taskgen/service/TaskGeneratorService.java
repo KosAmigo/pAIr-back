@@ -1,9 +1,18 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.dto.BlueprintDto;
+import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
+import com.pair.domain.taskgen.dto.ReviewResultDto.Violation;
+import com.pair.domain.taskgen.dto.StageUsageDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
+import com.pair.domain.taskgen.service.TaskPipelineService.Stage;
 import com.pair.global.config.TaskGenProperties;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.function.Consumer;
 
 /**
@@ -95,7 +104,6 @@ public abstract class TaskGeneratorService<D> {
         this.ai = ai;
         this.props = props;
         this.pipeline = pipeline;
-        this.leakJudge = new AnswerLeakJudgeService(ai, props);
     }
 
     private boolean staged() {
@@ -148,9 +156,6 @@ public abstract class TaskGeneratorService<D> {
         }
     }
 
-    /** M5 답 노출 AI 판정 */
-    protected final AnswerLeakJudgeService leakJudge;
-
     /** 판정 결과를 후속 검사 결과 맨 앞에 붙인다 */
     protected static Extra withCheck(GenCheckResultDto first, Extra rest) {
         List<GenCheckResultDto> all = new java.util.ArrayList<>(List.of(first));
@@ -192,53 +197,269 @@ public abstract class TaskGeneratorService<D> {
     /** 한 트랜잭션으로 저장하고 과제 code 를 돌려준다 */
     protected abstract String save(TaskGenRequest form, D draft, GenReport report, long adminId);
 
-    public final Outcome generate(TaskGenRequest form, long adminId, Consumer<String> onStep) {
-        long started = System.nanoTime();
-        String model = props.model();
-        TaskPipelineService.Run<D> run = staged() ? pipeline.start(form) : new OneShotRun(form);
+    // ── 관문 검사(AI) 연결(단계별 생성 전용). 하위 클래스가 Draft 모양에 맞게 채운다 ─────────────────────────────
 
-        List<AttemptLog> attemptLog = new java.util.ArrayList<>();
+    /** 관문 검사 점검 하나의 입력. 이 직군에 안 맞으면 null */
+    protected String checkInput(TaskReviewService.Check check, TaskGenRequest form, BlueprintDto bp, D draft) {
+        return null;
+    }
+
+    /** 관문 검사(답 노출·정답 키·테스트 근거·다른 풀이)를 하는 직군인가. false 면 코드 검사만 한다 */
+    protected boolean reviewable() {
+        return false;
+    }
+
+    protected boolean devTrack() {
+        return false;
+    }
+
+    /** "다른 풀이" 점검: 검수자가 낸 풀이를 숨은 테스트로 실제로 돌려 떨어지면 위반으로 돌려준다(DEV). notes 는 report 용 */
+    protected ReviewExtra altRun(D draft, List<DevDraftDto.FileDraft> alt) {
+        return new ReviewExtra(List.of(), Map.of());
+    }
+
+    protected record ReviewExtra(List<Violation> violations, Map<String, Object> notes) {}
+
+    /** 다시 만들기 예산: 글 문제 2번 + 테스트·정답 문제 2번(종류별로 따로), 설계도부터 새로 1번(비용 상한 안에서만). 최대 5번. 그래도 안 되면 실패 이유와 함께 검수 전(HIDDEN)으로 저장 */
+    static final int MAX_TEXT_REGENS = 2; // 글 문제(답 노출·일관성 등: 작성·문항 글 단계)
+    static final int MAX_TEST_REGENS = 2; // 테스트·정답 문제(실행 검사·정답 키·테스트 근거 등: 정답 쪽·시작 코드 단계)
+    static final String COST_CAP_CHECK = "비용 상한";
+    static final int MAX_RESTARTS = 1;
+    static final String STEP_REVIEW = "관문 검사 중";
+    static final String GATE_SKIPPED = "관문 검사 호출 실패";
+    static final String RESTART_CHECK = "설계도부터 다시 만듦";
+    static final String WARN_CHECK = "일관성·품질 경고";
+
+    private static boolean hasFail(List<GenCheckResultDto> results) {
+        return results.stream().anyMatch(GenCheckResultDto::needsRegeneration);
+    }
+
+    private static String models(List<StageUsageDto> usage, String fallback) {
+        String joined = usage.stream().map(StageUsageDto::model).distinct().collect(Collectors.joining(", "));
+        return joined.isEmpty() ? fallback : joined;
+    }
+
+    /** 관문 1번의 실행 결과 */
+    private record GateRun(TaskReviewService.Gate gate, GenCheckResultDto result, List<Violation> warnings, int dropped, Map<String, Object> notes) {}
+
+    private List<GateRun> runGates(TaskReviewService reviewer, TaskGenRequest form, BlueprintDto bp, D draft) {
+        List<GateRun> out = new ArrayList<>();
+        for (TaskReviewService.Gate g : TaskReviewService.gates(devTrack())) {
+            String input = checkInput(g.check(), form, bp, draft);
+            if (input == null) continue;
+            List<Violation> violations;
+            int dropped = 0;
+            Map<String, Object> notes = Map.of();
+            if (g.check() == TaskReviewService.Check.ALT) {
+                ReviewExtra x = altRun(draft, reviewer.alternative(input));
+                violations = x.violations();
+                notes = x.notes();
+            } else {
+                TaskReviewService.Findings f = reviewer.run(g.check(), g.stage(), input);
+                violations = f.violations();
+                dropped = f.dropped();
+            }
+            GateRun run = new GateRun(g, TaskReviewService.result(g, violations), violations.stream().filter(v -> !v.mustFix()).toList(), dropped, notes);
+            out.add(run);
+            if (!run.result().ok()) break; // 관문 하나가 실패하면 나머지는 돌리지 않는다(다시 만들면 결과가 바뀌므로 비용만 든다)
+        }
+        return out;
+    }
+
+    private static List<Map<String, Object>> gateRecords(List<GateRun> runs) {
+        return runs.stream().map(r -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("gate", r.gate().name());
+            m.put("stage", r.gate().stage().name());
+            m.put("ok", r.result().ok());
+            m.put("detail", r.result().detail());
+            if (r.dropped() > 0) m.put("droppedOutOfScope", r.dropped());
+            if (!r.notes().isEmpty()) m.put("notes", r.notes());
+            return m;
+        }).toList();
+    }
+
+    public final Outcome generate(TaskGenRequest form, long adminId, Consumer<String> onStep) {
+        EXTRA_USAGE.set(new ArrayList<>());
+        try {
+            return generateInner(form, adminId, onStep);
+        } finally {
+            EXTRA_USAGE.remove();
+        }
+    }
+
+    /** 검사 안에서 부른 모델(BIZ 풀이 검사 등)의 토큰을 이 생성 작업의 report 에 남긴다 */
+    protected static void recordUsage(StageUsageDto usage) {
+        List<StageUsageDto> l = EXTRA_USAGE.get();
+        if (l != null) l.add(usage);
+    }
+
+    private static final ThreadLocal<List<StageUsageDto>> EXTRA_USAGE = new ThreadLocal<>();
+
+    /**
+     * 생성 → (코드 검사 → 관문 검사) → 실패하면 실패를 낸 단계만 다시 → 관문 전체를 처음부터 다시. 예산이 다하면 이유와 함께 저장한다.
+     * AI 가 글을 고치지 않는다(설계 2장): 고치는 단계가 없고, 기계적 수정은 조립 코드가 한다
+     */
+    private Outcome generateInner(TaskGenRequest form, long adminId, Consumer<String> onStep) {
+        long started = System.nanoTime();
+        boolean staged = staged();
+        TaskPipelineService.Run<D> run = staged ? pipeline.start(form) : new OneShotRun(form);
+        StageCallService reviewCalls = new StageCallService(ai, props, devTrack());
+        TaskReviewService reviewer = new TaskReviewService(reviewCalls);
+        boolean gated = staged && reviewable();
+
+        List<AttemptLog> attemptLog = new ArrayList<>();
+        List<Map<String, Object>> gateRounds = new ArrayList<>(); // 시도마다 코드 검사 실패와 관문 결과
+        List<Map<String, Object>> regenerations = new ArrayList<>(); // 다시 만든 이력: 어느 단계를 왜
+        String retryError = null;
+        boolean gateSkipped = false;
+        int attempts = 1, stageRegens = 0, textRegens = 0, testRegens = 0, restarts = 0;
+        boolean capStopped = false;
+        String capDetail = "";
+        double cap = props.costCap();
+
         long attemptStarted = System.nanoTime();
         D draft = run.create(onStep); // 첫 생성이 실패하면 예외를 그대로 던지고 저장하지 않는다
-        int attempts = 1;
-        String retryError = null;
+        double createCost = StageCallService.cost(props, run.usage()); // 처음부터 다시 만들 때 드는 비용의 어림값
+        List<GenCheckResultDto> results;
+        List<GateRun> gates;
+        while (true) {
+            double checkStart = spent(run, reviewCalls);
+            onStep.accept(STEP_CHECKING);
+            results = runChecks(form, draft, run);
+            gates = List.of();
+            Map<String, Object> round = new LinkedHashMap<>();
+            round.put("attempt", attempts);
+            round.put("codeChecksFailed", results.stream().filter(GenCheckResultDto::needsRegeneration).map(GenCheckResultDto::name).toList());
+            if (gated && !hasFail(results)) { // 코드 검사를 통과한 뒤에만 AI 관문을 돈다(비용)
+                onStep.accept(STEP_REVIEW);
+                try {
+                    gates = runGates(reviewer, form, run.blueprint(), draft);
+                    round.put("gates", gateRecords(gates));
+                } catch (RuntimeException e) { // 관문 호출이 실패하면 과제를 버리지 않고 경고로 남긴다
+                    retryError = "관문 검사 호출 실패: " + e.getMessage();
+                    gateSkipped = true;
+                    round.put("gates", "호출 실패: " + e.getMessage());
+                }
+            } else if (gated) {
+                round.put("gates", "코드 검사가 실패해 돌리지 않음");
+            }
+            gateRounds.add(round);
+            double checkCost = spent(run, reviewCalls) - checkStart; // 이번 시도의 검사(관문·풀이) 비용: 다시 만들면 한 번 더 든다
+            List<GenCheckResultDto> all = new ArrayList<>(results);
+            gates.forEach(g -> all.add(g.result()));
+            attemptLog.add(attemptLog(attempts, attemptStarted, all));
+            List<GenCheckResultDto> failed = all.stream().filter(GenCheckResultDto::needsRegeneration).toList();
+            if (failed.isEmpty() || gateSkipped) break;
 
-        onStep.accept(STEP_CHECKING);
-        Checked checked = runAll(form, draft, run);
-        List<GenCheckResultDto> results = checked.results();
-        Extra extra = checked.extra();
-        attemptLog.add(attemptLog(1, attemptStarted, results));
-        List<GenCheckResultDto> failed = results.stream().filter(GenCheckResultDto::needsRegeneration).toList();
-
-        if (!failed.isEmpty()) {
+            // 다시 만들 방법: 실패를 낸 단계만(예산 3번), 설계도 문제거나 예산이 다했으면 설계도부터(1번), 그것도 다했으면 저장
+            boolean natural = staged && run.restartsFrom(failed);
+            java.util.Set<String> kinds = staged ? run.kinds(failed) : java.util.Set.of("test");
+            boolean textLeft = textRegens < MAX_TEXT_REGENS, testLeft = testRegens < MAX_TEST_REGENS;
+            boolean byStage = staged && !natural && kinds.stream().allMatch(k -> k.equals("text") ? textLeft : testLeft);
+            if (!byStage && restarts >= MAX_RESTARTS) break;
+            // 비용 상한: 다음 다시 만들기 비용(단계만이면 지금까지 가장 비싼 단계 호출, 처음부터면 첫 생성 비용, 더하기 검사 비용)이 상한을 넘기면 멈춘다
+            double spent = spent(run, reviewCalls);
+            double estimate = (byStage ? run.usage().stream().mapToDouble(u -> props.cost(u.model(), u.inputTokens(), u.outputTokens())).max().orElse(0) : createCost) + checkCost;
+            if (spent + estimate > cap) {
+                capStopped = true;
+                capDetail = String.format(java.util.Locale.ROOT, "지금까지 $%.2f, 다음 다시 만들기 예상 $%.2f → 상한 $%.2f 초과. 마지막 실패: %s", spent, estimate, cap,
+                        failed.stream().map(c -> c.name() + ": " + clip(c.detail())).collect(Collectors.joining(" / ")));
+                break;
+            }
+            boolean restart = !byStage;
+            if (byStage) {
+                stageRegens++;
+                if (kinds.contains("text")) textRegens++;
+                if (kinds.contains("test")) testRegens++;
+            } else restarts++;
+            List<GenCheckResultDto> redoArg = failed;
+            if (restart && staged && !natural) {
+                redoArg = List.of(new GenCheckResultDto(RESTART_CHECK, false, failed.stream().map(c -> c.name() + ": " + c.detail()).collect(Collectors.joining(" / "))));
+            }
             attemptStarted = System.nanoTime();
             try {
-                // 단계별 생성은 실패한 검사를 낸 단계부터, 모르면 설계도부터 1번만 다시 만든다
-                D second = run.redo(failed, onStep);
-                attempts = 2;
-                draft = second;
-                onStep.accept(STEP_CHECKING);
-                checked = runAll(form, draft, run);
-                results = checked.results();
-                extra = checked.extra();
-                attemptLog.add(attemptLog(2, attemptStarted, results));
+                draft = run.redo(redoArg, onStep);
             } catch (RuntimeException e) {
-                // 다시 만들기가 실패해도 이미 만든 첫 결과는 버리지 않고 실패 표시와 함께 저장한다
+                // 다시 만들기가 실패해도 이미 만든 결과는 버리지 않고 실패 표시와 함께 저장한다
                 retryError = String.valueOf(e.getMessage());
-                attemptLog.add(new AttemptLog(2, false, Math.round((System.nanoTime() - attemptStarted) / 1e9),
+                attemptLog.add(new AttemptLog(attempts + 1, false, Math.round((System.nanoTime() - attemptStarted) / 1e9),
                         List.of(new Problem("다시 생성 실패", GenCheckResultDto.FAIL, String.valueOf(e.getMessage())))));
+                break;
             }
+            attempts++;
+            Map<String, Object> regen = new LinkedHashMap<>();
+            regen.put("n", regenerations.size() + 1);
+            regen.put("kind", restart ? "blueprint" : "stages");
+            regen.put("stages", run.redone());
+            regen.put("because", failed.stream().map(c -> Map.of("name", c.name(), "detail", clip(c.detail()))).toList());
+            regenerations.add(regen);
         }
 
-        java.util.Map<String, Object> detail = new java.util.LinkedHashMap<>(details(draft));
-        detail.putAll(extra.details());
-        var usage = run.usage();
-        if (staged()) { // 단계별 토큰·모델·추론 강도(비용 확인용)와 다시 돌린 단계
-            detail.put("stages", usage);
-            if (!run.redone().isEmpty()) detail.put("redoStages", run.redone());
+        // 마지막 Draft 의 결과 정리: 코드 검사 + 관문 + 경고(일관성, Q)
+        List<GenCheckResultDto> finalChecks = new ArrayList<>(results);
+        gates.forEach(g -> finalChecks.add(g.result()));
+        if (capStopped) finalChecks.add(new GenCheckResultDto(COST_CAP_CHECK, false, capDetail));
+        if (gateSkipped) finalChecks.add(new GenCheckResultDto(GATE_SKIPPED, false, "관문 검사를 하지 못했어요(" + retryError + ")", GenCheckResultDto.WARN));
+        Map<String, Object> warnLog = new LinkedHashMap<>();
+        if (gated && !gateSkipped && !hasFail(finalChecks)) {
+            List<Violation> warnings = new ArrayList<>();
+            gates.forEach(g -> warnings.addAll(g.warnings()));
+            try {
+                String input = checkInput(TaskReviewService.Check.CONSISTENCY, form, run.blueprint(), draft);
+                if (input != null) warnings.addAll(reviewer.run(TaskReviewService.Check.CONSISTENCY, Stage.REVIEW, input).violations());
+            } catch (RuntimeException e) {
+                warnLog.put("consistencyError", String.valueOf(e.getMessage()));
+            }
+            for (var v : warnings) {
+                finalChecks.add(new GenCheckResultDto(WARN_CHECK, false, v.item() + " " + v.location() + ": " + clip(v.quote()) + " → " + v.fix(), GenCheckResultDto.WARN));
+            }
+            warnLog.put("count", warnings.size());
         }
-        long in = usage.stream().mapToLong(com.pair.domain.taskgen.dto.StageUsageDto::inputTokens).sum();
-        long out = usage.stream().mapToLong(com.pair.domain.taskgen.dto.StageUsageDto::outputTokens).sum();
+        // 참고 지표(AI 단독 풀이)는 관문을 통과한 뒤 항상 돌린다. 실패한 과제는 건너뛴다고 남긴다
+        Extra extra = afterChecks(form, draft, finalChecks);
+        finalChecks.addAll(extra.checks());
+        results = finalChecks;
+
+        Map<String, Object> detail = new LinkedHashMap<>(details(draft));
+        detail.putAll(extra.details());
+        List<StageUsageDto> usage = new ArrayList<>(run.usage());
+        usage.addAll(reviewCalls.usage());
+        usage.addAll(EXTRA_USAGE.get()); // 검사 안에서 부른 모델(BIZ 풀이 검사 등)
+        Map<String, Object> soloTokens = extra.details().get("soloTokens") instanceof Map<?, ?> m ? castTokens(m) : Map.of();
+        double soloCost = soloTokens.isEmpty() ? 0 : props.cost(props.soloModel() == null || props.soloModel().isBlank() ? "gpt-6-luna" : props.soloModel(),
+                ((Number) soloTokens.get("input")).longValue(), ((Number) soloTokens.get("output")).longValue());
+        if (staged) { // 단계별 모델·토큰·시간(비용 확인용), 관문 결과, 다시 만든 이력
+            detail.put("stages", usage);
+            Map<String, Object> cost = new LinkedHashMap<>(); // 호출 비용 = 토큰 × 가격. byStage 는 단계(점검)별 합계
+            Map<String, Double> byStageCost = new LinkedHashMap<>();
+            for (StageUsageDto u : usage) byStageCost.merge(u.stage(), round4(props.cost(u.model(), u.inputTokens(), u.outputTokens())), Double::sum);
+            if (soloCost > 0) byStageCost.put("SOLO", round4(soloCost));
+            cost.put("totalUsd", round4(StageCallService.cost(props, usage) + soloCost));
+            cost.put("capUsd", cap);
+            cost.put("attempts", attempts);
+            cost.put("stoppedByCap", capStopped);
+            cost.put("byStageUsd", byStageCost);
+            detail.put("cost", cost);
+            if (!run.redone().isEmpty()) detail.put("redoStages", run.redone());
+            Map<String, Object> g = new LinkedHashMap<>();
+            g.put("passed", results.stream().noneMatch(GenCheckResultDto::needsRegeneration));
+            g.put("rounds", gateRounds);
+            g.put("regenerations", regenerations);
+            Map<String, Object> budget = new LinkedHashMap<>(); // 종류별로 쓴 다시 만들기: 글 문제(text), 테스트·정답 문제(test), 설계도부터(restarts)
+            budget.put("textRegens", textRegens);
+            budget.put("maxTextRegens", MAX_TEXT_REGENS);
+            budget.put("testRegens", testRegens);
+            budget.put("maxTestRegens", MAX_TEST_REGENS);
+            budget.put("stageRegens", stageRegens);
+            budget.put("restarts", restarts);
+            budget.put("maxRestarts", MAX_RESTARTS);
+            g.put("budget", budget);
+            g.put("warnings", warnLog);
+            detail.put("gates", g);
+        }
+        long in = usage.stream().mapToLong(StageUsageDto::inputTokens).sum();
+        long out = usage.stream().mapToLong(StageUsageDto::outputTokens).sum();
 
         // warn 검사는 통과 여부에 영향을 주지 않는다(검수자에게 알리기만 한다)
         boolean passed = results.stream().noneMatch(GenCheckResultDto::needsRegeneration);
@@ -247,23 +468,34 @@ public abstract class TaskGeneratorService<D> {
         // 요청에 역량이 있으면 그대로, 비어 있으면 모델이 정한 값(검증해서 잘못된 key 는 버림)을 쓴다. 보고서 form 에도 이 값이 남는다
         TaskGenRequest saved = form.competencies() != null && !form.competencies().isEmpty() ? form
                 : form.withCompetencies(TaskGenRequest.pickCompetencies(draftCompetencies(draft)));
-        String code = save(saved, draft, new GenReport(model, attempts, seconds, in, out, passed, saved, results, retryError, detail, attemptLog), adminId, extra.files());
+        String code = save(saved, draft, new GenReport(models(usage, props.model()), attempts, seconds, in, out, passed, saved, results, retryError, detail, attemptLog), adminId, extra.files());
         return new Outcome(code, passed, attempts, results);
     }
 
-    private record Checked(List<GenCheckResultDto> results, Extra extra) {}
+    /** 지금까지 쓴 비용($): 단계 호출 + 관문 호출 + 검사 안의 풀이 호출 */
+    private double spent(TaskPipelineService.Run<D> run, StageCallService reviewCalls) {
+        return StageCallService.cost(props, run.usage()) + reviewCalls.cost() + StageCallService.cost(props, EXTRA_USAGE.get());
+    }
 
-    /** 기본 검사 + 시도마다 도는 후속 검사(afterChecks). 후속 검사 결과도 results 에 들어간다 */
-    private Checked runAll(TaskGenRequest form, D draft, TaskPipelineService.Run<D> run) {
+    private static double round4(double d) {
+        return Math.round(d * 10000) / 10000.0;
+    }
+
+    private static Map<String, Object> castTokens(Map<?, ?> m) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        m.forEach((k, v) -> out.put(String.valueOf(k), v));
+        return out.get("input") instanceof Number && out.get("output") instanceof Number ? out : Map.of();
+    }
+
+    private static String clip(String s) {
+        return s == null ? "" : s.length() > 80 ? s.substring(0, 80) + "…" : s;
+    }
+
+    /** 실행·계산 검사(+ run 이 있으면 단계 결과를 코드가 확인한 검사). 고친 Draft 는 run 의 단계 상태와 달라 run 검사는 건너뛴다 */
+    private List<GenCheckResultDto> runChecks(TaskGenRequest form, D draft, TaskPipelineService.Run<D> run) {
         List<GenCheckResultDto> results = new java.util.ArrayList<>(runChecks(form, draft));
-        results.addAll(run.checks()); // 단계 결과를 코드가 확인한 검사(설계도 형식, 사실이 글에 들어감, 숫자표 대조)
-        Extra extra = afterChecks(form, draft, results);
-        if (!extra.checks().isEmpty()) {
-            List<GenCheckResultDto> all = new java.util.ArrayList<>(results);
-            all.addAll(extra.checks());
-            results = all;
-        }
-        return new Checked(results, extra);
+        if (run != null) results.addAll(run.checks());
+        return results;
     }
 
     private List<GenCheckResultDto> runChecks(TaskGenRequest form, D draft) {

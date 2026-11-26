@@ -97,19 +97,12 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
     }
 
     /**
-     * 참고 지표(BIZ): 다른 fail 검사가 모두 통과한 Draft 에만 "AI 단독 풀이" 를 1회 돌려 함정 문항을 맞혔는지 기록한다(비용 절약).
+     * 참고 지표(BIZ): 검수까지 통과한 Draft 에 "AI 단독 풀이" 를 1회(항상) 돌려 함정 문항을 맞혔는지 기록한다(비용 절약).
      * 결과는 항상 ok(warn 등급)라 다시 생성을 일으키지 않는다. 호출이 실패해도 warn.
      */
     @Override
     protected Extra afterChecks(TaskGenRequest form, BizDraftDto draft, List<GenCheckResultDto> results) {
-        if (results.stream().anyMatch(GenCheckResultDto::needsRegeneration)) return soloExtra(draft, results);
-        // M5: 다른 검사가 모두 통과한 뒤에만 답 노출 AI 판정을 돌린다. 위반이면 다시 생성하므로 단독 풀이는 건너뛴다
-        List<GenCheckResultDto> judged = leakJudge.judgeAll(AnswerLeakJudgeService.visible(draft), AnswerLeakJudgeService.flaws(draft)); // M5 + M1 숫자 모순
-        if (judged.stream().anyMatch(GenCheckResultDto::needsRegeneration)) return new Extra(judged, Map.of(), Map.of());
-        Extra solo = soloExtra(draft, results);
-        List<GenCheckResultDto> all = new java.util.ArrayList<>(judged);
-        all.addAll(solo.checks());
-        return new Extra(all, solo.details(), solo.files());
+        return soloExtra(draft, results);
     }
 
     private Extra soloExtra(BizDraftDto draft, List<GenCheckResultDto> results) {
@@ -157,7 +150,17 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
 
     @Override
     protected List<GenCheckService<BizDraftDto>> checks(TaskGenRequest form, BizDraftDto draft) {
-        return BizCheckService.forDraft(pdf, solver, props.solverModel(), draft, form.minutes(), form);
+        return BizCheckService.forDraft(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), draft, form.minutes(), form);
+    }
+
+    /** 풀이 검사 호출의 토큰을 report 에 남기도록 감싼다 */
+    TaskGenSolverService countedSolver(java.util.function.Consumer<com.pair.domain.taskgen.dto.StageUsageDto> sink) {
+        return (model, prompt) -> {
+            long t0 = System.nanoTime();
+            TaskGenSolverService.Solved s = solver.solveCounted(model, prompt);
+            sink.accept(new com.pair.domain.taskgen.dto.StageUsageDto("SOLVER", model, props.solverEffort(), s.inputTokens(), s.outputTokens(), Math.round((System.nanoTime() - t0) / 1e9)));
+            return s.text();
+        };
     }
 
     @Override
@@ -193,5 +196,17 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
     @Override
     protected String save(TaskGenRequest form, BizDraftDto draft, GenReport report, long adminId) {
         return writer.saveBiz(form, draft, report, adminId);
+    }
+
+    // ── 관문 검사(AI) 연결 ─────────────────────────────
+
+    @Override
+    protected boolean reviewable() {
+        return true;
+    }
+
+    @Override
+    protected String checkInput(TaskReviewService.Check check, TaskGenRequest form, com.pair.domain.taskgen.dto.BlueprintDto bp, BizDraftDto draft) {
+        return TaskReviewService.bizInput(check, form, bp, draft);
     }
 }

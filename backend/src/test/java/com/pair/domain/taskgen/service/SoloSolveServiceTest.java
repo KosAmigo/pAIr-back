@@ -48,8 +48,6 @@ class SoloSolveServiceTest {
         @Override
         @SuppressWarnings("unchecked")
         public <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
-            if (type == com.pair.domain.taskgen.dto.LeakVerdictDto.class) // M5 답 노출 AI 판정: 위반 없음
-                return new Output<>((T) new com.pair.domain.taskgen.dto.LeakVerdictDto(List.of()), 10, 5);
             models.add(model);
             systems.add(system);
             users.add(user);
@@ -278,10 +276,10 @@ class SoloSolveServiceTest {
         var extra = gen.afterChecks(TaskGenFixtures.form(), draft(), List.of());
 
         assertThat(ai.users).isEmpty();
-        assertThat(extra.checks()).hasSize(3); // 답 노출·숫자 모순 AI 판정 2개 + 건너뜀
-        assertThat(extra.checks().get(2).name()).isEqualTo(SoloSolveService.NAME);
-        assertThat(extra.checks().get(2).ok()).isTrue();
-        assertThat(extra.checks().get(2).detail()).startsWith("건너뜀");
+        assertThat(extra.checks()).hasSize(1); // 건너뜀
+        assertThat(extra.checks().get(0).name()).isEqualTo(SoloSolveService.NAME);
+        assertThat(extra.checks().get(0).ok()).isTrue();
+        assertThat(extra.checks().get(0).detail()).startsWith("건너뜀");
         assertThat(extra.files()).isEmpty();
     }
 

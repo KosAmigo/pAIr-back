@@ -79,8 +79,6 @@ class TaskGenFlowTest {
         @Override
         @SuppressWarnings("unchecked")
         public synchronized <T> Output<T> generate(String model, String system, String user, Class<T> type) {
-            if (type == com.pair.domain.taskgen.dto.LeakVerdictDto.class) // M5 답 노출 AI 판정: 위반 없음
-                return new Output<>((T) new com.pair.domain.taskgen.dto.LeakVerdictDto(List.of()), 10, 5);
             if (type == com.pair.domain.taskgen.dto.SoloAnswerDto.class) {
                 soloUsers.add(user);
                 Object s = soloScript.poll();
@@ -183,10 +181,10 @@ class TaskGenFlowTest {
         assertThat(report.get("inputTokens").asLong()).isEqualTo(1000);
         assertThat(report.get("outputTokens").asLong()).isEqualTo(2000);
         // 15개 + 참고 지표 AI 단독 풀이(준비된 풀이가 없어 호출 실패 → 이 검사만 warn, 생성은 계속)
-        assertThat(report.get("checks")).hasSize(18);
-        assertThat(report.get("checks").get(17).get("name").asText()).isEqualTo(SoloSolveService.NAME);
-        assertThat(report.get("checks").get(16).get("ok").asBoolean()).isTrue();
-        assertThat(report.get("checks").get(17).get("detail").asText()).contains("호출 실패");
+        assertThat(report.get("checks")).hasSize(14);
+        assertThat(report.get("checks").get(13).get("name").asText()).isEqualTo(SoloSolveService.NAME);
+        assertThat(report.get("checks").get(12).get("ok").asBoolean()).isTrue();
+        assertThat(report.get("checks").get(13).get("detail").asText()).contains("호출 실패");
         // E2·E3 보고용 정보가 report.details 에 남는다
         assertThat(report.get("details").get("judgmentPoints").get(0).get("basis").asText()).isEqualTo(TaskGenFixtures.JUDGMENT.basis());
         assertThat(report.get("details").get("hiddenFlaws").get(0).get("caughtBy").asText()).isEqualTo("couponOnce");
@@ -386,16 +384,16 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("fail 검사(핵심어 노출)에 걸리면 이름과 내용을 붙여 1번 다시 만들고, 다시 만든 것이 통과하면 그것을 저장한다")
+    @DisplayName("fail 검사에 걸리면 이름과 내용을 붙여 1번 다시 만들고, 다시 만든 것이 통과하면 그것을 저장한다")
     void failLevelRegenerates() throws Exception {
-        ai.script.add(leaky("flow-leak-1"));
+        ai.script.add(bad("flow-leak-1"));
         ai.script.add(good("flow-leak-2"));
         var o = generate();
 
         assertThat(o.passed()).isTrue();
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(ai.users).hasSize(2);
-        assertThat(ai.users.get(1)).contains(DevCheckService.TRAP_WORDS).contains("'중복 적용'");
+        assertThat(ai.users.get(1)).contains(DevCheckService.SOLVED_PASSES);
         assertThat(records.findByCode("flow-leak-1")).isEmpty();
         assertThat(json.readTree(writer.report("flow-leak-2")).get("checks")).allSatisfy(c -> assertThat(c.get("ok").asBoolean()).isTrue());
     }
@@ -420,7 +418,7 @@ class TaskGenFlowTest {
         for (var c : report.get("checks")) {
             boolean amount = c.get("name").asText().equals(DevCheckService.AMOUNT);
             boolean solo = c.get("name").asText().equals(SoloSolveService.NAME); // 풀이가 준비되지 않아 호출 실패 → ok, warn
-            boolean text = c.get("name").asText().equals(DevCheckService.NO_SOLUTION_TEXT);
+            boolean text = false;
             assertThat(c.get("level").asText()).isEqualTo(amount || solo || text ? "warn" : "fail");
             assertThat(c.get("ok").asBoolean()).isEqualTo(!amount);
             assertThat(c.has("name") && c.has("detail")).isTrue();
@@ -430,13 +428,14 @@ class TaskGenFlowTest {
     @Test
     @DisplayName("fail 과 warn 이 함께 있으면 fail 만 다시 만들 때 프롬프트에 붙고, warn 은 붙지 않는다")
     void retryPromptHasOnlyFail() throws Exception {
-        ai.script.add(TaskGenFixtures.edit(small("flow-mix-1"), b -> b.description(List.of("이중 할인이 원인입니다."))));
+        DevDraftDto mixed = small("flow-mix-1");
+        ai.script.add(TaskGenFixtures.withSolution(mixed, mixed.solution().get(0).content().replace(" // FIXED", ""))); // 정답이 안 풀려 fail + 분량 warn
         ai.script.add(small("flow-mix-2"));
         var o = generate();
 
         assertThat(o.attempts()).isEqualTo(2);
         assertThat(o.passed()).isTrue(); // 두 번째는 warn 만 남음
-        assertThat(ai.users.get(1)).contains(DevCheckService.TRAP_WORDS).doesNotContain(DevCheckService.AMOUNT);
+        assertThat(ai.users.get(1)).contains(DevCheckService.SOLVED_PASSES).doesNotContain(DevCheckService.AMOUNT);
     }
 
     @Test
@@ -545,10 +544,10 @@ class TaskGenFlowTest {
         assertThat(done.get("status").asText()).isEqualTo("DONE");
         assertThat(done.get("taskCode").asText()).isEqualTo("flow-api");
         assertThat(done.get("passed").asBoolean()).isTrue();
-        assertThat(done.get("checks")).hasSize(18);
+        assertThat(done.get("checks")).hasSize(14);
 
         mvc.perform(as(get("/api/admin/tasks/flow-api/gen-report"), "ADMIN")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(18));
+                .andExpect(jsonPath("$.attempts").value(1)).andExpect(jsonPath("$.checks.length()").value(14));
         mvc.perform(as(get("/api/admin/tasks/order-deadlock/gen-report"), "ADMIN")).andExpect(status().isNotFound());
         mvc.perform(as(get("/api/admin/task-gen/no-such-job"), "ADMIN")).andExpect(status().isNotFound());
     }

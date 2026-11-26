@@ -42,15 +42,13 @@ class DevCheckServiceTest {
             f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"), f("NOTES.md", NOTES));
 
     @Test
-    @DisplayName("정상 Draft 는 검사 15개를 모두 통과하고, 같은 실행은 한 번만 돈다 (기본 3번 + 오답 2번 + 다른 풀이 1번)")
+    @DisplayName("정상 Draft 는 검사 13개를 모두 통과하고, 같은 실행은 한 번만 돈다 (기본 3번 + 오답 2번 + 다른 풀이 1번)")
     void allPass() {
         var results = run(TaskGenFixtures.good(), TaskGenFixtures.form());
-        assertThat(results).hasSize(15).allMatch(GenCheckResultDto::ok, results.toString());
+        assertThat(results).hasSize(13).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(results).extracting(GenCheckResultDto::level).containsOnly("fail", "warn");
         assertThat(results).filteredOn(r -> r.name().equals(DevCheckService.AMOUNT)).extracting(GenCheckResultDto::level).containsExactly("warn");
-        assertThat(results).filteredOn(r -> r.name().equals(DevCheckService.NO_SOLUTION_TEXT)).extracting(GenCheckResultDto::level).containsExactly("warn");
-        assertThat(results).filteredOn(r -> !r.name().equals(DevCheckService.AMOUNT) && !r.name().equals(DevCheckService.NO_SOLUTION_TEXT))
-                .extracting(GenCheckResultDto::level).containsOnly("fail");
+        assertThat(results).filteredOn(r -> !r.name().equals(DevCheckService.AMOUNT)).extracting(GenCheckResultDto::level).containsOnly("fail");
         assertThat(runner.calls.get()).isEqualTo(6);
     }
 
@@ -184,51 +182,6 @@ class DevCheckServiceTest {
 
     // ── 1. 함정 핵심어 노출 ─────────────────────
 
-    @Test
-    @DisplayName("핵심어가 설명·요구사항·보이는 파일 경로·코드 주석·메모에 있으면 '함정 핵심어 노출 없음' 만 실패한다 (대소문자·공백 무시)")
-    void trapWordExposed() {
-        var d = TaskGenFixtures.good();
-        var inDescription = edit(d, b -> b.description(List.of("쿠폰 두 장을 쓰면 결제 금액이 이상합니다.", "쿠폰이 중복  적용 되는 문제입니다.")));
-        assertThat(failedNames(inDescription)).containsExactly(DevCheckService.TRAP_WORDS);
-        assertThat(result(inDescription, DevCheckService.TRAP_WORDS, null).detail()).contains("설명").contains("중복 적용");
-
-        var inRequirements = edit(d, b -> b.requirements(List.of("이중할인을 막는다.")));
-        assertThat(result(inRequirements, DevCheckService.TRAP_WORDS, null).detail()).contains("요구사항");
-
-        var inPath = edit(d, b -> b.filesWith(f("logs/이중할인.log", "x")));
-        assertThat(result(inPath, DevCheckService.TRAP_WORDS, null).detail()).contains("보이는 파일 경로");
-
-        var inComment = TaskGenFixtures.withFiles(d, List.of(f("src/shop/Cart.java", CART_START.replace("int sum = 0;", "int sum = 0; // 이중 할인 처리")),
-                f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"), f("NOTES.md", NOTES)));
-        assertThat(result(inComment, DevCheckService.TRAP_WORDS, null).detail()).contains("보이는 코드 주석");
-
-        var inNotes = TaskGenFixtures.withFiles(d, List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("NOTES.md", NOTES + "원인은 이중 할인으로 보임\n")));
-        assertThat(result(inNotes, DevCheckService.TRAP_WORDS, null).detail()).contains("메모·로그");
-
-        // 코드(주석이 아닌 곳)에 있는 말은 보지 않는다
-        var inCode = TaskGenFixtures.withFiles(d, List.of(f("src/shop/Cart.java", CART_START.replace("int sum = 0;", "int 이중할인 = 0; int sum = 0;")),
-                f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"), f("NOTES.md", NOTES)));
-        assertThat(result(inCode, DevCheckService.TRAP_WORDS, null).ok()).isTrue();
-    }
-
-    @Test
-    @DisplayName("핵심어가 2개 미만이면 실패한다. 폼 함정 문장의 3글자 이상 말도 함께 본다 (2글자 이하·주제 말은 뺌)")
-    void trapWordsFromForm() {
-        var d = TaskGenFixtures.good();
-        assertThat(failedNames(edit(d, b -> b.trapKeywords(List.of("중복 적용"))))).containsExactly(DevCheckService.TRAP_WORDS);
-        assertThat(failedNames(edit(d, b -> b.trapKeywords(null)))).containsExactly(DevCheckService.TRAP_WORDS);
-
-        assertThat(GenTextService.formWords("하루를 항상 24시간으로 계산", "일별 이용량 집계")).containsExactly("24시간");
-        assertThat(GenTextService.formWords("쿠폰 두 장을 겹치면 할인이 중복 적용", "쿠폰 할인 계산")).containsExactly("겹치면");
-
-        // 폼 문장에서 뽑은 '겹치면' 이 설명에 있으면 모델이 정한 핵심어가 아니어도 걸린다
-        var form = TaskGenFixtures.form();
-        var leaked = edit(d, b -> b.description(List.of("쿠폰을 겹치면 금액이 이상합니다.")));
-        assertThat(result(leaked, DevCheckService.TRAP_WORDS, form).ok()).isFalse();
-        assertThat(result(leaked, DevCheckService.TRAP_WORDS, null).ok()).isTrue();
-    }
-
     // ── 2. 그럴듯한 오답 ─────────────────────
 
     @Test
@@ -298,32 +251,6 @@ class DevCheckServiceTest {
 
     // ── 4. 과제 종류별 필수 자료 ─────────────────────
 
-    @Test
-    @DisplayName("'장애' 과제에 로그·접수 메모가 없거나 200자 미만이면 '과제 종류별 필수 자료' 만 실패한다")
-    void incidentNeedsMaterials() {
-        var onlyCode = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n")));
-        assertThat(failedNames(onlyCode)).containsExactly(DevCheckService.MATERIALS);
-        assertThat(result(onlyCode, DevCheckService.MATERIALS, null).detail()).contains("재현 로그나 접수 메모");
-
-        var tooShort = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("NOTES.md", "# 메모\n쿠폰 두 장에서 금액이 이상함\n")));
-        assertThat(failedNames(tooShort)).containsExactly(DevCheckService.MATERIALS);
-
-        // logs/ 아래 파일이면 이름은 상관없고, 여러 파일의 글자 수를 합친다
-        String line = "2026-11-20 10:01:02 WARN order=1042 coupons=2 total=3100 expected=6200 result=MISMATCH\n";
-        var logs = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("logs/order.log", line + line), f("logs/payment.log", line)));
-        assertThat(result(logs, DevCheckService.MATERIALS, null).ok()).isTrue();
-
-        var incidentMd = TaskGenFixtures.withFiles(TaskGenFixtures.good(), List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("INCIDENT.md", NOTES)));
-        assertThat(result(incidentMd, DevCheckService.MATERIALS, null).ok()).isTrue();
-
-        // 장애가 아닌 과제는 자료가 없어도 된다
-        var feature = edit(onlyCode, b -> b.category("기능 구현"));
-        assertThat(failedNames(feature)).isEmpty();
-    }
-
     // ── 5. 후속 질문 ─────────────────────
 
     private static DevDraftDto.AltSolution alt(String note, String cart) {
@@ -387,25 +314,6 @@ class DevCheckServiceTest {
                 alt("3(돌리지 않음)", CART_SOLVED.replace(" // FIXED", "")))));
         assertThat(failedNames(many)).isEmpty();
         assertThat(runner.calls.get()).isEqualTo(7); // 기본 3 + 오답 2 + 다른 풀이 2
-    }
-
-    @Test
-    @DisplayName("요구사항·NOTES 의 해법 문장은 warn: 계산식을 말로 쓰거나 '~해야 합니다/~하도록 고치면' 이 있으면 걸리고, 현상·불변식 문장은 안 걸린다")
-    void solutionTextWarn() {
-        var good = TaskGenFixtures.good();
-        assertThat(result(good, DevCheckService.NO_SOLUTION_TEXT, null).ok()).isTrue();
-
-        var req = edit(good, b -> b.requirements(List.of("결제액 1원당 100분의 1점을 주고 가장 큰 정수로 맞춘다.", "승인된 주문 수는 재고를 넘지 않는다.")));
-        var rr = result(req, DevCheckService.NO_SOLUTION_TEXT, null);
-        assertThat(rr.ok()).isFalse();
-        assertThat(rr.level()).isEqualTo("warn");
-        assertThat(rr.needsRegeneration()).isFalse();
-        assertThat(rr.detail()).contains("요구사항: 결제액 1원당").doesNotContain("승인된 주문 수는");
-
-        var notes = edit(good, b -> b.files(List.of(f("src/shop/Cart.java", CART_START), f("test/shop/CartTest.java", "package shop;\nclass CartTest {}\n"),
-                f("NOTES.md", NOTES + "재고 확인과 차감은 한 번에 확정해야 합니다.\n"))));
-        assertThat(result(notes, DevCheckService.NO_SOLUTION_TEXT, null).detail()).contains("NOTES.md: 재고 확인과 차감은 한 번에 확정해야 합니다");
-        assertThat(result(notes, DevCheckService.NO_SOLUTION_TEXT, null).needsRegeneration()).isFalse();
     }
 
     @Test

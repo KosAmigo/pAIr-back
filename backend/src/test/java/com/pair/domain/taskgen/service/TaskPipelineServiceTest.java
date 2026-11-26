@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.pair.domain.taskgen.dto.BizAnswerDto;
 import com.pair.domain.taskgen.dto.BizDraftDto;
+import com.pair.domain.taskgen.dto.BizQuestionsDto;
 import com.pair.domain.taskgen.dto.BizWritingDto;
 import com.pair.domain.taskgen.dto.BlueprintDto;
 import com.pair.domain.taskgen.dto.DevAnswerDto;
@@ -31,6 +32,8 @@ class TaskPipelineServiceTest {
         final Map<Class<?>, Deque<Object>> script = new HashMap<>();
         final List<Class<?>> order = new ArrayList<>();
         final List<String> users = new ArrayList<>();
+        final List<String> systems = new ArrayList<>();
+        final List<String> models = new ArrayList<>();
         final List<String> efforts = new ArrayList<>();
 
         <T> StageAi add(Class<T> type, T value) {
@@ -47,8 +50,15 @@ class TaskPipelineServiceTest {
         @Override
         @SuppressWarnings("unchecked")
         public <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
+            if (type == com.pair.domain.taskgen.dto.ReviewResultDto.class && !script.containsKey(type)) { // 설계도 직후의 싼 점검: 안 정해 두면 위반 없음, 단계 호출 순서에는 넣지 않는다
+                @SuppressWarnings("unchecked")
+                Output<T> clean = new Output<>((T) new com.pair.domain.taskgen.dto.ReviewResultDto(List.of()), 10, 10);
+                return clean;
+            }
             order.add(type);
             users.add(user);
+            systems.add(system);
+            models.add(model);
             efforts.add(effort);
             Deque<Object> q = script.get(type);
             Object v = q.size() > 1 ? q.poll() : q.peek(); // 마지막 값은 계속 쓴다
@@ -76,12 +86,13 @@ class TaskPipelineServiceTest {
                 List.of(new BlueprintDto.Flaw("할인을 double 로 누적해 소수 합계가 어긋난다", "PaymentDiscount.addDiscount", F_DIGITS, "totalsExactly")),
                 List.of(new BlueprintDto.Judgment("할인이 원금보다 클 때 결제액을 어떻게 보일 것인가", F_SETTLE,
                         List.of(new BlueprintDto.Option("0으로 보인다", F_SETTLE), new BlueprintDto.Option("음수로 보인다", F_REPORT)))),
-                List.of("double", "부동소수점"), null, List.of(), List.of(), List.of(), List.of());
+                List.of("double", "부동소수점"), null, List.of(), List.of(), List.of(), List.of(),
+                List.of(new BlueprintDto.Case("totalsExactly", "할인 0.10, 0.20을 등록한 뒤 합계", "0.30", F_DIGITS)));
     }
 
     static DevWritingDto devWriting() {
         return new DevWritingDto(List.of("결제 화면 코드에 결제액 조회를 추가하세요. " + F_DIGITS, F_SETTLE + " " + F_REPORT + " 어느 쪽으로 정할지 설명하세요."),
-                List.of(EX1_IN + " → 3.50", EX2_IN + " → 0.30"), "");
+                List.of(EX1_IN + " → 3.50", EX2_IN + " → 0.30"), "", "AI 수정이 다른 입력에서도 맞는지 어떻게 확인했나요?");
     }
 
     static DevCodeDto devCode() {
@@ -91,8 +102,8 @@ class TaskPipelineServiceTest {
 
     static DevAnswerDto devAnswer() {
         var sol = List.of(new DevDraftDto.FileDraft("src/shop/PaymentDiscount.java", "package shop;\npublic class PaymentDiscount { int x; }\n"));
-        return new DevAnswerDto("# 정답", List.of(new DevDraftDto.FileDraft("test/shop/PaymentDiscountHiddenTest.java", "package shop;\nclass H {}\n")), sol,
-                List.of(new DevDraftDto.AltSolution("다른 구조", sol)), List.of(new DevDraftDto.WrongFix("double 누적", sol), new DevDraftDto.WrongFix("반올림", sol)), "AI 수정이 다른 입력에서도 맞는지 어떻게 확인했나요?");
+        return new DevAnswerDto("# 정답", List.of(new DevDraftDto.FileDraft("test/shop/PaymentDiscountHiddenTest.java", "package shop;\nclass H {\n    @Test\n    void totalsExactly() {}\n}\n")), sol,
+                List.of(new DevDraftDto.AltSolution("다른 구조", sol)), List.of(new DevDraftDto.WrongFix("double 누적", sol), new DevDraftDto.WrongFix("반올림", sol)));
     }
 
     private static StageAi devAi() {
@@ -118,9 +129,9 @@ class TaskPipelineServiceTest {
         run.create(s -> {});
 
         assertThat(ai.order).containsExactly(BlueprintDto.class, DevWritingDto.class, DevCodeDto.class, DevAnswerDto.class);
-        assertThat(ai.efforts).containsExactly("high", "medium", "medium", "medium");
-        assertThat(run.usage()).extracting("stage").containsExactly("BLUEPRINT", "WRITING", "CODE", "ANSWER");
-        assertThat(run.usage()).allSatisfy(u -> {
+        assertThat(ai.efforts).containsExactly("medium", "medium", "medium", "medium");
+        assertThat(run.usage()).extracting("stage").containsExactly("BLUEPRINT", "REVIEW:BLUEPRINT", "WRITING", "CODE", "ANSWER"); // 설계도 직후 글 문장 점검 1번
+        assertThat(run.usage()).filteredOn(u -> !u.stage().equals("REVIEW:BLUEPRINT")).allSatisfy(u -> {
             assertThat(u.inputTokens()).isEqualTo(100);
             assertThat(u.outputTokens()).isEqualTo(200);
         });
@@ -199,11 +210,11 @@ class TaskPipelineServiceTest {
         var run = devRun(ai);
         run.create(s -> {});
         String leaked = F_SETTLE;
-        run.redo(List.of(fail(DevCheckService.TRAP_WORDS, "응시자에게 보이는 곳에 함정 핵심어가 드러납니다: 설명에 ['double'] 그리고 '" + leaked + "'")), s -> {});
+        run.redo(List.of(fail(TaskPipelineService.FACTS_CHECK, "글에 그대로 들어가지 않은 사실: ['double' 원인] 그리고 '" + leaked + "'")), s -> {});
 
         String second = ai.users.get(4); // 설계도, 작성, 코드, 정답, 다시 작성 순서
         assertThat(ai.order.get(4)).isEqualTo(DevWritingDto.class);
-        assertThat(second).contains("사실 목록에 없는 말로 원인이나 결함을 짚지 않는다").contains("고칠 문장: " + F_SETTLE.substring(0, 5));
+        assertThat(second).contains("사실 목록의 문장과 예를 하나도 빼지 말고 그대로 넣는다").contains("고칠 문장: " + F_SETTLE.substring(0, 5));
         assertThat(second).doesNotContain("double", "부동소수점");
     }
 
@@ -225,7 +236,7 @@ class TaskPipelineServiceTest {
     }
 
     @Test
-    @DisplayName("다시 돌리기: 숨은 테스트 검사 실패는 정답 쪽만, 글 검사 실패는 작성과 정답 쪽")
+    @DisplayName("다시 돌리기: 숨은 테스트 검사 실패는 정답 쪽만, 글 검사 실패는 작성만")
     void redoFromAnswerOrWriting() {
         StageAi ai = devAi();
         var run = devRun(ai);
@@ -238,7 +249,7 @@ class TaskPipelineServiceTest {
         ai.order.clear();
         ai.users.clear();
         run.redo(List.of(fail(TaskPipelineService.FACTS_CHECK, "빠진 사실")), s -> {});
-        assertThat(ai.order).containsExactly(DevWritingDto.class, DevAnswerDto.class);
+        assertThat(ai.order).containsExactly(DevWritingDto.class); // 글만 바뀌면 정답 쪽은 그대로(시작 코드가 바뀔 때만 정답 쪽도 다시)
     }
 
     @Test
@@ -302,17 +313,31 @@ class TaskPipelineServiceTest {
                 List.of(new BlueprintDto.Table("자료/캠페인 실적.csv", List.of("캠페인", "월", "방문자 수", "전환 건수"), List.of(List.of("새봄", "4월", "10000", "400"), List.of("새봄", "6월", "10000", "500")))),
                 List.of(new BlueprintDto.Figure("통과선", "22", null, List.of()), new BlueprintDto.Figure("운영팀 기록", "1", null, List.of()), new BlueprintDto.Figure("상담 여력", "1050", null, List.of())),
                 List.of(new BlueprintDto.Doc("자료/검토 안내.pdf", "검토 안내"), new BlueprintDto.Doc("자료/운영 메모.pdf", "운영 메모")),
-                List.of("Q1 객관식 결론", "Q2 단답형 변화율", "Q3 객관식 여력"));
+                List.of("Q1 객관식 결론", "Q2 단답형 변화율", "Q3 객관식 여력"),
+                List.of(new BlueprintDto.Case("Q1", "새봄·여름 결론", "새봄만 후보", BIZ_F1, "배정 후보 결론", List.of("새봄만 후보", "여름만 후보", "둘 다 후보", "둘 다 보류"), false),
+                new BlueprintDto.Case("Q2", "새봄 변화율", "25", BIZ_F2, "새봄 4월 대비 6월 심사 변화율(퍼센트)", List.of(), false),
+                new BlueprintDto.Case("Q3", "6월 여력", "부족", BIZ_F3, "6월 상담 여력의 충분 여부", List.of("부족", "충분", "같음"), false)));
     }
 
     static BizWritingDto bizWriting(String extra) {
         return new BizWritingDto(List.of("캠페인 예산을 검토해 1페이지 기획안을 쓰세요."), List.of("결론과 근거를 담으세요."),
                 List.of(new BizDraftDto.DocDraft("자료/검토 안내.pdf", List.of("검토 안내\n" + BIZ_F1 + " 비교 기간은 4월과 6월이다." + extra)),
-                        new BizDraftDto.DocDraft("자료/운영 메모.pdf", List.of("운영 메모\n" + BIZ_F2 + " " + BIZ_F3))));
+                        new BizDraftDto.DocDraft("자료/운영 메모.pdf", List.of("운영 메모\n" + BIZ_F2 + " " + BIZ_F3))),
+                "AI 가 계산한 값을 어느 칸과 맞춰 봤나요?");
+    }
+
+    static BizQuestionsDto bizQuestions() {
+        return new BizQuestionsDto(List.of(
+                new BizQuestionsDto.Question("Q1", "Q1. 배정 후보는?", List.of("새봄만 후보", "여름만 후보", "둘 다 후보", "둘 다 보류")),
+                new BizQuestionsDto.Question("Q2", "Q2. 새봄의 4월 대비 6월 심사 변화율은? (퍼센트, 정수)", List.of()),
+                new BizQuestionsDto.Question("Q3", "Q3. 6월 상담 여력은?", List.of("부족", "충분", "같음"))));
     }
 
     static BizAnswerDto bizAnswer() {
-        return new BizAnswerDto("## 필수 항목\n1. 결론", List.of(new BizDraftDto.QuestionDraft(BizDraftDto.Type.SHORT, "Q2. 변화율은?", List.of(), List.of("25"), "1", List.of())), "AI 가 계산한 값을 어느 칸과 맞춰 봤나요?");
+        return new BizAnswerDto("## 필수 항목\n1. 결론", List.of(
+                new BizAnswerDto.Key("Q1", List.of(), "", List.of(), List.of()),
+                new BizAnswerDto.Key("Q2", List.of("25%"), "1", List.of(), List.of()),
+                new BizAnswerDto.Key("Q3", List.of(), "", List.of(), List.of())));
     }
 
     private static TaskPipelineService.Run<BizDraftDto> bizRun(StageAi ai) {
@@ -320,13 +345,13 @@ class TaskPipelineServiceTest {
     }
 
     @Test
-    @DisplayName("BIZ: 설계도 → 작성 → 정답 쪽 순서(시작 코드 단계 없음). CSV 는 숫자표에서 만들고 followUps 는 3개, 숫자 대조가 통과한다")
+    @DisplayName("BIZ: 설계도 → 작성 → 문항 글 → 정답 쪽 순서(시작 코드 단계 없음). CSV 는 숫자표에서 만들고 followUps 는 3개, 숫자 대조가 통과한다")
     void bizStagesAndAssembly() {
-        StageAi ai = new StageAi().add(BlueprintDto.class, bizBlueprint()).add(BizWritingDto.class, bizWriting("")).add(BizAnswerDto.class, bizAnswer());
+        StageAi ai = new StageAi().add(BlueprintDto.class, bizBlueprint()).add(BizWritingDto.class, bizWriting("")).add(BizQuestionsDto.class, bizQuestions()).add(BizAnswerDto.class, bizAnswer());
         var run = bizRun(ai);
         BizDraftDto d = run.create(s -> {});
 
-        assertThat(ai.order).containsExactly(BlueprintDto.class, BizWritingDto.class, BizAnswerDto.class);
+        assertThat(ai.order).containsExactly(BlueprintDto.class, BizWritingDto.class, BizQuestionsDto.class, BizAnswerDto.class);
         assertThat(d.csvFiles().get(0).path()).isEqualTo("자료/캠페인 실적.csv");
         assertThat(d.csvFiles().get(0).content()).isEqualTo("캠페인,월,방문자 수,전환 건수\n새봄,4월,10000,400\n새봄,6월,10000,500\n");
         assertThat(d.followUps()).hasSize(3);
@@ -335,7 +360,7 @@ class TaskPipelineServiceTest {
         assertThat(d.trap().wrongConclusion()).isEqualTo("모두 보류한다.");
         assertThat(d.hiddenFlaws().get(0).caughtBy()).isEqualTo("Q2");
         assertThat(run.checks()).extracting(GenCheckResultDto::ok).containsOnly(true);
-        assertThat(ai.users.get(2)).contains("campaign-review").contains("새봄,4월,10000,400").doesNotContain("\"facts\":[{");
+        assertThat(ai.users.get(3)).contains("campaign-review").contains("새봄,4월,10000,400").doesNotContain("\"facts\":[{");
     }
 
     @Test
@@ -343,7 +368,7 @@ class TaskPipelineServiceTest {
     void bizDocumentNumbers() {
         BlueprintDto b = bizBlueprint();
         assertThat(BizNumbersService.documentsCheck(b, bizWriting("").documents()).ok()).isTrue();
-        var bad = BizNumbersService.documentsCheck(b, bizWriting(" 응답자는 37명이었다.").documents());
+        var bad = BizNumbersService.documentsCheck(b, bizWriting(" 응답자는 37건이었다.").documents());
         assertThat(bad.ok()).isFalse();
         assertThat(bad.detail()).contains("37");
         assertThat(BizNumbersService.documentsCheck(b, bizWriting(" 1,050건과 같다.").documents()).ok()).isTrue(); // 쉼표 표기도 같은 수
@@ -360,27 +385,32 @@ class TaskPipelineServiceTest {
         figs.add(new BlueprintDto.Figure("완료", "600", "신청 전체", List.of()));
         figs.add(new BlueprintDto.Figure("합계", "1000", null, List.of("신청 전체", "완료")));
         BlueprintDto bad = new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(),
-                List.of(new BlueprintDto.Fact("조사 응답은 37명이었다.", "자료/검토 안내.pdf")), b.examples(), b.flaws(), b.judgments(), b.trapKeywords(), b.conclusion(),
+                List.of(new BlueprintDto.Fact("조사 응답은 37건이었다.", "자료/검토 안내.pdf")), b.examples(), b.flaws(), b.judgments(), b.trapKeywords(), b.conclusion(),
                 b.tables(), figs, b.docs(), b.questionPlan());
         assertThat(BizNumbersService.blueprintProblems(bad)).anyMatch(p -> p.contains("부분이 전체보다 큽니다"))
                 .anyMatch(p -> p.contains("합계가 맞지 않습니다")).anyMatch(p -> p.contains("37"));
     }
 
     @Test
-    @DisplayName("BIZ 다시 돌리기: 숫자 대조 실패는 작성과 정답 쪽만, 결론이 같은 함정(CONCLUSION)은 설계도부터")
+    @DisplayName("BIZ 다시 돌리기: 숫자 대조 실패는 작성과 정답 쪽, 문항 글 실패는 문항 글만, 결론이 같은 함정(CONCLUSION)은 설계도부터")
     void bizRedoRouting() {
-        StageAi ai = new StageAi().add(BlueprintDto.class, bizBlueprint()).add(BizWritingDto.class, bizWriting("")).add(BizAnswerDto.class, bizAnswer());
+        StageAi ai = new StageAi().add(BlueprintDto.class, bizBlueprint()).add(BizWritingDto.class, bizWriting("")).add(BizQuestionsDto.class, bizQuestions()).add(BizAnswerDto.class, bizAnswer());
         var run = bizRun(ai);
         run.create(s -> {});
         ai.order.clear();
         ai.users.clear();
         run.redo(List.of(fail(BizNumbersService.NAME, "숫자 37")), s -> {});
-        assertThat(ai.order).containsExactly(BizWritingDto.class, BizAnswerDto.class);
+        assertThat(ai.order).containsExactly(BizWritingDto.class, BizAnswerDto.class); // 자료가 바뀌면 쪽 번호 근거가 바뀌므로 정답 쪽도
+
+        ai.order.clear();
+        ai.users.clear();
+        run.redo(List.of(fail(BizQuestionService.CHECK, "보기가 다름")), s -> {});
+        assertThat(ai.order).containsExactly(BizQuestionsDto.class); // 문항 글만
 
         ai.order.clear();
         ai.users.clear();
         run.redo(List.of(fail(BizCheckService.CONCLUSION, "결론이 같음")), s -> {});
-        assertThat(ai.order).containsExactly(BlueprintDto.class, BizWritingDto.class, BizAnswerDto.class);
+        assertThat(ai.order).containsExactly(BlueprintDto.class, BizWritingDto.class, BizQuestionsDto.class, BizAnswerDto.class);
     }
 
     @Test
@@ -398,7 +428,7 @@ class TaskPipelineServiceTest {
         // 같은 경로의 문서를 두 번 쓴 작성 결과도 한 번만 남는다
         var doc = bizWriting("").documents().get(0);
         BizWritingDto writing = new BizWritingDto(List.of("설명"), List.of("요구"), List.of(doc, doc, bizWriting("").documents().get(1)));
-        StageAi ai = new StageAi().add(BlueprintDto.class, twice).add(BizWritingDto.class, writing).add(BizAnswerDto.class, bizAnswer());
+        StageAi ai = new StageAi().add(BlueprintDto.class, twice).add(BizWritingDto.class, writing).add(BizQuestionsDto.class, bizQuestions()).add(BizAnswerDto.class, bizAnswer());
         BizDraftDto d = bizRun(ai).create(s -> {});
         List<String> paths = new ArrayList<>(d.csvFiles().stream().map(DevDraftDto.FileDraft::path).toList());
         d.documents().forEach(x -> paths.add(x.path()));
@@ -445,12 +475,12 @@ class TaskPipelineServiceTest {
                 new DevCodeDto(List.of(src, pub, hid)), // 숨은 테스트를 시작 코드 단계가 만듦(공개 쪽에 들어옴)
                 devCode());
         List<DevAnswerDto> answers = List.of(devAnswer(),
-                new DevAnswerDto("a", List.of(hid, hid), sol, base.altSolutions(), base.wrongFixes(), "q"),
-                new DevAnswerDto("a", List.of(hid, pub), sol, base.altSolutions(), base.wrongFixes(), "q"), // 숨은 테스트가 공개 테스트와 같은 경로
-                new DevAnswerDto("a", List.of(hid), List.of(src, src), base.altSolutions(), base.wrongFixes(), "q"),
-                new DevAnswerDto("a", List.of(hid), sol, List.of(new DevDraftDto.AltSolution("n", List.of(src, src))), base.wrongFixes(), "q"),
-                new DevAnswerDto("a", List.of(hid), sol, base.altSolutions(), List.of(new DevDraftDto.WrongFix("r", List.of(src, src))), "q"),
-                new DevAnswerDto("a", List.of(hid, f("src/shop/Other.java")), List.of(src, pub), base.altSolutions(), base.wrongFixes(), "q")); // 정답에 테스트 파일
+                new DevAnswerDto("a", List.of(hid, hid), sol, base.altSolutions(), base.wrongFixes()),
+                new DevAnswerDto("a", List.of(hid, pub), sol, base.altSolutions(), base.wrongFixes()), // 숨은 테스트가 공개 테스트와 같은 경로
+                new DevAnswerDto("a", List.of(hid), List.of(src, src), base.altSolutions(), base.wrongFixes()),
+                new DevAnswerDto("a", List.of(hid), sol, List.of(new DevDraftDto.AltSolution("n", List.of(src, src))), base.wrongFixes()),
+                new DevAnswerDto("a", List.of(hid), sol, base.altSolutions(), List.of(new DevDraftDto.WrongFix("r", List.of(src, src)))),
+                new DevAnswerDto("a", List.of(hid, f("src/shop/Other.java")), List.of(src, pub), base.altSolutions(), base.wrongFixes())); // 정답에 테스트 파일
         var withNotes = new DevWritingDto(devWriting().description(), devWriting().requirements(), "접수 메모");
         int combos = 0;
         for (DevCodeDto c : codes) for (DevAnswerDto a : answers) for (DevWritingDto w : List.of(devWriting(), withNotes)) {
@@ -459,31 +489,6 @@ class TaskPipelineServiceTest {
             assertThat(savedPaths(d)).as("조합 %d", combos).doesNotHaveDuplicates();
         }
         assertThat(combos).isEqualTo(56);
-        // 안전장치: 겹침이 있으면 말해 주고, 없으면 비어 있다
-        assertThat(TaskAssemblyService.devPathProblems(devCode(), devAnswer())).isEmpty();
-        assertThat(TaskAssemblyService.devPathProblems(codes.get(1), devAnswer())).anyMatch(p -> p.contains("src/shop/PaymentDiscount.java (시작 코드)"));
-        assertThat(TaskAssemblyService.devPathProblems(devCode(), answers.get(1))).anyMatch(p -> p.contains("(숨은 테스트)"));
-        assertThat(TaskAssemblyService.devPathProblems(devCode(), answers.get(3))).anyMatch(p -> p.contains("(정답)"));
-        assertThat(TaskAssemblyService.devPathProblems(devCode(), answers.get(4))).anyMatch(p -> p.contains("(다른 풀이 1)"));
-        assertThat(TaskAssemblyService.devPathProblems(devCode(), answers.get(5))).anyMatch(p -> p.contains("(오답 1)"));
-    }
-
-    @Test
-    @DisplayName("DEV 경로 안전장치: 겹친 결과는 '파일 경로 중복 없음' fail 로 알리고 다시 돌릴 단계를 고른다(시작 코드 → 코드, 그 밖 → 정답 쪽). 저장되는 Draft 에는 겹침이 없다")
-    void devPathCheckFailsAndRoutes() {
-        DevAnswerDto dupHidden = new DevAnswerDto("a", List.of(f("test/shop/A.java"), f("test/shop/A.java")), devAnswer().solution(), devAnswer().altSolutions(), devAnswer().wrongFixes(), "q");
-        StageAi ai = new StageAi().add(BlueprintDto.class, devBlueprint()).add(DevWritingDto.class, devWriting())
-                .add(DevCodeDto.class, new DevCodeDto(List.of(f("src/shop/X.java"), f("src/shop/X.java"), f("test/shop/XTest.java"))))
-                .add(DevAnswerDto.class, dupHidden);
-        var run = devRun(ai);
-        DevDraftDto d = run.create(s -> {});
-
-        assertThat(savedPaths(d)).doesNotHaveDuplicates();
-        var check = run.checks().stream().filter(c -> c.name().equals(TaskPipelineService.PATHS_CHECK)).findFirst().orElseThrow();
-        assertThat(check.ok()).isFalse();
-        assertThat(check.needsRegeneration()).isTrue(); // 기존 실패 흐름(다시 만들기 → 그래도 실패하면 실패 표시와 함께 저장)
-        assertThat(DevPipelineService.owners(check, List.of())).containsExactly(TaskPipelineService.Stage.CODE);
-        assertThat(DevPipelineService.owners(fail(TaskPipelineService.PATHS_CHECK, "같은 경로가 두 번 있습니다: a (숨은 테스트)"), List.of())).containsExactly(TaskPipelineService.Stage.ANSWER);
     }
 
     @Test
@@ -504,7 +509,7 @@ class TaskPipelineServiceTest {
             BlueprintDto bp = new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), b.facts(), b.examples(),
                     b.flaws(), b.judgments(), b.trapKeywords(), b.conclusion(), tables, b.figures(), b.docs(), b.questionPlan());
             BizWritingDto w = new BizWritingDto(List.of("설명"), List.of("요구"), docs);
-            BizDraftDto d = TaskAssemblyService.biz(BIZ_FORM, bp, w, bizAnswer());
+            BizDraftDto d = TaskAssemblyService.biz(BIZ_FORM, bp, w, BizQuestionService.assemble(bp, bizQuestions(), bizAnswer()), bizAnswer());
             List<String> paths = new ArrayList<>(d.csvFiles().stream().map(DevDraftDto.FileDraft::path).toList());
             d.documents().forEach(x -> paths.add(x.path()));
             paths.addAll(List.of("기획안.md", "checklist.md", "_gen/report.json"));
@@ -512,82 +517,12 @@ class TaskPipelineServiceTest {
             assertThat(d.documents()).extracting(BizDraftDto.DocDraft::path).containsExactly("자료/검토 안내.pdf", "자료/운영 메모.pdf");
         }
         assertThat(combos).isEqualTo(8);
-        assertThat(TaskAssemblyService.bizPathProblems(b, bizWriting(""))).isEmpty();
-        assertThat(TaskAssemblyService.bizPathProblems(b, new BizWritingDto(List.of("a"), List.of("b"), List.of(docA, docA)))).anyMatch(p -> p.contains("같은 경로가 두 번"));
-        assertThat(TaskAssemblyService.bizPathProblems(b, new BizWritingDto(List.of("a"), List.of("b"), List.of(docA, asCsv)))).anyMatch(p -> p.contains("문서 계획에 없는 경로"));
-        assertThat(BizPipelineService.owners(fail(TaskPipelineService.PATHS_CHECK, "x"))).containsExactly(TaskPipelineService.Stage.WRITING);
     }
 
     // ── 사실은 기록·관측만, 작성은 배경만, 보기 확인 ─────────────────────────────
 
-    private static BlueprintDto withFacts(BlueprintDto b, List<BlueprintDto.Fact> facts) {
-        return new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), facts, b.examples(),
-                List.of(new BlueprintDto.Flaw("x", "y", facts.get(0).text(), "z")), b.judgments().isEmpty() ? b.judgments() : List.of(
-                new BlueprintDto.Judgment("q", facts.get(0).text(), List.of(new BlueprintDto.Option("a", facts.get(1).text()), new BlueprintDto.Option("b", facts.get(2).text())))),
-                b.trapKeywords(), b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan());
-    }
-
     @Test
-    @DisplayName("설계도 사실 확인: 정의·공식·규칙·포함 문장은 걸러내고, 견적·청구서·로그 같은 기록은 통과시킨다")
-    void blueprintRejectsRuleFacts() {
-        List<String> rules = List.of("총비용은 공급가액에 봉사료와 부가가치세를 합한 금액이다.", "일평균 전환 수는 전환 수를 집행일 수로 나눈 값이다.",
-                "집행일 수에는 시작일과 종료일이 모두 포함된다.", "채널 성과 비교 지표는 일평균 전환 수다.");
-        List<String> records = List.of("견적서 항목: 대관 8,000,000원, 봉사료 10퍼센트 별도", "청구서 합계란에 '부가세 포함 금액'이라고 적혀 있다.",
-                "7월 3일 접수 로그: 할인 0.10, 0.20을 등록한 뒤 합계가 0.30000000000000004로 표시됨", "6월 상담팀 처리 여력은 1050건이었다.");
-        rules.forEach(r -> assertThat(RuleSentenceService.ruleLike(r)).as(r).isTrue());
-        records.forEach(r -> assertThat(RuleSentenceService.ruleLike(r)).as(r).isFalse());
-
-        BlueprintDto b = devBlueprint();
-        BlueprintDto bad = BlueprintService.normalized(withFacts(b, List.of(new BlueprintDto.Fact(rules.get(0), "description"), new BlueprintDto.Fact(records.get(0), "description"),
-                new BlueprintDto.Fact(records.get(2), "notes"))), false);
-        assertThat(BlueprintService.problems(bad, false)).anyMatch(p -> p.contains("정의·공식·규칙 문장") && p.contains("합한 금액"));
-        BlueprintDto ok = BlueprintService.normalized(withFacts(b, List.of(new BlueprintDto.Fact(records.get(0), "description"), new BlueprintDto.Fact(records.get(1), "description"),
-                new BlueprintDto.Fact(records.get(2), "notes"))), false);
-        assertThat(BlueprintService.problems(ok, false)).isEmpty();
-    }
-
-    @Test
-    @DisplayName("설계도에 규칙 문장이 있으면 뒤 단계로 가기 전에 설계도를 다시 받는다(고친 문장을 받으면 그것으로 진행)")
-    void blueprintWithRuleFactIsRewritten() {
-        BlueprintDto bad = withFacts(devBlueprint(), List.of(new BlueprintDto.Fact("총비용은 공급가액에 봉사료를 합한 금액이다.", "description"),
-                new BlueprintDto.Fact(F_SETTLE, "description"), new BlueprintDto.Fact(F_REPORT, "description")));
-        StageAi ai = new StageAi().add(BlueprintDto.class, bad).add(BlueprintDto.class, devBlueprint()).add(DevWritingDto.class, devWriting())
-                .add(DevCodeDto.class, devCode()).add(DevAnswerDto.class, devAnswer());
-        devRun(ai).create(s -> {});
-
-        assertThat(ai.order).startsWith(BlueprintDto.class, BlueprintDto.class, DevWritingDto.class);
-        assertThat(ai.users.get(1)).contains("설계도가 아래 문제로 걸렸습니다").contains("기록과 관측");
-        assertThat(ai.users.get(2)).doesNotContain("합한 금액");
-    }
-
-    @Test
-    @DisplayName("작성 후 확인: 사실·예 밖에 덧붙인 규칙·정의·용도 문장(구분자 취급, API 용도)은 fail 이고 작성 단계에서 다시 쓴다. 사실·예 문장과 배경은 통과")
-    void writingAddedRulesAreRejected() {
-        BlueprintDto b = devBlueprint();
-        String background = "결제 팀은 매일 아침 어제의 정산 내역을 확인합니다. " + F_DIGITS;
-        assertThat(TaskWritingService.rulesCheck(b, background + "\n" + EX1_IN + " → 3.50").ok()).isTrue();
-
-        var bad = TaskWritingService.rulesCheck(b, background + "\n구분자는 문자 그대로 취급하며, 빈 필드도 결과에 포함합니다.\n이 API는 원문 보관 화면과 상세 화면에 사용됩니다.");
-        assertThat(bad.ok()).isFalse();
-        assertThat(bad.detail()).contains("문자 그대로 취급하며").contains("사용됩니다");
-
-        // 파이프라인: 작성 결과에 규칙 문장이 있으면 검사가 fail 이고, 작성 단계부터 다시 돈다
-        DevWritingDto ruled = new DevWritingDto(List.of(devWriting().description().get(0), devWriting().description().get(1), "빈 필드도 결과에 포함합니다."), devWriting().requirements(), "");
-        StageAi ai = new StageAi().add(BlueprintDto.class, b).add(DevWritingDto.class, ruled).add(DevCodeDto.class, devCode()).add(DevAnswerDto.class, devAnswer());
-        var run = devRun(ai);
-        run.create(s -> {});
-        var check = run.checks().stream().filter(c -> c.name().equals(TaskPipelineService.RULES_CHECK)).findFirst().orElseThrow();
-        assertThat(check.needsRegeneration()).isTrue();
-        assertThat(DevPipelineService.owners(check, List.of())).containsExactly(TaskPipelineService.Stage.WRITING);
-        ai.order.clear();
-        ai.users.clear();
-        run.redo(List.of(check), s -> {});
-        assertThat(ai.order).containsExactly(DevWritingDto.class, DevAnswerDto.class);
-        assertThat(ai.users.get(0)).contains("고칠 문장: 빈 필드도 결과에 포함합니다.").contains("규칙·조건·정의·용도 문장은 쓰지 않는다");
-    }
-
-    @Test
-    @DisplayName("정답 쪽 보기 확인: 보기에 다른 문항의 정답 값이 있거나 판단 지점을 객관식 정답 하나로 내면 fail, 정상 문항은 통과")
+    @DisplayName("정답 쪽 보기 확인: 보기에 다른 문항의 정답 값이 있으면 fail, 정상 문항은 통과")
     void answerChoiceCheck() {
         BlueprintDto b = bizBlueprint();
         var shortQ = new BizDraftDto.QuestionDraft(BizDraftDto.Type.SHORT, "Q1. 값은?", List.of(), List.of("12100000"), "1", List.of());
@@ -599,11 +534,10 @@ class TaskPipelineServiceTest {
         assertThat(r1.ok()).isFalse();
         assertThat(r1.detail()).contains("Q1 의 정답 값 12100000");
 
+        // 판단 지점을 객관식으로 낸 것은 이제 코드가 아니라 검수(4단계)가 본다
         var judgment = choiceQuestion("Q2. 먼저 할 작업은?", "안내문을 먼저 한다.", "상담을 먼저 한다.", "둘 다 보류", "추가 검토");
-        var r2 = AnswerChoiceService.check(b, List.of(shortQ, judgment));
-        assertThat(r2.ok()).isFalse();
-        assertThat(r2.detail()).contains("판단 지점").contains("객관식");
-        assertThat(BizPipelineService.owners(r2)).containsExactly(TaskPipelineService.Stage.ANSWER);
+        assertThat(AnswerChoiceService.check(b, List.of(shortQ, judgment)).ok()).isTrue();
+        assertThat(BizPipelineService.owners(r1)).containsExactly(TaskPipelineService.Stage.QUESTIONS);
     }
 
     private static BizDraftDto.QuestionDraft choiceQuestion(String content, String... choices) {
@@ -620,25 +554,187 @@ class TaskPipelineServiceTest {
         assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("시작 코드도 이미 맞게 내는 입력만");
         assertThat(TaskPromptService.WRITING_DEV).contains("배경뿐").contains("문자 그대로 취급한다");
         assertThat(TaskPromptService.writingBiz(20)).contains("배경뿐");
-        assertThat(TaskPromptService.answerBiz("깊이")).contains("다른 문항의 정답 값을 넣지 않는다").contains("판단 지점은 객관식으로 묻지 않는다");
+        assertThat(TaskPromptService.QUESTIONS_BIZ).contains("다른 문항의 값을 넣지 않는다").contains("설명 문장 없이");
+        assertThat(TaskPromptService.answerBiz("깊이")).contains("정답 키만 씁니다").doesNotContain("taskFollowUp");
         assertThat(TaskPromptService.answerDev(20)).contains("보이는 예는 시작 코드가 이미 통과한다");
+    }
+
+    @Test
+    @DisplayName("문항 근거 경로: 띄어쓰기·자료/ 앞부분·확장자 차이는 실제 경로로 고치고, 그래도 없는 경로는 저장 Draft 에서 빼며 검사가 fail 로 알린다(저장 때 task_file_id 가 비지 않게)")
+    void questionSourcePathsAreResolvedOrRejected() {
+        List<String> files = List.of("자료/캠페인 실적.csv", "자료/검토 안내.pdf", "자료/운영 메모.pdf");
+        assertThat(TaskAssemblyService.resolvePath("자료/캠페인 실적.csv", files)).isEqualTo("자료/캠페인 실적.csv");
+        assertThat(TaskAssemblyService.resolvePath("자료/캠페인실적.csv", files)).isEqualTo("자료/캠페인 실적.csv"); // 띄어쓰기
+        assertThat(TaskAssemblyService.resolvePath("캠페인 실적.csv", files)).isEqualTo("자료/캠페인 실적.csv"); // 자료/ 앞부분
+        assertThat(TaskAssemblyService.resolvePath("자료/검토 안내", files)).isEqualTo("자료/검토 안내.pdf"); // 확장자
+        assertThat(TaskAssemblyService.resolvePath("자료/검토 안내.csv", files)).isEqualTo("자료/검토 안내.pdf"); // 같은 이름, 다른 확장자도 이름이 하나뿐이면 같은 파일
+        assertThat(TaskAssemblyService.resolvePath("자료/없는 문서.pdf", files)).isNull();
+        assertThat(TaskAssemblyService.resolvePath(null, files)).isNull();
+
+        BlueprintDto b = bizBlueprint();
+        BizWritingDto w = bizWriting("");
+        var q = new BizDraftDto.QuestionDraft(BizDraftDto.Type.SHORT, "Q?", List.of(), List.of("25"), "1",
+                List.of(new BizDraftDto.Source("캠페인실적.csv", ""), new BizDraftDto.Source("자료/검토 안내", "1"), new BizDraftDto.Source("자료/예약 매출.csv", "")));
+        var badSources = List.of(new BizDraftDto.Source("캠페인실적.csv", ""), new BizDraftDto.Source("자료/검토 안내", "1"), new BizDraftDto.Source("자료/예약 매출.csv", ""));
+        BizAnswerDto answer = new BizAnswerDto("## 필수 항목\n1. 결론", List.of(
+                new BizAnswerDto.Key("Q1", List.of(), "", badSources, List.of()), new BizAnswerDto.Key("Q2", List.of("25"), "1", List.of(), List.of()),
+                new BizAnswerDto.Key("Q3", List.of(), "", List.of(), List.of())));
+
+        BizDraftDto d = TaskAssemblyService.biz(BIZ_FORM, b, w, List.of(q), answer);
+        assertThat(d.questions().get(0).sources()).extracting(BizDraftDto.Source::path).containsExactly("자료/캠페인 실적.csv", "자료/검토 안내.pdf");
+        List<String> saved = new ArrayList<>(d.csvFiles().stream().map(DevDraftDto.FileDraft::path).toList());
+        d.documents().forEach(x -> saved.add(x.path()));
+        assertThat(saved).containsAll(d.questions().get(0).sources().stream().map(BizDraftDto.Source::path).toList());
+
+        var problems = TaskAssemblyService.bizSourceProblems(b, w, List.of(q));
+        assertThat(problems).hasSize(1).first().asString().contains("Q1").contains("자료/예약 매출.csv");
+
+        // 파이프라인: 검사가 fail 이고 정답 쪽부터 다시 돈다
+        StageAi ai = new StageAi().add(BlueprintDto.class, b).add(BizWritingDto.class, w).add(BizQuestionsDto.class, bizQuestions()).add(BizAnswerDto.class, answer);
+        var run = bizRun(ai);
+        run.create(s -> {});
+        var check = run.checks().stream().filter(c -> c.name().equals(TaskPipelineService.SOURCE_PATH_CHECK)).findFirst().orElseThrow();
+        assertThat(check.needsRegeneration()).isTrue();
+        assertThat(BizPipelineService.owners(check)).containsExactly(TaskPipelineService.Stage.ANSWER);
+        // 모두 맞는 경로면 통과
+        var good = new BizDraftDto.QuestionDraft(BizDraftDto.Type.SHORT, "Q?", List.of(), List.of("25"), "1", List.of(new BizDraftDto.Source("캠페인 실적.csv", "")));
+        assertThat(TaskAssemblyService.bizSourceProblems(b, w, List.of(good))).isEmpty();
+    }
+
+    // ── 설계도 사례(cases), 숫자·쪽 번호 읽기 ─────────────────────────────
+
+    private static BlueprintDto withCases(BlueprintDto b, List<BlueprintDto.Case> cases) {
+        return new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), b.facts(), b.examples(), b.flaws(),
+                b.judgments(), b.trapKeywords(), b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan(), cases);
+    }
+
+    @Test
+    @DisplayName("설계도 사례: 사례가 없거나 결함의 caughtBy 가 사례에 없으면 설계도 문제이고, 사례의 근거 문장은 사실 목록에 자동으로 들어가 자료에 반드시 나온다")
+    void blueprintCases() {
+        BlueprintDto b = devBlueprint();
+        assertThat(BlueprintService.problems(BlueprintService.normalized(b, false), false)).isEmpty();
+
+        assertThat(BlueprintService.problems(BlueprintService.normalized(withCases(b, List.of()), false), false)).anyMatch(p -> p.contains("사례(cases)가 결함 수 이상"));
+        var wrongName = withCases(b, List.of(new BlueprintDto.Case("otherTest", "상황", "0.30", F_DIGITS)));
+        assertThat(BlueprintService.problems(BlueprintService.normalized(wrongName, false), false)).anyMatch(p -> p.contains("caughtBy 는 사례(cases)의 name"));
+
+        String basis = "7월 3일 접수 로그: 할인 0.10, 0.20 합계 0.30000000000000004";
+        var added = BlueprintService.normalized(withCases(b, List.of(new BlueprintDto.Case("totalsExactly", "상황", "0.30", basis))), false);
+        assertThat(added.facts()).extracting(BlueprintDto.Fact::text).contains(basis); // 근거가 사실로 들어가 글에 그대로 실린다
+        // 작성 단계는 사례를 받지 않는다(사실 목록으로만 본다)
+        assertThat(TaskWritingService.input(added, false, 20, "")).doesNotContain("totalsExactly").doesNotContain("cases");
+    }
+
+    @Test
+    @DisplayName("답 쪽이 설계도 사례만 구현했는지: 숨은 테스트 메서드가 사례 name 과 같아야 하고, 사례 밖 테스트(자료에 근거 없는 동작)나 빠진 사례는 fail, BIZ 는 문항 수가 사례 수와 같아야 한다")
+    void caseCheck() {
+        BlueprintDto b = devBlueprint();
+        var ok = List.of(new DevDraftDto.FileDraft("test/shop/H.java", "class H {\n    @Test\n    void totalsExactly() {}\n}"));
+        assertThat(CaseCheckService.dev(b, ok).ok()).isTrue();
+
+        var extra = List.of(new DevDraftDto.FileDraft("test/shop/H.java", "class H {\n    @Test\n    void totalsExactly() {}\n    @Test\n    void upcomingZeroIsEmpty() {}\n}"));
+        var r1 = CaseCheckService.dev(b, extra);
+        assertThat(r1.ok()).isFalse();
+        assertThat(r1.detail()).contains("upcomingZeroIsEmpty").contains("자료에 근거 없는 동작");
+        assertThat(r1.needsRegeneration()).isTrue();
+
+        var missing = List.of(new DevDraftDto.FileDraft("test/shop/H.java", "class H {\n    @Test\n    void other() {}\n}"));
+        assertThat(CaseCheckService.dev(b, missing).detail()).contains("totalsExactly");
+        assertThat(DevPipelineService.owners(r1, List.of())).containsExactly(TaskPipelineService.Stage.ANSWER);
+
+        BlueprintDto bb = bizBlueprint();
+        assertThat(BizQuestionService.check(bb, bizQuestions()).ok()).isTrue(); // 문항 3개, 사례 3개
+        var fewer = new BizQuestionsDto(bizQuestions().questions().subList(0, 1));
+        assertThat(BizQuestionService.check(bb, fewer).ok()).isFalse(); // Q2·Q3 가 없다
+        var four = new ArrayList<>(bizQuestions().questions());
+        four.add(new BizQuestionsDto.Question("Q4", "Q4. 사례에 없는 문항", List.of()));
+        var checkFour = BizQuestionService.check(bb, new BizQuestionsDto(four));
+        assertThat(checkFour.detail()).contains("설계도에 없는 문항");
+        assertThat(BizPipelineService.owners(checkFour)).containsExactly(TaskPipelineService.Stage.QUESTIONS);
+
+        // 파이프라인의 검사 목록에 들어 있다
+        StageAi ai = devAi();
+        var run = devRun(ai);
+        run.create(s -> {});
+        assertThat(run.checks()).anyMatch(c -> c.name().equals(TaskPipelineService.CASES_CHECK) && c.ok());
+        assertThat(TaskPromptService.answerDev(20)).contains("설계도 cases 만 구현한다").contains("null 대체값");
+        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("cases:").contains("flaws.caughtBy 는 그 사례의 name");
+    }
+
+    @Test
+    @DisplayName("버그: CSV 행(\"1000,100,5000000\")은 칸마다 읽어 천 단위 쉼표로 오해하지 않고, 진짜 천 단위(1,050)와 날짜·쪽 숫자는 그대로 동작한다")
+    void csvRowNumbersArePerCell() {
+        assertThat(BizNumbersService.numbers("1000,100,5000000")).containsExactlyInAnyOrder("1000", "100", "5000000");
+        assertThat(BizNumbersService.numbers("새봄,4월,1000,100,5000000")).contains("1000", "100", "5000000").doesNotContain("100500", "0");
+        assertThat(BizNumbersService.numbers("처리 여력은 1,050건, 신청은 12,100,000원이었다.")).containsExactlyInAnyOrder("1050", "12100000");
+        assertThat(BizNumbersService.numbers("앞 100,500 뒤")).containsExactly("100500");
+
+        BlueprintDto b = bizBlueprint();
+        var table = new BlueprintDto.Table("자료/예약 매출.csv", List.of("월", "예약", "건수", "매출"), List.of(List.of("6월", "1000", "100", "5000000")));
+        BlueprintDto withTable = new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), b.facts(), b.examples(),
+                b.flaws(), b.judgments(), b.trapKeywords(), b.conclusion(), List.of(table), b.figures(), b.docs(), b.questionPlan(), b.cases());
+        var echoed = List.of(new BizDraftDto.DocDraft("자료/검토 안내.pdf", List.of("검토 안내\n" + BIZ_F1 + "\n6월,1000,100,5000000\n표 요약: 1000,100,5000000")));
+        assertThat(BizNumbersService.documentsCheck(withTable, echoed).ok()).as(BizNumbersService.documentsCheck(withTable, echoed).detail()).isTrue();
+        var wrong = List.of(new BizDraftDto.DocDraft("자료/검토 안내.pdf", List.of("검토 안내\n6월,1000,100,5000001")));
+        assertThat(BizNumbersService.documentsCheck(withTable, wrong).ok()).isFalse();
+    }
+
+    @Test
+    @DisplayName("버그: 근거 쪽 번호 범위(\"1-2\")는 형식 검사를 통과하고 조립에서 \"1,2\" 로 정리된다. 없는 쪽 범위나 숫자가 아닌 쪽은 계속 실패")
+    void pageRangesAreAccepted() {
+        assertThat(TaskAssemblyService.normalizePages("1-2")).isEqualTo("1,2");
+        assertThat(TaskAssemblyService.normalizePages("1~3")).isEqualTo("1,2,3");
+        assertThat(TaskAssemblyService.normalizePages("2쪽")).isEqualTo("2");
+        assertThat(TaskAssemblyService.normalizePages("1, 3")).isEqualTo("1,3");
+        assertThat(TaskAssemblyService.normalizePages("")).isEqualTo("");
+        assertThat(TaskAssemblyService.normalizePages("앞쪽")).isEqualTo("앞쪽"); // 못 읽으면 그대로(검사가 잡는다)
+
+        BizDraftDto d = BizFixtures.good("pages");
+        List<BizDraftDto.QuestionDraft> qs = new ArrayList<>(d.questions());
+        for (String pages : List.of("1-2", "1~2", "1,2")) {
+            var q0 = qs.get(0);
+            List<BizDraftDto.Source> sources = q0.sources().stream().map(x -> new BizDraftDto.Source(x.path(), x.path().contains("설문 요약") ? pages : x.pages())).toList();
+            var edited = BizFixtures.edit(d, b -> b.questions(List.of(new BizDraftDto.QuestionDraft(q0.type(), q0.content(), q0.choices(), q0.accepted(), q0.calc(), sources, q0.commonWrongAnswers()),
+                    qs.get(1), qs.get(2), qs.get(3))));
+            var sourcesCheck = BizCheckService.forDraft(new PdfService(), new BizFixtures.FakeSolver(), "gpt-6.1-terra", edited).stream()
+                    .filter(c -> c.name().equals(BizCheckService.SOURCES)).findFirst().orElseThrow().run(edited);
+            assertThat(sourcesCheck.ok()).as(pages + ": " + sourcesCheck.detail()).isTrue();
+        }
+        var bad = BizFixtures.edit(d, b -> {
+            var q0 = d.questions().get(0);
+            var sources = q0.sources().stream().map(x -> new BizDraftDto.Source(x.path(), x.path().contains("설문 요약") ? "1-9" : x.pages())).toList();
+            return b.questions(List.of(new BizDraftDto.QuestionDraft(q0.type(), q0.content(), q0.choices(), q0.accepted(), q0.calc(), sources, q0.commonWrongAnswers()),
+                    d.questions().get(1), d.questions().get(2), d.questions().get(3)));
+        });
+        var badCheck = BizCheckService.forDraft(new PdfService(), new BizFixtures.FakeSolver(), "gpt-6.1-terra", bad).stream()
+                .filter(c -> c.name().equals(BizCheckService.SOURCES)).findFirst().orElseThrow().run(bad);
+        assertThat(badCheck.ok()).isFalse();
+        assertThat(badCheck.detail()).contains("없는 쪽입니다");
+
+        // 조립: 저장될 쪽 번호가 정리된다
+        BlueprintDto b = bizBlueprint();
+        var q = new BizDraftDto.QuestionDraft(BizDraftDto.Type.SHORT, "Q", List.of(), List.of("25"), "1", List.of(new BizDraftDto.Source("자료/검토 안내.pdf", "1-2")));
+        BizDraftDto assembled = TaskAssemblyService.biz(BIZ_FORM, b, bizWriting(""), List.of(q), new BizAnswerDto("## 필수 항목", List.of()));
+        assertThat(assembled.questions().get(0).sources().get(0).pages()).isEqualTo("1,2");
     }
 
     // ── 설정 ─────────────────────────────
 
     @Test
-    @DisplayName("단계별 모델·추론 강도는 설정으로 바꾼다(기본: 설계도 high, 나머지 medium, 비우면 model)")
+    @DisplayName("단계별 모델·추론 강도는 직군마다 설정으로 바꾼다(기본: DEV·BIZ 생성 sol, 관문 Sonnet, 모두 medium)")
     void stageSettings() {
-        assertThat(PROPS.stage("BLUEPRINT").effort()).isEqualTo("high");
-        assertThat(PROPS.stage("ANSWER").effort()).isEqualTo("medium");
-        assertThat(PROPS.stage("WRITING").model()).isEqualTo(PROPS.model());
+        assertThat(PROPS.stage(true, "BLUEPRINT").model()).isEqualTo("gpt-6.1-sol");
+        assertThat(PROPS.stage(true, "WRITING").model()).isEqualTo("gpt-6.1-sol");
+        assertThat(PROPS.stage(false, "BLUEPRINT").model()).isEqualTo("gpt-6.1-sol");
+        assertThat(PROPS.stage(false, "ANSWER").effort()).isEqualTo("medium");
         assertThat(PROPS.staged()).isTrue();
 
         var custom = new TaskGenProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, "oneshot",
-                new TaskGenProperties.Stages(null, new TaskGenProperties.Stage("m-1", "low", 5000), null, null));
+                new TaskGenProperties.Stages(new TaskGenProperties.Track(null, new TaskGenProperties.Stage("m-1", "low", 5000), null, null, null, null, null), null), "high");
         assertThat(custom.staged()).isFalse();
-        assertThat(custom.stage("WRITING")).isEqualTo(new TaskGenProperties.Stage("m-1", "low", 5000));
-        assertThat(custom.stage("CODE").effort()).isEqualTo("medium");
+        assertThat(custom.stage(true, "WRITING")).isEqualTo(new TaskGenProperties.Stage("m-1", "low", 5000));
+        assertThat(custom.stage(false, "WRITING").model()).isEqualTo("gpt-6.1-sol");
+        assertThat(custom.stage(true, "CODE").effort()).isEqualTo("medium");
     }
 
     @Test

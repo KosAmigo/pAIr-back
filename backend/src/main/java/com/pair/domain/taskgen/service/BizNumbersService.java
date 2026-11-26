@@ -22,18 +22,40 @@ final class BizNumbersService {
 
     static final String NAME = "자료 숫자가 숫자표와 같음"; // M1
 
-    private static final Pattern NUMBER = Pattern.compile("\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?");
-    /** 날짜·쪽·차례 숫자는 수치가 아니다 */
-    private static final Pattern NOT_A_FIGURE = Pattern.compile("^\\s*(월|일|년|분기|쪽|페이지|번째|차\\b)");
+    /** 천 단위 쉼표 숫자(앞이 숫자·쉼표가 아니고 뒤가 숫자가 아닐 때만)나 보통 숫자 */
+    private static final Pattern NUMBER = Pattern.compile("(?<![\\d,])\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?(?![\\d]|,\\d)|\\d+(?:\\.\\d+)?");
+    private static final Pattern PLAIN = Pattern.compile("\\d+(?:\\.\\d+)?");
+    /** 공백 없는 칸이 쉼표로 이어진 줄(CSV 행): 칸마다 읽는다("1000,100,5000000"은 세 수) */
+    private static final Pattern CSV_ROW = Pattern.compile("^\\s*[^\\s,]+(,[^\\s,]+){2,}\\s*$");
+    /** 날짜·쪽·차례·시각·사람 수·조항·팀 수 같은 숫자는 수치가 아니다 */
+    private static final Pattern NOT_A_FIGURE = Pattern.compile("^\\s*(월|일|년|분기|쪽|페이지|번째|차\\b|시|명|개|조|호|팀|곳|가지)");
     private static final int SHOWN = 5;
 
     private BizNumbersService() {}
 
-    /** 글 속 숫자(쉼표·끝자리 0 정리). "1,050건" → "1050", "2.50" → "2.5" */
+    /** 찾은 숫자: canon 은 정리한 값, after 는 그 뒤 같은 칸·줄의 글 */
+    private record Hit(String raw, String canon, String after) {}
+
+    private static List<Hit> scan(String text) {
+        List<Hit> out = new ArrayList<>();
+        for (String line : (text == null ? "" : text).split("\\R")) {
+            if (CSV_ROW.matcher(line).matches()) {
+                for (String cell : line.split(",")) {
+                    Matcher m = PLAIN.matcher(cell);
+                    while (m.find()) out.add(new Hit(m.group(), canon(m.group()), cell.substring(m.end())));
+                }
+            } else {
+                Matcher m = NUMBER.matcher(line);
+                while (m.find()) out.add(new Hit(m.group(), canon(m.group()), line.substring(m.end())));
+            }
+        }
+        return out;
+    }
+
+    /** 글 속 숫자(쉼표·끝자리 0 정리). "1,050건" → "1050", "2.50" → "2.5". CSV 줄은 칸마다 읽는다 */
     static Set<String> numbers(String text) {
         Set<String> out = new LinkedHashSet<>();
-        Matcher m = NUMBER.matcher(text == null ? "" : text);
-        while (m.find()) out.add(canon(m.group()));
+        scan(text).forEach(h -> out.add(h.canon()));
         return out;
     }
 
@@ -131,10 +153,9 @@ final class BizNumbersService {
         List<String> bad = new ArrayList<>();
         for (var d : docs == null ? List.<BizDraftDto.DocDraft>of() : docs) {
             for (String page : d.pages() == null ? List.<String>of() : d.pages()) {
-                Matcher m = NUMBER.matcher(page == null ? "" : page);
-                while (m.find()) {
-                    if (NOT_A_FIGURE.matcher(page.substring(m.end())).find() || allowed.contains(canon(m.group()))) continue;
-                    String at = m.group() + "(" + d.path() + ")";
+                for (Hit h : scan(page)) {
+                    if (NOT_A_FIGURE.matcher(h.after()).find() || allowed.contains(h.canon())) continue;
+                    String at = h.raw() + "(" + d.path() + ")";
                     if (!bad.contains(at)) bad.add(at);
                 }
             }

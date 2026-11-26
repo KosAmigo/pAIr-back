@@ -37,8 +37,6 @@ class BizSoloSolveServiceTest {
         @Override
         @SuppressWarnings("unchecked")
         public <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
-            if (type == com.pair.domain.taskgen.dto.LeakVerdictDto.class) // M5 답 노출 AI 판정: 위반 없음
-                return new Output<>((T) new com.pair.domain.taskgen.dto.LeakVerdictDto(List.of()), 10, 5);
             models.add(model);
             systems.add(system);
             users.add(user);
@@ -278,11 +276,11 @@ class BizSoloSolveServiceTest {
     void runsWhenOnlyWarn() {
         ai.script.add(answers("1", "2", "21080", "2000"));
         var gen = generator(new TaskGenProperties(null, null, null, null, null));
-        var warn = new GenCheckResultDto(BizCheckService.EVIDENCE_STYLE, false, "해석 지시", GenCheckResultDto.WARN);
+        var warn = new GenCheckResultDto("임의 경고 검사", false, "경고 내용", GenCheckResultDto.WARN);
         var extra = gen.afterChecks(form("LIVE"), BizFixtures.good("biz-solo"), List.of(warn));
 
         assertThat(ai.users).hasSize(1);
-        assertThat(extra.checks().subList(2, extra.checks().size())).singleElement().satisfies(c -> assertThat(c.needsRegeneration()).isFalse());
+        assertThat(extra.checks()).singleElement().satisfies(c -> assertThat(c.needsRegeneration()).isFalse());
         assertThat(extra.details()).containsKeys("soloTokens", "soloAnswers");
     }
 
@@ -292,7 +290,7 @@ class BizSoloSolveServiceTest {
         ai.script.add(answers("1", "2", "21080", "2000"));
         var extra = generator(new TaskGenProperties(null, null, null, null, null)).afterChecks(form("SELF"), BizFixtures.good("biz-solo"), List.of());
 
-        assertThat(extra.checks().subList(2, extra.checks().size())).singleElement().satisfies(c -> {
+        assertThat(extra.checks()).singleElement().satisfies(c -> {
             assertThat(c.ok()).isTrue();
             assertThat(c.level()).isEqualTo(GenCheckResultDto.WARN);
             assertThat(c.needsRegeneration()).isFalse();
@@ -306,6 +304,6 @@ class BizSoloSolveServiceTest {
         var extra = generator(props).afterChecks(form("LIVE"), BizFixtures.good("biz-solo"), List.of());
 
         assertThat(ai.users).isEmpty();
-        assertThat(extra.checks().get(2).detail()).startsWith("건너뜀");
+        assertThat(extra.checks().get(0).detail()).startsWith("건너뜀");
     }
 }

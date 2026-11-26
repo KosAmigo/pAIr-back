@@ -70,7 +70,7 @@ public class BatchClient {
 
     // ── 요청 만들기 (일반 채점과 같은 내용) ─────────────
 
-    /** Claude 채점 요청 (ClaudeJudgeClient 와 같음: 시스템 프롬프트 캐시, 구조화 출력, effort). */
+    /** Claude 채점 요청 (ModelJudge(Claude)와 같음: 시스템 프롬프트 캐시, 구조화 출력, effort). */
     public ObjectNode claudeJudgeParams(String system, String prefix, String user, String schemaJson) {
         PairProperties.Model cfg = props.judge().claude();
         ObjectNode p = json.createObjectNode();
@@ -94,7 +94,7 @@ public class BatchClient {
         return p;
     }
 
-    /** OpenAI 채점 요청 (OpenAiJudgeClient 와 같음: Chat Completions, 구조화 출력, reasoning_effort). */
+    /** OpenAI 채점 요청 (ModelJudge(OpenAI)와 같음: Chat Completions, 구조화 출력, reasoning_effort). */
     public ObjectNode openaiJudgeBody(String system, String prefix, String user, String schemaJson) {
         PairProperties.Model cfg = props.judge().openai();
         ObjectNode b = json.createObjectNode();

@@ -24,7 +24,6 @@ final class TaskAssemblyService {
      * 파일 주인(같은 경로를 두 단계가 만들지 않게): 시작 코드 단계는 src/·test/ 만, NOTES.md 는 작성 단계만,
      * 숨은 테스트(test/)·정답(src/)·다른 풀이·오답은 정답 쪽 단계만, CSV 는 숫자표에서 코드만, 문서는 설계도의 문서 계획 경로만.
      * 주인이 아닌 단계가 만든 파일은 버리고, 같은 경로가 남으면 앞의 것만 둔다(저장 때 task_files 경로 중복 방지).
-     * 겹침은 devPathProblems·bizPathProblems 가 따로 알려 형식 검사 실패로 다시 만들게 한다
      */
     static DevDraftDto dev(TaskGenRequest form, BlueprintDto b, DevWritingDto w, DevCodeDto c, DevAnswerDto a) {
         List<DevDraftDto.FileDraft> files = new ArrayList<>(unique(nz(c.files()).stream().filter(f -> startsWith(f, "src/") || startsWith(f, "test/")).toList()));
@@ -33,58 +32,96 @@ final class TaskAssemblyService {
         List<DevDraftDto.WrongFix> wrongs = nz(a.wrongFixes()).stream().map(x -> new DevDraftDto.WrongFix(x.reason(), unique(x.files()))).toList();
         return new DevDraftDto(b.title(), b.summary(), b.code(), b.category(), w.description(), w.requirements(), a.answer(), files,
                 unique(nz(a.hiddenTests()).stream().filter(f -> startsWith(f, "test/")).toList()), unique(nz(a.solution()).stream().filter(f -> startsWith(f, "src/")).toList()),
-                TaskGenRequest.difficultyOf(form.minutes()), b.competencies(), b.trapKeywords(), wrongs, a.taskFollowUp(), alts, judgments(b), flaws(b, false));
+                TaskGenRequest.difficultyOf(form.minutes()), b.competencies(), b.trapKeywords(), wrongs, w.taskFollowUp(), alts, judgments(b), flaws(b, false));
     }
 
-    static BizDraftDto biz(TaskGenRequest form, BlueprintDto b, BizWritingDto w, BizAnswerDto a) {
+    static BizDraftDto biz(TaskGenRequest form, BlueprintDto b, BizWritingDto w, List<BizDraftDto.QuestionDraft> assembled, BizAnswerDto a) {
         var first = b.flaws().get(0);
         var trap = new BizDraftDto.Trap(first.what(), first.evidence(), b.conclusion().correct(), b.conclusion().wrong());
-        String own = a.taskFollowUp() == null || a.taskFollowUp().isBlank() ? GeneratedTaskRepository.DEV_FOLLOW_UPS.get(2) : a.taskFollowUp().strip();
+        String own = w.taskFollowUp() == null || w.taskFollowUp().isBlank() ? GeneratedTaskRepository.DEV_FOLLOW_UPS.get(2) : w.taskFollowUp().strip();
         List<String> followUps = List.of(GeneratedTaskRepository.DEV_FOLLOW_UPS.get(0), GeneratedTaskRepository.DEV_FOLLOW_UPS.get(1), own);
-        // 문서는 설계도의 문서 계획 순서와 경로대로만(계획에 없거나 같은 경로면 버림)
+        List<BizDraftDto.DocDraft> docs = bizDocs(b, w);
+        // 문항 근거(sources)는 실제 파일 경로로만. 글자 차이만 나는 경로는 고치고, 그래도 없는 경로는 버린다(저장 때 task_file_id 가 비면 DB 오류).
+        // 버린 것은 bizSourceProblems 가 따로 알려 형식 실패로 다시 만들게 한다
+        List<String> paths = filePaths(b, docs);
+        List<BizDraftDto.QuestionDraft> questions = nz(assembled).stream().map(q -> new BizDraftDto.QuestionDraft(q.type(), q.content(), q.choices(),
+                q.accepted(), q.calc(), resolvedSources(q, paths), q.commonWrongAnswers())).toList();
+        return new BizDraftDto(b.title(), b.summary(), b.code(), b.category(), w.description(), w.requirements(), followUps, docs,
+                BizNumbersService.csvFiles(b), a.checklist(), trap, questions, TaskGenRequest.difficultyOf(form.minutes()), b.competencies(),
+                b.trapKeywords(), judgments(b), flaws(b, true));
+    }
+
+    /** 문서는 설계도의 문서 계획 순서와 경로대로만(계획에 없거나 같은 경로면 버림) */
+    private static List<BizDraftDto.DocDraft> bizDocs(BlueprintDto b, BizWritingDto w) {
         List<BizDraftDto.DocDraft> docs = new ArrayList<>();
         for (var plan : b.docs()) nz(w.documents()).stream().filter(d -> plan.path().equals(d.path())).findFirst().ifPresent(d -> {
             if (docs.stream().noneMatch(x -> x.path().equals(d.path()))) docs.add(d);
         });
-        return new BizDraftDto(b.title(), b.summary(), b.code(), b.category(), w.description(), w.requirements(), followUps, docs,
-                BizNumbersService.csvFiles(b), a.checklist(), trap, a.questions(), TaskGenRequest.difficultyOf(form.minutes()), b.competencies(),
-                b.trapKeywords(), judgments(b), flaws(b, true));
+        return docs;
     }
 
-    /** 같은 경로가 겹치는 곳(버리기 전의 단계 결과 기준). 문제가 없으면 빈 목록. 괄호 안은 겹친 곳 */
-    static List<String> devPathProblems(DevCodeDto c, DevAnswerDto a) {
+    /** 저장될 BIZ 자료 경로(CSV + 문서) */
+    private static List<String> filePaths(BlueprintDto b, List<BizDraftDto.DocDraft> docs) {
+        List<String> paths = new ArrayList<>();
+        BizNumbersService.csvFiles(b).forEach(f -> paths.add(f.path()));
+        docs.forEach(d -> paths.add(d.path()));
+        return paths;
+    }
+
+    /** 근거 경로를 실제 파일 경로로 바꾼다: 같으면 그대로, 띄어쓰기·자료/ 앞부분·확장자 차이만 나면 그 파일, 못 찾으면 null */
+    static String resolvePath(String path, List<String> files) {
+        if (path == null) return null;
+        if (files.contains(path)) return path;
+        String key = looseKey(path);
+        List<String> hit = files.stream().filter(f -> looseKey(f).equals(key)).toList();
+        return hit.size() == 1 ? hit.get(0) : null;
+    }
+
+    /** 쪽 번호를 "1,2" 꼴로: 범위("1-2", "1~3")는 풀어 쓰고 "쪽"·"p" 같은 글자는 뺀다. 못 읽으면 그대로 */
+    static String normalizePages(String pages) {
+        if (pages == null || pages.isBlank()) return pages;
         List<String> out = new ArrayList<>();
-        dups(nz(c.files()).stream().filter(f -> startsWith(f, "src/") || startsWith(f, "test/")).toList(), "시작 코드", out);
-        dups(nz(a.hiddenTests()), "숨은 테스트", out);
-        dups(nz(a.solution()), "정답", out);
+        for (String token : pages.replaceAll("(?i)(쪽|페이지|p\\.?)", "").split("[,\\s]+")) {
+            if (token.isEmpty()) continue;
+            String[] ends = token.split("[-~–]", -1);
+            try {
+                if (ends.length == 2) {
+                    int from = Integer.parseInt(ends[0].strip()), to = Integer.parseInt(ends[1].strip());
+                    if (from > to || to - from > 30) return pages;
+                    for (int n = from; n <= to; n++) out.add(String.valueOf(n));
+                } else out.add(String.valueOf(Integer.parseInt(token.strip())));
+            } catch (NumberFormatException e) {
+                return pages;
+            }
+        }
+        return String.join(",", out);
+    }
+
+    private static String looseKey(String p) {
+        return GenTextService.squash(p).replaceFirst("^자료/", "").replaceFirst("\\.(pdf|csv)$", "");
+    }
+
+    private static List<BizDraftDto.Source> resolvedSources(BizDraftDto.QuestionDraft q, List<String> paths) {
+        List<BizDraftDto.Source> out = new ArrayList<>();
+        for (var s : nz(q.sources())) {
+            String real = s == null ? null : resolvePath(s.path(), paths);
+            if (real != null) out.add(new BizDraftDto.Source(real, normalizePages(s.pages())));
+        }
+        return out;
+    }
+
+    /** 문항 근거 경로 중 실제 자료와 맞출 수 없는 것(버리기 전 기준). 문제가 없으면 빈 목록 */
+    static List<String> bizSourceProblems(BlueprintDto b, BizWritingDto w, List<BizDraftDto.QuestionDraft> questions) {
+        List<String> paths = filePaths(b, bizDocs(b, w));
+        List<String> out = new ArrayList<>();
         int n = 0;
-        for (var x : nz(a.altSolutions())) dups(nz(x.files()), "다른 풀이 " + ++n, out);
-        n = 0;
-        for (var x : nz(a.wrongFixes())) dups(nz(x.files()), "오답 " + ++n, out);
-        Set<String> pub = new LinkedHashSet<>();
-        nz(c.files()).forEach(f -> pub.add(f.path()));
-        for (var f : nz(a.hiddenTests())) if (pub.contains(f.path())) out.add("같은 경로가 두 번 있습니다: " + f.path() + " (숨은 테스트가 공개 테스트와 같은 경로)");
-        return out;
-    }
-
-    /** BIZ: 작성 단계의 문서 경로가 겹치거나 문서 계획에 없는 경우 */
-    static List<String> bizPathProblems(BlueprintDto b, BizWritingDto w) {
-        List<String> out = new ArrayList<>();
-        Set<String> plan = new LinkedHashSet<>();
-        b.docs().forEach(d -> plan.add(d.path()));
-        Set<String> seen = new LinkedHashSet<>();
-        for (var d : nz(w.documents())) {
-            if (!seen.add(d.path())) out.add("같은 경로가 두 번 있습니다: " + d.path() + " (문서)");
-            else if (!plan.contains(d.path())) out.add("문서 계획에 없는 경로입니다: " + d.path() + " (문서)");
+        for (var q : nz(questions)) {
+            n++;
+            for (var s : nz(q.sources())) {
+                if (s == null || resolvePath(s.path(), paths) == null) out.add("Q" + n + " 근거 경로가 실제 자료에 없습니다: " + (s == null ? null : s.path()));
+            }
         }
         return out;
-    }
-
-    private static void dups(List<DevDraftDto.FileDraft> files, String where, List<String> out) {
-        Set<String> seen = new LinkedHashSet<>();
-        for (var f : files) {
-            if (f != null && !seen.add(f.path())) out.add("같은 경로가 두 번 있습니다: " + f.path() + " (" + where + ")");
-        }
     }
 
     private static boolean startsWith(DevDraftDto.FileDraft f, String prefix) {

@@ -106,6 +106,27 @@ final class GenTextService {
         return new ArrayList<>(out);
     }
 
+    /** 테스트 메서드 이름 → 본문(주석 포함). 사례(case)별로 단정을 따로 볼 때 쓴다 */
+    static java.util.Map<String, String> testBodies(List<DevDraftDto.FileDraft> tests) {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        if (tests == null) return out;
+        Pattern method = Pattern.compile("@(?:Test|ParameterizedTest|RepeatedTest)\\b[\\s\\S]*?void\\s+(\\w+)\\s*\\([^)]*\\)\\s*(?:throws[^{]*)?\\{");
+        for (var f : tests) {
+            if (f == null || f.content() == null) continue;
+            Matcher m = method.matcher(f.content());
+            while (m.find()) {
+                int depth = 1, i = m.end();
+                for (; i < f.content().length() && depth > 0; i++) {
+                    char c = f.content().charAt(i);
+                    if (c == '{') depth++;
+                    else if (c == '}') depth--;
+                }
+                out.putIfAbsent(m.group(1), f.content().substring(m.end(), Math.max(m.end(), i - 1)).strip());
+            }
+        }
+        return out;
+    }
+
     private static final int MIN_BASIS_CHARS = 8;
 
     /**
