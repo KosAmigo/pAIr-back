@@ -71,12 +71,15 @@ public class ExamConsoleController {
     private final com.pair.domain.exam.service.SnapshotRetentionService retention;
     private final com.pair.domain.exam.service.SessionAiCostService aiCosts;
     private final com.pair.domain.exam.service.EvidenceClipService clips;
+    private final com.pair.domain.exam.service.EnvCheckPhotoService envPhotos;
 
     public ExamConsoleController(ExamSessionService sessions, SessionResultService results, ProctorService proctor,
             AutoSubmitService autoSubmit, ConnectionGraceService grace, ConsoleAccessService access,
             com.pair.domain.exam.service.EnvCheckService envCheck, com.pair.domain.exam.service.NoticeService notices,
             com.pair.domain.exam.service.SnapshotRetentionService retention, com.pair.domain.exam.service.EvidenceClipService clips,
-            com.pair.domain.exam.service.SessionAiCostService aiCosts) {
+            com.pair.domain.exam.service.SessionAiCostService aiCosts,
+            com.pair.domain.exam.service.EnvCheckPhotoService envPhotos) {
+        this.envPhotos = envPhotos;
         this.retention = retention;
         this.aiCosts = aiCosts;
         this.clips = clips;
@@ -254,6 +257,20 @@ public class ExamConsoleController {
     public AutoSubmitService.RescueResult rescue(CurrentUser user, @PathVariable Long sessionId) {
         manage(user, sessionId);
         return autoSubmit.rescue(sessionId);
+    }
+
+    /** 대상자의 환경 점검 사진 목록 (귀 왼쪽·오른쪽, 손목). 감독관도 볼 수 있다 */
+    @GetMapping("/{sessionId}/participants/{participantId}/env-check/photos")
+    public List<com.pair.domain.exam.dto.EnvCheckPhotoResponse> envCheckPhotos(CurrentUser user, @PathVariable Long sessionId,
+            @PathVariable Long participantId) {
+        access.requireSession(user, sessionId);
+        return envPhotos.photosOf(sessionId, participantId);
+    }
+
+    @GetMapping(value = "/{sessionId}/env-check/photos/{photoId}/image", produces = MediaType.IMAGE_JPEG_VALUE)
+    public ResponseEntity<byte[]> envCheckPhotoImage(CurrentUser user, @PathVariable Long sessionId, @PathVariable Long photoId) {
+        access.requireSession(user, sessionId);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(envPhotos.image(sessionId, photoId));
     }
 
     /** 대상자의 환경 점검 결과 (진행 중이면 실시간, 아니면 저장된 결과). 아직 없으면 204. 감독관도 볼 수 있다 */

@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 public interface SnapshotStorage {
 
     /** 서버가 만든 키 모양. 경로 조작을 막는 데도 쓴다 */
-    Pattern KEY = Pattern.compile("exam-clips/\\d{1,19}/\\d{1,19}/\\d{1,19}\\.jpg|exam-snapshots/\\d{1,19}/\\d{1,19}\\.jpg|participant-csv/\\d{1,19}/\\d{1,19}\\.csv");
+    Pattern KEY = Pattern.compile("exam-clips/\\d{1,19}/\\d{1,19}/\\d{1,19}\\.jpg|exam-snapshots/\\d{1,19}/\\d{1,19}\\.jpg|env-check/\\d{1,19}/\\d{1,19}\\.jpg|participant-csv/\\d{1,19}/\\d{1,19}\\.csv");
 
     void put(String key, byte[] bytes);
 
@@ -28,6 +28,11 @@ public interface SnapshotStorage {
     /** 이벤트 증거 구간 사진 1장 (이벤트 앞뒤) */
     static String clipKeyOf(long sessionId, long eventId, long frameId) {
         return "exam-clips/" + sessionId + "/" + eventId + "/" + frameId + ".jpg";
+    }
+
+    /** 환경 점검 사진(귀 왼쪽·오른쪽, 손목) */
+    static String envCheckKeyOf(long sessionId, long photoId) {
+        return "env-check/" + sessionId + "/" + photoId + ".jpg";
     }
 
     static String csvKeyOf(long sessionId, long uploadedAtMillis) {
