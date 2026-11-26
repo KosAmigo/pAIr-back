@@ -50,6 +50,12 @@ public class ScoringWorkerService {
 
     @PostConstruct
     void start() {
+        // 작업자 이름은 프로세스마다 새로 정해지므로, 지금 처리 중 목록에 있는 작업은 모두 이전 프로세스(재시작·강제 종료)가 남긴 것이다.
+        // staleAfter 를 기다리지 않고 바로 되살린다. 서버가 하나라는 전제(두 서버가 겹쳐 돌면 다시 검토)
+        guarded(() -> {
+            int n = queue.recoverStale(Duration.ZERO, props.maxAttempts());
+            if (n > 0) log.info("이전 서버가 끝내지 못한 채점 작업 {}건을 되살렸습니다", n);
+        });
         running = true;
         for (int i = 1; i <= props.workers(); i++) {
             Thread t = new Thread(this::loop, "scoring-worker-" + i);

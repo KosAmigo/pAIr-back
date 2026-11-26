@@ -216,4 +216,19 @@ class ModelClientTest {
             System.out.println("[schema-size] " + t.getSimpleName() + " " + n + (n > ModelClient.AnthropicBackend.STRICT_MAX_SCHEMA_CHARS ? " (비엄격)" : ""));
         }
     }
+
+    @Test
+    @DisplayName("가짜 AI: 모델을 부르지 않고 기다린 뒤 빈 결과를 준다(목록은 null 이 아니라 빈 목록)")
+    void fakeBackendReturnsEmptyResults() {
+        var fake = new ModelClient(PROPS, new ModelClient.FakeBackend(java.time.Duration.ofMillis(50), 0),
+                new ModelClient.FakeBackend(java.time.Duration.ofMillis(50), 0));
+        long start = System.nanoTime();
+
+        var r = fake.json("claude-haiku-5-5", "s", "u", com.pair.domain.scoring.service.ScoringService.JudgeResult.class, 1000, "low");
+
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(java.time.Duration.ofMillis(45));
+        assertThat(r.value().verdicts()).isEmpty();
+        assertThat(r.inputTokens()).isZero();
+        assertThat(fake.text("gpt-6-luna", null, "u", 100, null).text()).isNotBlank();
+    }
 }

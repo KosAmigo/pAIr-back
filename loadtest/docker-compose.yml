@@ -1,0 +1,64 @@
+# 부하 테스트 전용 환경: 로컬 PostgreSQL(pgvector) + Redis + 가짜 AI 모드 백엔드. 운영·개발 DB(RDS)와 AI 키를 전혀 쓰지 않는다.
+# 실행은 submit_load.py 가 이 파일로 띄우고 지운다. 손으로 띄울 때는 pAIr-back 폴더에서:
+#   docker compose -f loadtest/docker-compose.yml up -d --build
+#   LOADTEST_QUEUE=true docker compose -f loadtest/docker-compose.yml up -d    채점 큐(Redis) 켜고
+#   docker compose -f loadtest/docker-compose.yml down -v                       데이터까지 지우기
+# 백엔드: http://localhost:18180, 상태·지표: http://localhost:18181/actuator/health
+name: pair-loadtest
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: pair
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: loadtest
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "pair"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/backend.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "18180:8180"
+      - "18181:8181"
+    # 운영과 같은 종료 대기(안전한 종료). 재시작 시나리오에서 하던 채점을 마치고 내려간다
+    stop_grace_period: 150s
+    environment:
+      PAIR_DB_URL: jdbc:postgresql://db:5432/pair
+      PAIR_DB_USER: postgres
+      PAIR_DB_PASSWORD: loadtest
+      # 스크립트가 사용자 헤더(X-Pair-User-Id)로 부른다. 테스트 전용 서명 키(운영 키 아님)
+      PAIR_AUTH_MODE: header
+      PAIR_JWT_SECRET: bG9hZHRlc3Qtb25seS1zaWduaW5nLWtleS0zMmJ5dGVzLWxvbmc=
+      PAIR_WITHDRAWN_EMAIL_SECRET: bG9hZHRlc3Qtb25seS13aXRoZHJhd24ta2V5LTMyYnl0ZXMtbG9uZw==
+      # 가짜 AI: 채점 모델 호출 1번에 LOADTEST_AI_LATENCY(± 30%) 기다리고 빈 판정을 돌려준다. 키가 없어 실제 호출은 일어날 수 없다
+      PAIR_AI_FAKE_ENABLED: "true"
+      PAIR_AI_FAKE_LATENCY: ${LOADTEST_AI_LATENCY:-30s}
+      OPENAI_API_KEY: ""
+      ANTHROPIC_API_KEY: ""
+      # 자료를 검색(RAG, 임베딩 호출)하지 않고 통째로 넣는다
+      PAIR_REFERENCE_DOCS: full
+      PAIR_SCORING_QUEUE_ENABLED: ${LOADTEST_QUEUE:-false}
+      PAIR_REDIS_HOST: redis
+      # 운영과 같은 동시 채점 수(application.yml pair.grader.parallel, pair.scoring-queue.workers 기본 4)
+      PAIR_GRADER_PARALLEL: ${LOADTEST_PARALLEL:-4}
+      PAIR_SCORINGQUEUE_WORKERS: ${LOADTEST_PARALLEL:-4}
+      PAIR_RUN_MODE: local
