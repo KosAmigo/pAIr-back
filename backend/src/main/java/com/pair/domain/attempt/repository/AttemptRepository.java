@@ -19,6 +19,10 @@ public interface AttemptRepository extends JpaRepository<Attempt, Long> {
     /** 상태별 응시 수 (모니터링: 채점 대기 건수) */
     long countByStatus(com.pair.domain.attempt.dto.AttemptStateDto.Status status);
 
+    /** 회차의 응시 수 (대상자 × 과제) */
+    @Query("select count(a) from Attempt a, com.pair.domain.exam.entity.ExamParticipant p where a.participantId = p.id and p.session.id = :sessionId")
+    long countBySession(@Param("sessionId") Long sessionId);
+
     /** 상태별 응시 ID (서버 시작 때 채점이 끊긴 응시 찾기) */
     @Query("select a.id from Attempt a where a.status = :status order by a.id")
     List<Long> findIdsByStatus(@Param("status") com.pair.domain.attempt.dto.AttemptStateDto.Status status);
