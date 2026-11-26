@@ -90,6 +90,7 @@ class CompanyIsolationIntegrationTest extends ExamIntegrationTest {
                 get(base + "/events/1/snapshot"), get(base + "/events/1/clip"), get(base + "/clips"),
                 get(base + "/retention"), post(base + "/retention/extend"), post(base + "/rescue"),
                 get(base + "/participants/" + p + "/env-check"), get(base + "/env-check-failures"),
+                get(base + "/participants/" + p + "/env-check/photos"), get(base + "/env-check/photos/1/image"),
                 post(base + "/participants/" + p + "/notices").contentType(MediaType.APPLICATION_JSON).content(notice),
                 get(base + "/participants/" + p + "/notices"),
                 get(base + "/results"), get(base + "/results.csv"), get(base + "/results.xlsx"));
@@ -117,6 +118,7 @@ class CompanyIsolationIntegrationTest extends ExamIntegrationTest {
         String base = "/api/console/sessions/" + otherSession + "/participants/" + ownerParticipant;
         List<MockHttpServletRequestBuilder> mixed = List.of(
                 post(base + "/invite"), post(base + "/restore-link"), get(base + "/events"), get(base + "/env-check"),
+                get(base + "/env-check/photos"),
                 post(base + "/notices").contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"안내\"}"),
                 get(base + "/notices"));
         List<String> leaked = new ArrayList<>();
