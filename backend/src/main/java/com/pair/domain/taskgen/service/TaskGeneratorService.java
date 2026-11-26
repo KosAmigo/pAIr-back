@@ -500,15 +500,19 @@ public abstract class TaskGeneratorService<D> {
             limit.put("stageFailures", usage.stream().filter(u -> StageCallService.OUTPUT_LIMIT_FAILED.equals(u.outputLimit())).count());
             limit.put("resumes", outputLimitLog);
             detail.put("outputLimit", limit);
+            JobCallService batchJob = JobCallService.current();
+            if (batchJob != null && batchJob.window() != null) detail.put("batch", batchSummary(usage, batchJob.deadlineAt())); // 배치 작업: 배치로 받은 호출 수, 바로 호출로 바꾼 수와 이유
             detail.put("blueprintRetries", run.blueprintRetries()); // 설계도 형식 검사로 다시 받은 이유(점검: taskgen-runs/_verify/prompt-audit-2026-11-26.md)
             Map<String, Object> cost = new LinkedHashMap<>(); // 호출 비용 = 토큰 × 가격. byStage 는 단계(점검)별 합계
             Map<String, Double> byStageCost = new LinkedHashMap<>();
-            for (StageUsageDto u : usage) byStageCost.merge(u.stage(), round4(props.cost(u.model(), u.inputTokens(), u.outputTokens())), Double::sum);
+            for (StageUsageDto u : usage) byStageCost.merge(u.stage(), round4(StageCallService.cost(props, u)), Double::sum);
             if (soloCost > 0) byStageCost.put("SOLO", round4(soloCost));
             cost.put("totalUsd", round4(StageCallService.cost(props, usage) + soloCost));
             cost.put("capUsd", cap);
             cost.put("attempts", attempts);
             cost.put("stoppedByCap", capStopped);
+            JobCallService saved = JobCallService.current();
+            cost.put("reusedCalls", saved == null ? 0 : saved.reusedCount()); // 끊긴 작업을 이어 가며 저장된 결과를 다시 쓴 호출 수(그 비용은 위 합계에 한 번만 들어 있다)
             cost.put("estimates", costEstimates);
             cost.put("byStageUsd", byStageCost);
             detail.put("cost", cost);
@@ -541,6 +545,23 @@ public abstract class TaskGeneratorService<D> {
                 : form.withCompetencies(TaskGenRequest.pickCompetencies(draftCompetencies(draft)));
         String code = save(saved, draft, new GenReport(models(usage, props.model()), attempts, seconds, in, out, passed, saved, results, retryError, detail, attemptLog), adminId, extra.files());
         return new Outcome(code, passed, attempts, results);
+    }
+
+    /** 배치 작업의 요약(report details.batch): 배치로 받은 호출 수·평균 대기, 바로 호출로 바꾼 수와 이유(wait 대기 초과, deadline 마감, length 끊김, failed 실패) */
+    static Map<String, Object> batchSummary(List<StageUsageDto> usage, java.time.Instant deadlineAt) {
+        Map<String, Object> b = new LinkedHashMap<>();
+        List<StageUsageDto> viaBatch = usage.stream().filter(u -> StageUsageDto.BATCH.equals(u.via()) && u.directReason().isEmpty()).toList();
+        b.put("batchCalls", viaBatch.size());
+        b.put("avgWaitSeconds", viaBatch.isEmpty() ? 0 : Math.round(viaBatch.stream().mapToLong(StageUsageDto::waitedMs).sum() / 1000.0 / viaBatch.size()));
+        b.put("maxWaitSeconds", Math.round(viaBatch.stream().mapToLong(StageUsageDto::waitedMs).max().orElse(0) / 1000.0));
+        Map<String, Long> direct = new LinkedHashMap<>();
+        for (String r : List.of(BatchCallService.WAIT, BatchCallService.DEADLINE, BatchCallService.LENGTH, BatchCallService.FAILED)) {
+            direct.put(r, usage.stream().filter(u -> StageUsageDto.DIRECT.equals(u.via()) && r.equals(u.directReason())).count());
+        }
+        b.put("directCalls", direct.values().stream().mapToLong(Long::longValue).sum());
+        b.put("directByReason", direct);
+        b.put("deadlineAt", deadlineAt == null ? null : deadlineAt.toString());
+        return b;
     }
 
     /** 지금까지 쓴 비용($): 단계 호출 + 관문 호출 + 검사 안의 풀이 호출 */
@@ -580,7 +601,7 @@ public abstract class TaskGeneratorService<D> {
     private double lastStageCost(List<StageUsageDto> usage, String stage) {
         for (int i = usage.size() - 1; i >= 0; i--) {
             StageUsageDto u = usage.get(i);
-            if (u.stage().equals(stage)) return props.cost(u.model(), u.inputTokens(), u.outputTokens());
+            if (u.stage().equals(stage)) return StageCallService.cost(props, u);
         }
         return 0;
     }

@@ -58,7 +58,8 @@ class TaskFileStorageConfigTest {
     private static final String REMOTE = "jdbc:postgresql://pair-db.xxxx.ap-northeast-2.rds.amazonaws.com:5432/pair";
 
     private static TaskGenJobService jobs(String storage, String url, BizTaskGeneratorService biz, DevTaskGeneratorService dev) {
-        return new TaskGenJobService(dev, biz, new TaskGenProperties(null, null, null, null, null), new TaskFileStorageGuard(storage, url));
+        return new TaskGenJobService(dev, biz, new TaskFileStorageGuard(storage, url), mock(com.pair.domain.taskgen.repository.TaskGenJobRepository.class),
+                mock(com.pair.domain.taskgen.repository.TaskGenCallRepository.class), new com.fasterxml.jackson.databind.ObjectMapper(), "test", 2, false);
     }
 
     private static TaskGenRequest form(String track) {

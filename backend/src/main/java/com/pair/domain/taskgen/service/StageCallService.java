@@ -11,6 +11,7 @@ final class StageCallService {
     private final TaskGenAiService ai;
     private final TaskGenProperties props;
     private final boolean dev;
+    private final JobCallService saved = JobCallService.current(); // 작업이 이어 가기를 켰으면(작업 스레드에 묶여 있음) 호출을 저장·재사용한다
     private final List<StageUsageDto> usage = java.util.Collections.synchronizedList(new ArrayList<>());
 
     /** dev: DEV 직군이면 true, BIZ 면 false (직군마다 단계 모델이 다르다) */
@@ -51,6 +52,53 @@ final class StageCallService {
         long started = System.nanoTime();
         TaskGenAiService.Output<T> out;
         String name = label == null ? stage.name() : stage.name() + ":" + label;
+        String hash = null;
+        int nth = 0;
+        if (saved != null) { // 이어 가기: 같은 입력의 nth 번째 호출이 저장돼 있으면 모델을 부르지 않는다
+            hash = JobCallService.hash(cfg.model(), cfg.effort(), cfg.maxTokens(), system, user, type.getName());
+            nth = saved.nextNth(hash);
+            var stored = saved.find(hash, nth);
+            if (stored.isPresent()) {
+                var value = saved.read(stored.get(), type);
+                if (value.isPresent()) {
+                    var c = stored.get();
+                    var u = new StageUsageDto(name, cfg.model(), cfg.effort(), c.getInputTokens(), c.getOutputTokens(), 0, "", c.getVia(), c.getWaitedMs(), "");
+                    usage.add(u);
+                    saved.addCost(cost(props, u));
+                    saved.markReused();
+                    return value.get();
+                }
+            }
+        }
+        String directReason = "";
+        long waitedMs = 0; // 배치 창구에서 기다린 뒤 바로 호출로 바꾼 경우의 대기 시간
+        BatchCallService window = saved == null ? null : saved.window();
+        if (window != null) { // 배치(BATCH) 작업: 창구에 맡기고 기다린다. 마감이 모자라거나 창구가 바로 호출로 바꾸라고 하면 아래 바로 호출로 간다
+            if (!saved.directForRest() && window.deadlineTight(saved.deadlineAt(), stage)) saved.goDirectForRest(BatchCallService.DEADLINE);
+            if (saved.directForRest()) {
+                directReason = BatchCallService.DEADLINE;
+            } else {
+                var reply = window.submit(new BatchCallService.Request(saved.jobId(), stage.name(), label, hash, nth, cfg.model(), system, user, type,
+                        cfg.maxTokens(), cfg.effort(), BatchCallService.isReview(stage)));
+                if (reply.answered()) {
+                    var u = new StageUsageDto(name, cfg.model(), cfg.effort(), reply.inputTokens(), reply.outputTokens(), Math.round(reply.waitedMs() / 1000.0), "",
+                            StageUsageDto.BATCH, reply.waitedMs(), "");
+                    usage.add(u);
+                    @SuppressWarnings("unchecked") T value = (T) reply.value();
+                    saved.addCost(cost(props, u));
+                    saved.save(hash, nth, stage.name(), label, cfg.model(), value, reply.inputTokens(), reply.outputTokens(), StageUsageDto.BATCH, reply.waitedMs());
+                    return value;
+                }
+                directReason = reply.fallback();
+                waitedMs = reply.waitedMs();
+                if (reply.inputTokens() + reply.outputTokens() > 0) { // 끊기거나 못 읽은 배치 호출도 돈이 들었다
+                    var wasted = new StageUsageDto(name, cfg.model(), cfg.effort(), reply.inputTokens(), reply.outputTokens(), Math.round(reply.waitedMs() / 1000.0),
+                            "", StageUsageDto.BATCH, reply.waitedMs(), directReason);
+                    usage.add(wasted);
+                    saved.addCost(cost(props, wasted));
+                }
+            }
+        }
         try {
             out = ai.generate(cfg.model(), system, user, type, cfg.maxTokens(), cfg.effort());
         } catch (com.pair.infra.ai.OutputLimitException e) {
@@ -68,7 +116,11 @@ final class StageCallService {
             throw new IllegalStateException("[단계 " + (label == null ? stage.name() : stage.name() + ":" + label) + ", " + cfg.model() + ", 출력 한도 " + cfg.maxTokens() + "] " + e.getMessage(), e);
         }
         usage.add(new StageUsageDto(name, cfg.model(), cfg.effort(), out.inputTokens(), out.outputTokens(),
-                Math.round((System.nanoTime() - started) / 1e9), out.effortLowered() ? OUTPUT_LIMIT_LOWERED : ""));
+                Math.round((System.nanoTime() - started) / 1e9), out.effortLowered() ? OUTPUT_LIMIT_LOWERED : "", StageUsageDto.DIRECT, waitedMs, directReason));
+        if (saved != null) {
+            saved.addCost(props.cost(cfg.model(), out.inputTokens(), out.outputTokens())); // 바로 호출은 전액
+            saved.save(hash, nth, stage.name(), label, cfg.model(), out.value(), out.inputTokens(), out.outputTokens(), StageUsageDto.DIRECT, waitedMs);
+        }
         return out.value();
     }
 
@@ -97,7 +149,12 @@ final class StageCallService {
     }
 
     static double cost(TaskGenProperties props, List<StageUsageDto> usage) {
-        return usage.stream().mapToDouble(u -> props.cost(u.model(), u.inputTokens(), u.outputTokens())).sum();
+        return usage.stream().mapToDouble(u -> cost(props, u)).sum();
+    }
+
+    /** 호출 1번의 실제 비용($): 토큰 × 가격, 배치는 50% */
+    static double cost(TaskGenProperties props, StageUsageDto u) {
+        return props.cost(u.model(), u.inputTokens(), u.outputTokens()) * u.priceFactor();
     }
 
     void record(StageUsageDto u) {

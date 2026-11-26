@@ -116,6 +116,9 @@ package-rules:
   enabled: ${PACKAGE_RULES_ENABLED:true}
 
 pair:
+  # 이 서버의 환경 이름. 공용 DB 의 AI 과제 생성 작업(task_gen_jobs.env)을 서버별로 나눈다: 서버는 자기 env 의 작업만 줍는다.
+  # 운영은 PAIR_ENV_NAME=prod 로 정한다(docker-compose.prod.yml). 정하지 않으면 local-<컴퓨터 이름>(팀원 PC 의 OS 사용자 이름이 같을 수 있어 컴퓨터 이름을 쓴다)
+  env-name: ${PAIR_ENV_NAME:local-${COMPUTERNAME:${HOSTNAME:dev}}}
   toss:
     # 테스트 키만 허용한다. 클라이언트 키는 프론트에서 별도로 설정한다.
     secret-key: ${PAIR_TOSS_SECRET_KEY:}
@@ -200,7 +203,10 @@ pair:
     model: gpt-6.1-terra
     solver-model: claude-sonnet-5-5   # BIZ 직접 풀이 검사(생성 sol 과 다른 회사): claude-* 는 Anthropic, gpt-* 는 OpenAI
     solver-effort: medium
-    max-concurrent: ${PAIR_TASKGEN_MAX_CONCURRENT:10}   # 동시에 도는 생성 작업 상한(최대 10)
+    max-concurrent: ${PAIR_TASKGEN_MAX_CONCURRENT:10}   # 동시에 도는 생성 작업 상한(최대 10). 넘으면 대기열에서 기다린다
+    # 대기열 워커(5초마다 내 env 의 대기 작업을 집음). 끄면 이 서버는 작업을 줍지 않는다(요청은 받아 대기열에 넣는다)
+    worker:
+      enabled: ${PAIR_TASKGEN_WORKER_ENABLED:true}
     # 생성기 전용 코드 실행(응시용 pair.run.* 과 따로, 서버의 별도 JVM). 비우면 max-concurrent=CPU 수, timeout=pair.run.timeout-seconds, heap-mb=256
     run:
       heap-mb: 256            # 실행 JVM 하나의 -Xmx(MB). max-concurrent, timeout-seconds 를 쓰려면 여기에 적는다
