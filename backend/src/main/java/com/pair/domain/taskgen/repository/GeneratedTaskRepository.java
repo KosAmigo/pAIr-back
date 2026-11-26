@@ -72,6 +72,11 @@ public class GeneratedTaskRepository {
             "AI가 제안한 내용 중 채택하지 않은 것이 있다면 무엇이고, 이유는 무엇인가요?",
             "동료가 같은 결과를 얻으려면 AI에게 어떤 지시를 어떤 순서로 주면 되나요?");
 
+    /** BIZ 과제 공통 후속 질문 앞 2개(g8: DEV 문구 "테스트 실행, 로그 대조"가 BIZ 에 남아 있었음). 3번째는 과제마다 만든 질문 */
+    public static final List<String> BIZ_FOLLOW_UPS = List.of(
+            "AI 답변 중 그대로 믿지 않고 직접 확인한 것은 무엇이고, 어떻게 확인했나요? (예: 자료 숫자 다시 계산, 문서끼리 대조)",
+            "AI가 제안한 내용 중 채택하지 않은 것이 있다면 무엇이고, 이유는 무엇인가요?");
+
     /** 공용 후속 질문 중 앞의 2개. 3번째는 과제마다 AI 가 만든 질문(Draft 의 taskFollowUp)을 쓴다 */
     private static final int COMMON_FOLLOW_UPS = 2;
 
@@ -336,7 +341,7 @@ public class GeneratedTaskRepository {
     }
 
     private String settings(DevDraftDto d, TaskGenRequest form) {
-        String open = d.files().stream().map(DevDraftDto.FileDraft::path).filter(p -> p.startsWith("src/")).findFirst().orElse(null);
+        String open = openFile(d);
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("openFile", open);
         s.put("editableFile", null);
@@ -347,6 +352,27 @@ public class GeneratedTaskRepository {
         return toJson(s);
     }
 
+    /**
+     * 처음 열어 둘 파일(DEV). 결함이 있는 파일을 열어 두면 어디를 볼지 알려 주는 셈이라(2026-11-26 g6 판정) 결함 위치(hiddenFlaws)에 이름이 있는
+     * 파일은 피한다. 설명·요구사항이 이름을 대는 src 파일(호출하는 쪽)을 먼저, 없으면 결함과 상관없는 첫 src 파일, 그것도 없으면 첫 src 파일
+     */
+    static String openFile(DevDraftDto d) {
+        List<String> src = d.files().stream().map(DevDraftDto.FileDraft::path).filter(p -> p.startsWith("src/") && p.endsWith(".java")).toList();
+        String flaws = d.hiddenFlaws() == null ? "" : d.hiddenFlaws().stream().map(f -> f.description() + " " + f.verifyWith()).reduce("", String::concat);
+        String text = String.join("\n", d.description() == null ? List.of() : d.description()) + "\n" + String.join("\n", d.requirements() == null ? List.of() : d.requirements());
+        // g8: 공개 테스트를 먼저 연다(g7 판정 10: 설명이 이름을 대는 호출 쪽 파일을 열어 두면 필요한 코드 파일을 고를 일이 없음)
+        java.util.Optional<String> test = d.files().stream().map(DevDraftDto.FileDraft::path).filter(p -> p.startsWith("test/") && p.endsWith(".java") && !named(flaws, p)).findFirst();
+        if (test.isPresent()) return test.get();
+        List<String> clean = src.stream().filter(p -> !named(flaws, p)).toList();
+        return clean.stream().filter(p -> named(text, p)).findFirst().orElse(clean.stream().findFirst().orElse(src.stream().findFirst().orElse(null)));
+    }
+
+    /** 글에 파일 경로나 클래스 이름(파일 이름에서 .java 뺀 것)이 단어로 있는가 */
+    private static boolean named(String text, String path) {
+        String stem = path.substring(path.lastIndexOf('/') + 1).replaceFirst("\\.java$", "");
+        return text.contains(path) || java.util.regex.Pattern.compile("(?<![A-Za-z0-9_])" + java.util.regex.Pattern.quote(stem) + "(?![A-Za-z0-9_])").matcher(text).find();
+    }
+
     /** E6: 과제별 AI 제한(턴·한 번에 첨부·첨부 맥락)을 제한시간 기본값으로 settings 에 함께 저장한다 */
     private static void putAiLimits(Map<String, Object> s, int minutes) {
         AiLimitsDto l = AiLimitsDto.forMinutes(minutes);
@@ -355,13 +381,27 @@ public class GeneratedTaskRepository {
         s.put("aiContextChars", l.contextChars());
     }
 
-    /** tasks.task_id 는 PostgreSQL 에서는 시퀀스, 테스트 DB(H2)에서는 최댓값+1 로 정한다 */
+    /**
+     * tasks.task_id 는 PostgreSQL 에서는 시퀀스, 테스트 DB(H2)에서는 최댓값+1 로 정한다.
+     * H2 는 아직 커밋 안 된 저장의 id 가 최댓값에 안 보여 동시에 저장하면 같은 id 를 골라, 뒤 저장이 앞 저장의 행 잠금을 기다리다
+     * 시간 초과로 실패했다(2026-11-26 g6-biz: 동시 10개 중 3개, 문서 PDF 를 만드는 동안 잠금이 길어짐). 이 프로세스에서 이미 나눠 준 id 보다 큰 값을 준다
+     */
     private long nextTaskId() {
-        String product = jdbc.execute((ConnectionCallback<String>) c -> c.getMetaData().getDatabaseProductName());
-        Long id = "PostgreSQL".equals(product)
-                ? jdbc.queryForObject("select nextval(pg_get_serial_sequence('tasks', 'task_id'))", Long.class)
-                : jdbc.queryForObject("select coalesce(max(task_id), 0) + 1 from tasks", Long.class);
-        return id == null ? 1 : id;
+        if (postgres()) {
+            Long id = jdbc.queryForObject("select nextval(pg_get_serial_sequence('tasks', 'task_id'))", Long.class);
+            return id == null ? 1 : id;
+        }
+        Long max = jdbc.queryForObject("select coalesce(max(task_id), 0) + 1 from tasks", Long.class);
+        long db = max == null ? 1 : max;
+        return issuedH2Id.updateAndGet(prev -> Math.max(prev + 1, db));
+    }
+
+    private final java.util.concurrent.atomic.AtomicLong issuedH2Id = new java.util.concurrent.atomic.AtomicLong();
+    private volatile Boolean postgres;
+
+    private boolean postgres() {
+        if (postgres == null) postgres = "PostgreSQL".equals(jdbc.execute((ConnectionCallback<String>) c -> c.getMetaData().getDatabaseProductName()));
+        return postgres;
     }
 
     private static TaskFile file(long taskId, String path, String content, String visibility, boolean readOnly) {

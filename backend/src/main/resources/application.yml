@@ -184,7 +184,10 @@ pair:
     model: gpt-6.1-terra
     solver-model: claude-sonnet-5-5   # BIZ 직접 풀이 검사(생성 sol 과 다른 회사): claude-* 는 Anthropic, gpt-* 는 OpenAI
     solver-effort: medium
-    max-concurrent: 2
+    max-concurrent: ${PAIR_TASKGEN_MAX_CONCURRENT:10}   # 동시에 도는 생성 작업 상한(최대 10)
+    # 생성기 전용 코드 실행(응시용 pair.run.* 과 따로, 서버의 별도 JVM). 비우면 max-concurrent=CPU 수, timeout=pair.run.timeout-seconds, heap-mb=256
+    run:
+      heap-mb: 256            # 실행 JVM 하나의 -Xmx(MB). max-concurrent, timeout-seconds 를 쓰려면 여기에 적는다
     effort: medium
     max-tokens: 48000
     # 생성 방식: staged = 단계별(설계도 → 작성 → 코드/문항 글 → 정답 쪽 → 관문, pAIr-docs 설계/과제_생성_파이프라인.md), oneshot = 옛 방식(한 번에 과제 전체)
@@ -194,7 +197,7 @@ pair:
     stages:
       dev:
         blueprint: {model: gpt-6.1-sol, effort: medium, max-tokens: 24000}
-        writing: {model: gpt-6.1-sol, effort: medium, max-tokens: 16000}   # 결함을 모르는 단계
+        writing: {model: gpt-6.1-sol, effort: low, max-tokens: 16000}   # 결함을 모르는 단계. 글로 옮기기만 해서 low(g5 08: medium 이 생각 16000 을 다 써 빈 답)
         code: {model: gpt-6.1-sol, effort: medium, max-tokens: 24000}
         answer: {model: gpt-6.1-sol, effort: medium, max-tokens: 32000}
         # 관문 검사(코드 검사를 통과한 과제에만). review 는 다른 풀이 작성도 맡고, review2 는 답 노출을 따로 보는 두 번째 눈
@@ -205,8 +208,8 @@ pair:
         filler-review: {model: claude-sonnet-5-5, effort: low, max-tokens: 6000}
       biz:
         blueprint: {model: gpt-6.1-sol, effort: medium, max-tokens: 24000}
-        writing: {model: gpt-6.1-sol, effort: medium, max-tokens: 16000}
-        questions: {model: gpt-6.1-sol, effort: medium, max-tokens: 8000}   # 문항 글(결함을 모르는 단계)
+        writing: {model: gpt-6.1-sol, effort: low, max-tokens: 16000}   # 결함을 모르는 단계(low: g5 02·08 빈 답)
+        questions: {model: gpt-6.1-sol, effort: low, max-tokens: 8000}   # 문항 글(결함을 모르는 단계)
         answer: {model: gpt-6.1-sol, effort: medium, max-tokens: 32000}
         review: {model: claude-sonnet-5-5, effort: medium, max-tokens: 16000}
         review2: {model: gpt-6.1-terra, effort: medium, max-tokens: 16000}
@@ -214,16 +217,18 @@ pair:
         filler-review: {model: claude-sonnet-5-5, effort: low, max-tokens: 6000}
     # 과제 1개를 만드는 데 쓸 수 있는 비용 상한($, 모든 호출의 토큰×가격). 다음 다시 만들기가 넘기면 멈추고 검수 전(HIDDEN)으로 저장한다
     cost-cap: 0.6
+    # 직군·제한시간별 상한(2026-11-26 사용자 결정, 파이프라인 문서 5장). BIZ 40·60분은 첫 시도만 $0.5~0.65라 0.6 이면 다시 만들 수 없었다(g9). 키가 없으면 cost-cap
+    cost-caps: {dev: 0.6, biz-20: 0.6, biz-40: 0.8, biz-60: 1.0}
     # E6·M6: 필요한 묶음만 첨부하면 과제별 AI 제한 안에서 풀리고 자료 전체는 맥락 한도를 넘게 한다. 설계도가 묶음·관련 적은 자료 목록을 내고,
     # 단계 4'가 관련 적은 자료를 만들고, 관문이 분량(묶음 ≤ 한도의 70%, 전체 ≥ 한도의 2배)과 답 노출을 본다(기준 문서 좋은_과제_기준.md 6장)
     material-gate: true
     # 주제·함정 추천: 싼 모델, 짧은 출력. 추론 모델이라 생각 토큰도 상한에 들어간다
-    suggest-model: gpt-6-luna
+    suggest-model: gpt-6-luna   # 주제 추천만 예외로 luna(terra 는 low·8000 에서도 가끔 생각만 하다 잘림, g5). 다른 생성 단계는 terra 이상
     suggest-max-tokens: 2000
     # 답 노출 AI 판정(M5): 응시자에게 보이는 글이 결함의 원인·고치는 법·계산 절차를 알려 주는지 본다. 비우면 suggest-model
-    leak-model: ${pair.taskgen.suggest-model}
+    leak-model: gpt-6.1-terra
     leak-max-tokens: 3000
-    suggest-effort: low      # gpt-6-luna 는 none/low/medium/high/xhigh 만 받는다(minimal 은 400 오류)
+    suggest-effort: low      # 추론 모델: minimal 은 400 오류일 수 있어 low 로 둔다
     # 참고 지표 "AI 단독 풀이"(개발 과제, 합격·불합격 아님): 응시자 AI 처럼 설명·보이는 파일만 주고 solo-attempts 번(기본 1) 풀게 해 숨은 결함을 잡았는지 기록만 한다
     # 모델·추론 강도·출력 한도는 응시자 AI 설정(pair.assistant)을 그대로 쓴다. 끄면 검사를 건너뛰고 report 에 "건너뜀"만 남는다
     solo-enabled: true

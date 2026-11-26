@@ -54,7 +54,18 @@ public record BlueprintDto(
     }
 
     /** 관련 적은 자료 하나: path 는 파일 이름(DEV src/…java, BIZ 자료/…pdf·csv), summary 는 한 줄 내용(결함·답과 상관없는 일반 업무 내용) */
-    public record Filler(String path, String summary) {}
+    public record Filler(String path, String summary, Boolean confusing) {
+
+        /** 헷갈리는 자료 표시 없이 만든다(테스트·옛 코드용) */
+        public Filler(String path, String summary) {
+            this(path, summary, false);
+        }
+
+        /** 헷갈리는 자료인가: 과제와 같은 영역의 이름·내용이지만 답·결함 근거·판단 근거는 없는 자료(M6) */
+        public boolean confusingFlag() {
+            return Boolean.TRUE.equals(confusing);
+        }
+    }
 
     /** 사례 없이 만든다(테스트·옛 코드용) */
     public BlueprintDto(String title, String summary, String code, String category, List<String> competencies, String scenario, List<String> api,

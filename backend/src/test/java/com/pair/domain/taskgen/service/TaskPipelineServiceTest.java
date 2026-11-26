@@ -32,6 +32,7 @@ class TaskPipelineServiceTest {
         final Map<Class<?>, Deque<Object>> script = new HashMap<>();
         final List<Class<?>> order = new ArrayList<>();
         final List<String> users = new ArrayList<>();
+        final List<String> docUsers = java.util.Collections.synchronizedList(new ArrayList<>());
         final List<String> systems = new ArrayList<>();
         final List<String> models = new ArrayList<>();
         final List<String> efforts = new ArrayList<>();
@@ -49,11 +50,23 @@ class TaskPipelineServiceTest {
 
         @Override
         @SuppressWarnings("unchecked")
-        public <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
+        public synchronized <T> Output<T> generate(String model, String system, String user, Class<T> type, int maxTokens, String effort) {
             if (type == com.pair.domain.taskgen.dto.ReviewResultDto.class && !script.containsKey(type)) { // 설계도 직후의 싼 점검: 안 정해 두면 위반 없음, 단계 호출 순서에는 넣지 않는다
                 @SuppressWarnings("unchecked")
                 Output<T> clean = new Output<>((T) new com.pair.domain.taskgen.dto.ReviewResultDto(List.of()), 10, 10);
                 return clean;
+            }
+            // 직군별 설계도(g6): 스크립트는 공통 BlueprintDto 로 적고, 부른 순서에도 BlueprintDto 로 남긴다
+            if (type == com.pair.domain.taskgen.dto.DevBlueprintDto.class || type == com.pair.domain.taskgen.dto.BizBlueprintDto.class) {
+                Output<BlueprintDto> o = generate(model, system, user, BlueprintDto.class, maxTokens, effort);
+                Object converted = type == com.pair.domain.taskgen.dto.DevBlueprintDto.class ? com.pair.domain.taskgen.dto.DevBlueprintDto.from(o.value())
+                        : com.pair.domain.taskgen.dto.BizBlueprintDto.from(o.value());
+                return new Output<>((T) converted, o.inputTokens(), o.outputTokens());
+            }
+            // BIZ 작성 문서별 호출(g6): 문서 호출은 지금 맨 앞 작성 값을 보기만 하고(순서에 안 남김), 요청 글 호출이 그 값을 꺼낸다
+            if (type == com.pair.domain.taskgen.dto.BizWritingDto.class && user.contains(BizPipelineService.DOC_CALL_MARK)) {
+                docUsers.add(user); // g8: 문서만 다시 쓰는 호출을 확인하려고 따로 남긴다
+                return new Output<>((T) script.get(type).peek(), 100, 200);
             }
             order.add(type);
             users.add(user);
@@ -83,7 +96,7 @@ class TaskPipelineServiceTest {
                 "결제 화면에서 할인 항목을 등록하고 합계를 조회한다.", List.of("PaymentDiscount.totalDiscount(): BigDecimal"),
                 List.of(new BlueprintDto.Fact(F_DIGITS, "description"), new BlueprintDto.Fact(F_SETTLE, "description"), new BlueprintDto.Fact(F_REPORT, "description")),
                 List.of(new BlueprintDto.Example(EX1_IN, "3.50"), new BlueprintDto.Example(EX2_IN, "0.30")),
-                List.of(new BlueprintDto.Flaw("할인을 double 로 누적해 소수 합계가 어긋난다", "PaymentDiscount.addDiscount", F_DIGITS, "totalsExactly")),
+                List.of(new BlueprintDto.Flaw("할인을 double 로 누적해 소수 합계가 어긋난다", "DiscountLedger.add", F_DIGITS, "totalsExactly")),
                 List.of(new BlueprintDto.Judgment("할인이 원금보다 클 때 결제액을 어떻게 보일 것인가", F_SETTLE,
                         List.of(new BlueprintDto.Option("0으로 보인다", F_SETTLE), new BlueprintDto.Option("음수로 보인다", F_REPORT)))),
                 List.of("double", "부동소수점"), null, List.of(), List.of(), List.of(), List.of(),
@@ -316,7 +329,7 @@ class TaskPipelineServiceTest {
                 List.of("Q1 객관식 결론", "Q2 단답형 변화율", "Q3 객관식 여력"),
                 List.of(new BlueprintDto.Case("Q1", "새봄·여름 결론", "새봄만 후보", BIZ_F1, "배정 후보 결론", List.of("새봄만 후보", "여름만 후보", "둘 다 후보", "둘 다 보류"), false),
                 new BlueprintDto.Case("Q2", "새봄 변화율", "25", BIZ_F2, "새봄 4월 대비 6월 심사 변화율(퍼센트)", List.of(), false),
-                new BlueprintDto.Case("Q3", "6월 여력", "부족", BIZ_F3, "6월 상담 여력의 충분 여부", List.of("부족", "충분", "같음"), false)));
+                new BlueprintDto.Case("Q3", "6월 여력", "부족", BIZ_F3, "6월 상담 여력의 충분 여부", List.of("부족", "충분", "같음", "알 수 없음"), false)));
     }
 
     static BizWritingDto bizWriting(String extra) {
@@ -330,7 +343,7 @@ class TaskPipelineServiceTest {
         return new BizQuestionsDto(List.of(
                 new BizQuestionsDto.Question("Q1", "Q1. 배정 후보는?", List.of("새봄만 후보", "여름만 후보", "둘 다 후보", "둘 다 보류")),
                 new BizQuestionsDto.Question("Q2", "Q2. 새봄의 4월 대비 6월 심사 변화율은? (퍼센트, 정수)", List.of()),
-                new BizQuestionsDto.Question("Q3", "Q3. 6월 상담 여력은?", List.of("부족", "충분", "같음"))));
+                new BizQuestionsDto.Question("Q3", "Q3. 6월 상담 여력은?", List.of("부족", "충분", "같음", "알 수 없음"))));
     }
 
     static BizAnswerDto bizAnswer() {
@@ -550,13 +563,13 @@ class TaskPipelineServiceTest {
     @DisplayName("프롬프트: 설계도는 기록·관측만 쓰게 하고 사실 아님/사실임 예를 보이며, 작성은 배경만, 정답 쪽은 보기·판단 지점·결과 예를 막는다")
     void promptsCarryTheRules() {
         String bp = TaskPromptService.blueprint(true, 20, "깊이");
-        assertThat(bp).contains("기록과 관측").contains("사실 아님:").contains("사실임:").contains("원자료 한 줄");
-        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("시작 코드도 이미 맞게 내는 입력만");
-        assertThat(TaskPromptService.WRITING_DEV).contains("배경뿐").contains("문자 그대로 취급한다");
-        assertThat(TaskPromptService.writingBiz(20)).contains("배경뿐");
-        assertThat(TaskPromptService.QUESTIONS_BIZ).contains("다른 문항의 값을 넣지 않는다").contains("설명 문장 없이");
-        assertThat(TaskPromptService.answerBiz("깊이")).contains("정답 키만 씁니다").doesNotContain("taskFollowUp");
-        assertThat(TaskPromptService.answerDev(20)).contains("보이는 예는 시작 코드가 이미 통과한다");
+        assertThat(bp).contains("records and observations").contains("Not a fact").contains("Fact: \"견적서").contains("one raw record line");
+        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("must already pass on the flawed starter code");
+        assertThat(TaskPromptService.WRITING_DEV).contains("write only background").contains("문자 그대로 취급한다");
+        assertThat(TaskPromptService.writingBizDoc(20, false, 2)).contains("write only background");
+        assertThat(TaskPromptService.QUESTIONS_BIZ).contains("Do not put another question's value").contains("no explanation sentences");
+        assertThat(TaskPromptService.answerBiz("깊이")).contains("You write only the answer keys").doesNotContain("taskFollowUp");
+        assertThat(TaskPromptService.answerDev(20)).contains("the visible examples already pass on the starter code");
     }
 
     @Test
@@ -657,8 +670,8 @@ class TaskPipelineServiceTest {
         var run = devRun(ai);
         run.create(s -> {});
         assertThat(run.checks()).anyMatch(c -> c.name().equals(TaskPipelineService.CASES_CHECK) && c.ok());
-        assertThat(TaskPromptService.answerDev(20)).contains("설계도 cases 만 구현한다").contains("null 대체값");
-        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("cases:").contains("flaws.caughtBy 는 그 사례의 name");
+        assertThat(TaskPromptService.answerDev(20)).contains("implementing only the blueprint cases").contains("null fallback values");
+        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("cases:").contains("flaws.caughtBy is that case's name");
     }
 
     @Test

@@ -26,6 +26,25 @@ class MaterialLimitTest {
     private static final TaskGenRequest DEV_FORM = new TaskGenRequest("DEV", "결제 할인 계산", "소수 금액 누적 오차", "SELF", 20);
     private static final TaskGenRequest BIZ_FORM = new TaskGenRequest("BIZ", "캠페인 검토", "지표 정의 차이", "SELF", 20);
 
+    /** 헷갈리는 자료로 표시한 관련 적은 자료(설계도 검사는 1/3 이상을 요구한다) */
+    private static BlueprintDto.Filler conf(String path, String summary) {
+        return new BlueprintDto.Filler(path, summary, true);
+    }
+
+    /** 필요한 묶음이 한도(8000자)의 40% 이상이 되도록 부풀린 시작 코드·공개 테스트 */
+    private static com.pair.domain.taskgen.dto.DevCodeDto paddedCode() {
+        BlueprintDto bp = TaskPipelineServiceTest.devBlueprint();
+        List<String> evidence = new java.util.ArrayList<>();
+        bp.cases().forEach(c -> evidence.add(c.basis()));
+        bp.flaws().forEach(f -> evidence.add(f.evidence()));
+        bp.judgments().forEach(j -> evidence.add(j.basis()));
+        StringBuilder a = new StringBuilder(), b = new StringBuilder();
+        for (int i = 0; i < evidence.size(); i++) (i % 2 == 0 ? a : b).append("    String e").append(i).append(" = \"").append(evidence.get(i).replace("\"", "'")).append("\";\n");
+        String pad = "    String note = \"" + "x".repeat(1500) + "\";\n";
+        return new com.pair.domain.taskgen.dto.DevCodeDto(List.of(new DevDraftDto.FileDraft("src/shop/PaymentDiscount.java", "package shop;\npublic class PaymentDiscount {\n" + pad + a + "}\n"),
+                new DevDraftDto.FileDraft("test/shop/PaymentDiscountTest.java", "package shop;\nclass PaymentDiscountTest {\n" + pad + b + "}\n")));
+    }
+
     // ── 과제별 AI 제한 기본값 ─────────────────────────────
 
     @Test
@@ -82,7 +101,11 @@ class MaterialLimitTest {
     void bizSoloPromptRespectsLimits() {
         BizDraftDto d = BizFixtures.good("campaign");
         String limited = BizSoloSolveService.prompt(d, new AiLimitsDto(10, 1, 120));
-        assertThat(limited).contains("[자료 " + d.documents().get(0).path()).doesNotContain("[자료 " + d.documents().get(1).path()).doesNotContain(d.csvFiles().get(0).path());
+        List<String> names = new java.util.ArrayList<>(d.documents().stream().map(BizDraftDto.DocDraft::path).toList());
+        d.csvFiles().forEach(f -> names.add(f.path()));
+        names.sort(String.CASE_INSENSITIVE_ORDER); // 이름순(응시 화면 파일 목록과 같음)으로 앞에서부터 붙인다
+        assertThat(limited).contains("[자료 " + names.get(0));
+        names.stream().skip(1).forEach(n -> assertThat(limited).doesNotContain("[자료 " + n));
         assertThat(limited).contains("[문항]").contains("Q1.");
         String unlimited = BizSoloSolveService.prompt(d);
         assertThat(unlimited).contains(d.documents().get(1).path()).contains(d.csvFiles().get(0).path());
@@ -97,7 +120,7 @@ class MaterialLimitTest {
     @Test
     @DisplayName("M6 필요한 묶음: 한도의 70% 이하면 통과, 넘으면 실패해 설계도를 다시 만든다")
     void neededBundleAtMost70Percent() {
-        BlueprintDto b = bp(List.of("src/a.java", "src/b.java"), List.of(new BlueprintDto.Filler("src/f1.java", "로그 형식")));
+        BlueprintDto b = bp(List.of("src/a.java", "src/b.java"), List.of(conf("src/f1.java", "로그 형식")));
         AiLimitsDto limit = new AiLimitsDto(10, 2, 1000);
 
         Map<String, String> ok = Map.of("src/a.java", "x".repeat(400), "src/b.java", "x".repeat(300));
@@ -108,6 +131,83 @@ class MaterialLimitTest {
         assertThat(fail.name()).isEqualTo(TaskPipelineService.M6_NEEDED_CHECK);
         assertThat(DevPipelineService.owners(fail, List.of(), List.of())).containsExactly(Stage.BLUEPRINT);
         assertThat(BizPipelineService.owners(fail)).containsExactly(Stage.BLUEPRINT);
+    }
+
+    @Test
+    @DisplayName("단독 풀이는 이름순으로 붙인다: 필요한 파일이 목록 앞에 있어도 앞에서부터 고르기가 곧 정답 고르기가 되지 않는다")
+    void attachInNameOrder() {
+        var all = List.of(new SoloLimitService.Material("src/shop/Zeta.java", "z"), new SoloLimitService.Material("test/shop/Test.java", "t"),
+                new SoloLimitService.Material("NOTES.md", "n"), new SoloLimitService.Material("src/shop/alpha.java", "a"));
+        var r = SoloLimitService.attach(all, new AiLimitsDto(10, 4, 1000));
+        assertThat(r.attached()).extracting(SoloLimitService.Material::path).containsExactly("src/shop/alpha.java", "src/shop/Zeta.java", "test/shop/Test.java", "NOTES.md");
+    }
+
+    @Test
+    @DisplayName("M6 필요한 묶음 40%: 미만이면 경고만 낸다(다시 만들지 않는다)")
+    void neededBundleAtLeast40Percent() {
+        BlueprintDto b = bp(List.of("src/a.java", "src/b.java"), List.of(conf("src/f1.java", "로그 형식")));
+        AiLimitsDto limit = new AiLimitsDto(10, 2, 1000);
+        assertThat(MaterialGateService.neededMin(b, Map.of("src/a.java", "x".repeat(200), "src/b.java", "x".repeat(200)), limit).ok()).isTrue(); // 400 = 40%
+        GenCheckResultDto warn = MaterialGateService.neededMin(b, Map.of("src/a.java", "x".repeat(200), "src/b.java", "x".repeat(199)), limit);
+        assertThat(warn.ok()).isFalse();
+        assertThat(warn.level()).isEqualTo(GenCheckResultDto.WARN);
+        assertThat(warn.needsRegeneration()).isFalse();
+        assertThat(warn.detail()).contains("40%");
+        // 70% 검사(실패 조건)는 작은 묶음을 실패로 보지 않는다
+        assertThat(MaterialGateService.needed(b, Map.of("src/a.java", "x", "src/b.java", "x"), limit).ok()).isTrue();
+    }
+
+    private static BlueprintDto withFacts(BlueprintDto b, List<BlueprintDto.Fact> facts) {
+        return new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), facts, b.examples(), b.flaws(), b.judgments(), b.trapKeywords(),
+                b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan(), b.cases(), b.neededFiles(), b.fillers());
+    }
+
+    @Test
+    @DisplayName("M6 근거 파일: 결함 위치 파일과 사례 근거 파일을 합쳐 필요한 파일 2개 이상이면 통과, 아니면 경고만")
+    void evidenceInTwoNeededFiles() {
+        // g7: 고정 설계도의 결함 위치는 api 밖 클래스(DiscountLedger.add)
+        BlueprintDto base = TaskPipelineServiceTest.devBlueprint().withMaterials(List.of("src/shop/DiscountLedger.java", "NOTES.md"), List.of(conf("src/shop/F.java", "로그")));
+        // 사례 근거가 설명(description)에 있으면 필요한 파일이 아니라서 결함 위치 파일 1개뿐
+        GenCheckResultDto one = MaterialGateService.evidence(base);
+        assertThat(one.ok()).isFalse();
+        assertThat(one.name()).isEqualTo(TaskPipelineService.M6_EVIDENCE_CHECK);
+        assertThat(one.level()).isEqualTo(GenCheckResultDto.WARN);
+        assertThat(one.needsRegeneration()).isFalse();
+        assertThat(one.detail()).contains("1개");
+        // 사례 근거 사실이 NOTES.md 에 있으면 코드 파일(결함 위치) + NOTES.md = 2개
+        String basis = base.cases().get(0).basis();
+        List<BlueprintDto.Fact> moved = base.facts().stream().map(f -> f.text().equals(basis) ? new BlueprintDto.Fact(f.text(), "NOTES.md") : f).toList();
+        GenCheckResultDto two = MaterialGateService.evidence(withFacts(base, moved));
+        assertThat(two.ok()).isTrue();
+        assertThat(two.detail()).contains("2개");
+    }
+
+    @Test
+    @DisplayName("M6 헷갈리는 자료: 관련 적은 자료의 1/3 미만이면 경고만 낸다")
+    void blueprintConfusingShare() {
+        var plain = List.of(new BlueprintDto.Filler("src/f1.java", "a"), new BlueprintDto.Filler("src/f2.java", "b"), new BlueprintDto.Filler("src/f3.java", "c"), new BlueprintDto.Filler("src/f4.java", "d"));
+        GenCheckResultDto warn = MaterialGateService.confusing(bp(List.of("src/a.java", "test/aTest.java"), plain));
+        assertThat(warn.ok()).isFalse();
+        assertThat(warn.needsRegeneration()).isFalse();
+        assertThat(warn.name()).isEqualTo(TaskPipelineService.M6_CONFUSING_CHECK);
+        var two = List.of(conf("src/f1.java", "a"), conf("src/f2.java", "b"), plain.get(2), plain.get(3));
+        assertThat(MaterialGateService.confusing(bp(List.of("src/a.java", "test/aTest.java"), two)).ok()).isTrue();
+        // 설계도 단계는 더 이상 헷갈리는 자료 수로 다시 만들게 하지 않는다
+        assertThat(BlueprintService.materialProblems(bp(List.of("src/a.java", "test/aTest.java"), plain), false, 20)).isEmpty();
+        assertThat(MaterialGateService.confusingMin(4)).isEqualTo(2);
+        assertThat(MaterialGateService.confusingMin(3)).isEqualTo(1);
+        assertThat(MaterialGateService.confusingMin(6)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("단계 4' 입력은 파일마다 따로 만들고, 헷갈리는 자료는 표시한다")
+    void fillerInputsPerFile() {
+        BlueprintDto b = bp(List.of("src/a.java"), List.of(conf("src/f1.java", "옛 정책"), new BlueprintDto.Filler("src/f2.java", "로그 형식")));
+        List<String> in = FillerService.inputs(b, 3000, "");
+        assertThat(in).hasSize(2);
+        assertThat(in.get(0)).contains("src/f1.java").contains("[헷갈리는 자료]");
+        assertThat(in.get(1)).contains("src/f2.java").doesNotContain("[헷갈리는 자료]");
+        assertThat(in.get(0)).doesNotContain("만들 파일: 이 파일 하나만 만든다]\n- src/f2.java");
     }
 
     @Test
@@ -124,7 +224,7 @@ class MaterialLimitTest {
     @Test
     @DisplayName("M6 자료 전체: 한도의 2배 이상이면 통과, 모자라면 실패해 단계 4' 만 다시 만든다")
     void totalAtLeastTwiceTheLimit() {
-        BlueprintDto b = bp(List.of("src/a.java"), List.of(new BlueprintDto.Filler("src/f1.java", "로그 형식")));
+        BlueprintDto b = bp(List.of("src/a.java"), List.of(conf("src/f1.java", "로그 형식")));
         AiLimitsDto limit = new AiLimitsDto(10, 2, 1000);
 
         assertThat(MaterialGateService.total(b, Map.of("src/a.java", "x".repeat(500), "src/f1.java", "x".repeat(1500)), limit).ok()).isTrue(); // 2000
@@ -142,7 +242,7 @@ class MaterialLimitTest {
     @Test
     @DisplayName("관련 적은 자료 분량: 자료 전체가 한도의 2.3배가 되도록 파일마다 나눠 정한다")
     void perFillerChars() {
-        BlueprintDto b = bp(List.of("src/a.java"), List.of(new BlueprintDto.Filler("src/f1.java", "a"), new BlueprintDto.Filler("src/f2.java", "b")));
+        BlueprintDto b = bp(List.of("src/a.java"), List.of(conf("src/f1.java", "a"), conf("src/f2.java", "b")));
         // 8000 × 2.3 = 18400, 필요한 묶음 4000 → 14400 / 2 = 7200
         assertThat(MaterialGateService.perFillerChars(b, 4000, new AiLimitsDto(10, 2, 8000))).isEqualTo(7200);
     }
@@ -152,7 +252,7 @@ class MaterialLimitTest {
     @Test
     @DisplayName("단계 4' 입력에는 시나리오·관련 적은 자료 목록·필요한 묶음 이름만 있고 결함·사실·사례는 없다")
     void fillerInputHidesFlaw() {
-        BlueprintDto b = bp(List.of("src/shop/PaymentDiscount.java"), List.of(new BlueprintDto.Filler("src/shop/AuditLog.java", "감사 로그 기록")));
+        BlueprintDto b = bp(List.of("src/shop/PaymentDiscount.java"), List.of(conf("src/shop/AuditLog.java", "감사 로그 기록")));
         String input = FillerService.input(b, 3000, "");
         assertThat(input).contains(b.scenario()).contains("src/shop/AuditLog.java").contains("감사 로그 기록").contains("src/shop/PaymentDiscount.java").contains("3000");
         for (String secret : List.of(b.flaws().get(0).what(), b.flaws().get(0).where(), "totalsExactly", "double", "부동소수점", TaskPipelineServiceTest.F_SETTLE, TaskPipelineServiceTest.EX1_IN)) {
@@ -163,7 +263,7 @@ class MaterialLimitTest {
     @Test
     @DisplayName("단계 4' 결과 다듬기: 설계도가 정한 경로만, 빈 파일·중복은 버린다")
     void fillerSanitized() {
-        BlueprintDto b = bp(List.of("src/a.java"), List.of(new BlueprintDto.Filler("src/f1.java", "a"), new BlueprintDto.Filler("src/f2.java", "b")));
+        BlueprintDto b = bp(List.of("src/a.java"), List.of(conf("src/f1.java", "a"), conf("src/f2.java", "b")));
         FillerDto raw = new FillerDto(List.of(new DevDraftDto.FileDraft("src/f1.java", "class F1 {}"), new DevDraftDto.FileDraft("src/f1.java", "다른 것"),
                 new DevDraftDto.FileDraft("src/f2.java", "  "), new DevDraftDto.FileDraft("src/other.java", "class O {}")));
         FillerDto clean = FillerService.sanitized(raw, b);
@@ -186,24 +286,24 @@ class MaterialLimitTest {
     @Test
     @DisplayName("설계도: 20분 DEV 는 필요한 묶음 2~3개, 관련 적은 자료로 파일 6~8개 안팎이어야 한다")
     void blueprintMaterialRangeDev() {
-        var fillers = List.of(new BlueprintDto.Filler("src/f1.java", "a"), new BlueprintDto.Filler("src/f2.java", "b"), new BlueprintDto.Filler("src/f3.java", "c"),
-                new BlueprintDto.Filler("src/f4.java", "d"));
+        var fillers = List.of(conf("src/f1.java", "a"), conf("src/f2.java", "b"), conf("src/f3.java", "c"),
+                conf("src/f4.java", "d"));
         assertThat(BlueprintService.materialProblems(bp(List.of("src/a.java", "test/aTest.java"), fillers), false, 20)).isEmpty();
         assertThat(BlueprintService.materialProblems(bp(List.of("src/a.java"), fillers), false, 20)).anyMatch(m -> m.contains("neededFiles"));
         assertThat(BlueprintService.materialProblems(bp(List.of("src/a.java", "test/aTest.java"), List.of()), false, 20)).anyMatch(m -> m.contains("fillers"));
         assertThat(BlueprintService.materialProblems(bp(List.of("src/a.java", "src/f1.java"), fillers), false, 20)).anyMatch(m -> m.contains("같은 경로"));
-        assertThat(BlueprintService.materialProblems(bp(List.of("src/a.java", "test/aTest.java"), List.of(new BlueprintDto.Filler("src/f1.java", ""), new BlueprintDto.Filler("src/f2.java", "b"),
-                new BlueprintDto.Filler("src/f3.java", "c"), new BlueprintDto.Filler("src/f4.java", "d"))), false, 20)).anyMatch(m -> m.contains("summary"));
+        assertThat(BlueprintService.materialProblems(bp(List.of("src/a.java", "test/aTest.java"), List.of(conf("src/f1.java", ""), conf("src/f2.java", "b"),
+                conf("src/f3.java", "c"), conf("src/f4.java", "d"))), false, 20)).anyMatch(m -> m.contains("summary"));
     }
 
     @Test
     @DisplayName("설계도: BIZ 필요한 묶음은 문서 계획·표 경로 안에서 고르고, 관련 적은 자료는 자료/ 아래 pdf·csv")
     void blueprintMaterialRangeBiz() {
         BlueprintDto b = TaskPipelineServiceTest.bizBlueprint(); // docs 2 + tables 1
-        var fillers = List.of(new BlueprintDto.Filler("자료/지난 회의록.pdf", "a"), new BlueprintDto.Filler("자료/타 캠페인 집행.csv", "b"));
+        var fillers = List.of(conf("자료/지난 회의록.pdf", "a"), conf("자료/타 캠페인 집행.csv", "b"));
         assertThat(BlueprintService.materialProblems(b.withMaterials(List.of("자료/검토 안내.pdf", "자료/운영 메모.pdf"), fillers), true, 20)).isEmpty();
         assertThat(BlueprintService.materialProblems(b.withMaterials(List.of("자료/검토 안내.pdf", "자료/없는 문서.pdf"), fillers), true, 20)).anyMatch(m -> m.contains("없습니다"));
-        assertThat(BlueprintService.materialProblems(b.withMaterials(List.of("자료/검토 안내.pdf", "자료/운영 메모.pdf"), List.of(new BlueprintDto.Filler("src/x.java", "a"), fillers.get(1))), true, 20))
+        assertThat(BlueprintService.materialProblems(b.withMaterials(List.of("자료/검토 안내.pdf", "자료/운영 메모.pdf"), List.of(conf("src/x.java", "a"), fillers.get(1))), true, 20))
                 .anyMatch(m -> m.contains("경로 형식"));
     }
 
@@ -217,13 +317,13 @@ class MaterialLimitTest {
 
     private static BlueprintDto devE6Blueprint() {
         return TaskPipelineServiceTest.devBlueprint().withMaterials(List.of("src/shop/PaymentDiscount.java", "test/shop/PaymentDiscountTest.java"),
-                List.of(new BlueprintDto.Filler("src/shop/Filler1.java", "로그 형식"), new BlueprintDto.Filler("src/shop/Filler2.java", "설정 읽기"),
-                        new BlueprintDto.Filler("src/shop/Filler3.java", "영수증 포맷"), new BlueprintDto.Filler("src/shop/Filler4.java", "회원 등급")));
+                List.of(conf("src/shop/Filler1.java", "로그 형식"), conf("src/shop/Filler2.java", "설정 읽기"),
+                        conf("src/shop/Filler3.java", "영수증 포맷"), conf("src/shop/Filler4.java", "회원 등급")));
     }
 
     private static TaskPipelineServiceTest.StageAi devAi(FillerDto filler) {
         return new TaskPipelineServiceTest.StageAi().add(BlueprintDto.class, devE6Blueprint()).add(com.pair.domain.taskgen.dto.DevWritingDto.class, TaskPipelineServiceTest.devWriting())
-                .add(com.pair.domain.taskgen.dto.DevCodeDto.class, TaskPipelineServiceTest.devCode()).add(com.pair.domain.taskgen.dto.DevAnswerDto.class, TaskPipelineServiceTest.devAnswer())
+                .add(com.pair.domain.taskgen.dto.DevCodeDto.class, paddedCode()).add(com.pair.domain.taskgen.dto.DevAnswerDto.class, TaskPipelineServiceTest.devAnswer())
                 .add(FillerDto.class, filler);
     }
 
@@ -235,7 +335,7 @@ class MaterialLimitTest {
         DevDraftDto d = run.create(s -> {});
 
         assertThat(ai.order).containsExactly(BlueprintDto.class, com.pair.domain.taskgen.dto.DevWritingDto.class, com.pair.domain.taskgen.dto.DevCodeDto.class,
-                com.pair.domain.taskgen.dto.DevAnswerDto.class, FillerDto.class);
+                com.pair.domain.taskgen.dto.DevAnswerDto.class, FillerDto.class, FillerDto.class, FillerDto.class, FillerDto.class); // 관련 적은 자료 4개를 파일마다 따로 부른다
         assertThat(ai.models.get(4)).isEqualTo("gpt-6.1-terra"); // 싼 모델(설정 기본값)
         assertThat(run.usage()).extracting("stage").contains("FILLER");
         assertThat(ai.users.get(4)).doesNotContain("double", "부동소수점", "totalsExactly");
@@ -260,7 +360,7 @@ class MaterialLimitTest {
         ai.script.get(FillerDto.class).add(devFiller(4200));
         int calls = ai.order.size();
         run.redo(failed, s -> {});
-        assertThat(ai.order.subList(calls, ai.order.size())).containsExactly(FillerDto.class); // 설계도·작성·코드·정답은 다시 안 돈다
+        assertThat(ai.order.subList(calls, ai.order.size())).containsOnly(FillerDto.class).hasSize(4); // 설계도·작성·코드·정답은 다시 안 돈다
         assertThat(ai.users.get(ai.users.size() - 1)).contains("자료 전체"); // 앞서 실패한 이유를 알려 준다
         assertThat(run.checks().stream().filter(GenCheckResultDto::needsRegeneration).toList()).isEmpty();
     }
@@ -281,10 +381,10 @@ class MaterialLimitTest {
     @DisplayName("BIZ 파이프라인(M6 켜짐): 관련 적은 문서·CSV 가 문서 쪽과 CSV 로 붙고 M6 검사가 통과한다")
     void bizPipelineWithFiller() {
         BlueprintDto b = TaskPipelineServiceTest.bizBlueprint().withMaterials(List.of("자료/검토 안내.pdf", "자료/운영 메모.pdf"),
-                List.of(new BlueprintDto.Filler("자료/지난 회의록.pdf", "지난 분기 회의"), new BlueprintDto.Filler("자료/타 캠페인 집행.csv", "다른 캠페인 집행표")));
+                List.of(conf("자료/지난 회의록.pdf", "지난 분기 회의"), conf("자료/타 캠페인 집행.csv", "다른 캠페인 집행표")));
         String longText = ("집행 점검 회의에서 일정과 예산 집행 현황을 확인하고 다음 점검 일정을 정했다.\n\n").repeat(260);
         String csv = "캠페인,월,금액\n" + "가을,9월,1200\n".repeat(900);
-        var ai = new TaskPipelineServiceTest.StageAi().add(BlueprintDto.class, b).add(com.pair.domain.taskgen.dto.BizWritingDto.class, TaskPipelineServiceTest.bizWriting(""))
+        var ai = new TaskPipelineServiceTest.StageAi().add(BlueprintDto.class, b).add(com.pair.domain.taskgen.dto.BizWritingDto.class, TaskPipelineServiceTest.bizWriting(" " + "가".repeat(3600)))
                 .add(com.pair.domain.taskgen.dto.BizQuestionsDto.class, TaskPipelineServiceTest.bizQuestions()).add(com.pair.domain.taskgen.dto.BizAnswerDto.class, TaskPipelineServiceTest.bizAnswer())
                 .add(FillerDto.class, new FillerDto(List.of(new DevDraftDto.FileDraft("자료/지난 회의록.pdf", longText), new DevDraftDto.FileDraft("자료/타 캠페인 집행.csv", csv))));
         var run = new BizPipelineService(ai, E6).start(BIZ_FORM);

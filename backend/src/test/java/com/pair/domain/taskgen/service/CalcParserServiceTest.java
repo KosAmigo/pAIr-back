@@ -75,4 +75,11 @@ class CalcParserServiceTest {
         assertThat(BizTableService.num("34%")).isEqualTo(34);
         assertThat(BizTableService.num("abc")).isNull();
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("g5 04·10: 따옴표 밖의 −, ×, ÷ 는 -, *, / 로 읽고 따옴표 안의 글자는 그대로 둔다")
+    void unicodeOperators() {
+        assertThat(eval("10 − 4 ÷ 2 × 3")).isEqualTo(4);
+        assertThat(CalcParserService.asciiOperators("v(\"a−b.csv\", \"x=1\", \"y\") − 1")).isEqualTo("v(\"a−b.csv\", \"x=1\", \"y\") - 1");
+    }
 }

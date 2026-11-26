@@ -83,6 +83,11 @@ public class DevTaskGeneratorService extends TaskGeneratorService<DevDraftDto> {
     }
 
     @org.springframework.beans.factory.annotation.Autowired
+    public DevTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, TaskGenRunService run, GeneratedTaskRepository writer,
+            SoloSolveService solo, DevPipelineService pipeline) {
+        this(ai, props, run.runner(), writer, solo, pipeline);
+    }
+
     public DevTaskGeneratorService(TaskGenAiService ai, TaskGenProperties props, CodeRunner runner, GeneratedTaskRepository writer,
             SoloSolveService solo, DevPipelineService pipeline) {
         super(ai, props, pipeline);

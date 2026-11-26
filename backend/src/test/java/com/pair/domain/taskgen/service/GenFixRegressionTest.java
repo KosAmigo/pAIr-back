@@ -51,10 +51,10 @@ class GenFixRegressionTest {
 
         BlueprintDto dev = TaskPipelineServiceTest.devBlueprint();
         var called = new BlueprintDto.Case("payableNoDiscount", "할인 없이 payable() 호출", "10000", dev.cases().get(0).basis());
-        assertThat(BlueprintService.addedMethodCases(with(dev, List.of(api), List.of(), dev.flaws(), List.of(called, dev.cases().get(0))))).isEmpty();
-        var none = BlueprintService.addedMethodCases(with(dev, List.of(api), List.of(), dev.flaws(), List.of(dev.cases().get(0))));
+        assertThat(DevBlueprintService.addedMethodCases(with(dev, List.of(api), List.of(), dev.flaws(), List.of(called, dev.cases().get(0))))).isEmpty();
+        var none = DevBlueprintService.addedMethodCases(with(dev, List.of(api), List.of(), dev.flaws(), List.of(dev.cases().get(0))));
         assertThat(none).anyMatch(p -> p.contains("payable() 를 부르는 사례") && p.contains("예:") && p.contains("추가: 클래스.payable("));
-        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("수정자나 패키지 이름은 쓰지 않는다").contains("추가: OrderDiscount.payable(): long");
+        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("No modifiers (public, static), no package").contains("추가: OrderDiscount.payable(): long");
     }
 
     // ── 2. 사실 한 문장, 비슷한 문장 비교 ─────────────────────────────
@@ -73,7 +73,7 @@ class GenFixRegressionTest {
                 b.trapKeywords(), b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan(), b.cases());
         assertThat(BlueprintService.multiSentenceFacts(bad)).hasSize(2);
         assertThat(BlueprintService.multiSentenceFacts(b)).isEmpty();
-        assertThat(TaskPromptService.blueprint(true, 40, "깊이")).contains("사실 하나는 문장 하나");
+        assertThat(TaskPromptService.blueprint(true, 40, "깊이")).contains("Each fact is ONE sentence");
     }
 
     @Test
@@ -103,13 +103,13 @@ class GenFixRegressionTest {
         String api = "추가: settings.LayoutParser.encode(): String";
         var examples = List.of(new BlueprintDto.Example("new LayoutParser(\"AUTO\").encode()", "\"\""), new BlueprintDto.Example("new LayoutParser(\"GRID\").encode()", "\"layout=GRID\""));
         var auto = new BlueprintDto.Case("encodesAuto", "new LayoutParser(\"AUTO\").encode()", "\"\"", "new LayoutParser(\"AUTO\").encode() → \"\"");
-        var problems = BlueprintService.addedMethodCases(with(dev, List.of(api), examples, dev.flaws(), List.of(auto, dev.cases().get(0))));
+        var problems = DevBlueprintService.addedMethodCases(with(dev, List.of(api), examples, dev.flaws(), List.of(auto, dev.cases().get(0))));
         assertThat(problems).hasSize(1);
         assertThat(problems.get(0)).contains("GRID").contains("사례(cases)가 없습니다");
         var grid = new BlueprintDto.Case("encodesGrid", "new LayoutParser(\"GRID\").encode()", "\"layout=GRID\"", "new LayoutParser(\"GRID\").encode() → \"layout=GRID\"");
-        assertThat(BlueprintService.addedMethodCases(with(dev, List.of(api), examples, dev.flaws(), List.of(auto, grid, dev.cases().get(0))))).isEmpty();
-        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("사례가 없는 동작은 숨은 테스트가 보지 않아");
-        assertThat(TaskPromptService.answerDev(40)).contains("description·requirements 에 없는 요구");
+        assertThat(DevBlueprintService.addedMethodCases(with(dev, List.of(api), examples, dev.flaws(), List.of(auto, grid, dev.cases().get(0))))).isEmpty();
+        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("behaviour without a case is not checked by hidden tests");
+        assertThat(TaskPromptService.answerDev(40)).contains("missing from the visible description·requirements");
     }
 
     // ── 5. 정의가 함정을 없앰 ─────────────────────────────
@@ -134,7 +134,9 @@ class GenFixRegressionTest {
         assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.TRAP_QUESTION, false, "Q2 는 자료 칸 하나를 그대로 읽는 문항입니다"))).containsExactly(Stage.ANSWER);
 
         String leak = TaskPromptService.check("blueprint-leak");
-        assertThat(leak).contains("원본 필드는 운임 및 예약 수수료를 포함한 카드 결제 합계").contains("함정의 정답 해석");
+        // g8 결정: 회사 정의를 기록 말투로 한 번 쓰는 것은 허용(함정의 정답 해석을 정해 줘도), 절차·지시로 쓰면 M5
+        assertThat(leak).contains("회사 정의 기록은 위반이 아닙니다").contains("함정의 정답 해석").contains("계산 절차");
+        assertThat(TaskPromptService.check("leak")).contains("회사 정의 기록").contains("빼서 구한다");
     }
 
     // ── 6. 군더더기 문장 ─────────────────────────────
@@ -150,7 +152,7 @@ class GenFixRegressionTest {
         var r = TaskWritingService.fillerCheck(FILLER);
         assertThat(r.ok()).isFalse();
         assertThat(r.needsRegeneration()).isFalse(); // 경고만
-        assertThat(TaskPromptService.writingBiz(40)).contains("나쁜 예:").contains("좋은 예:").contains("담당자는 자료를 검토 중이다");
+        assertThat(TaskPromptService.writingBizDoc(40, false, 2)).contains("나쁜 예:").contains("좋은 예:").contains("담당자는 자료를 검토 중이다");
     }
 
     @Test
@@ -160,8 +162,10 @@ class GenFixRegressionTest {
                 .add(BizWritingDto.class, TaskPipelineServiceTest.bizWriting(" " + FILLER)).add(BizWritingDto.class, TaskPipelineServiceTest.bizWriting(" " + FILLER))
                 .add(BizQuestionsDto.class, TaskPipelineServiceTest.bizQuestions()).add(BizAnswerDto.class, TaskPipelineServiceTest.bizAnswer());
         new BizPipelineService(ai, new TaskGenProperties(null, null, null, null, null)).start(new com.pair.domain.taskgen.dto.TaskGenRequest("BIZ", "캠페인 검토", "지표 정의 차이", "SELF", 20)).create(s -> {});
-        assertThat(ai.order).containsExactly(BlueprintDto.class, BizWritingDto.class, BizWritingDto.class, BizQuestionsDto.class, BizAnswerDto.class);
-        assertThat(ai.users.get(2)).contains("되풀이됩니다").contains("담당자는 접수된 자료를 검토 중이다");
+        // g8: 되돌릴 때는 그 문장이 든 문서만 문서별 호출로 다시 쓰고 요청 글(brief)은 다시 부르지 않는다
+        assertThat(ai.order).containsExactly(BlueprintDto.class, BizWritingDto.class, BizQuestionsDto.class, BizAnswerDto.class);
+        assertThat(ai.docUsers).filteredOn(u -> u.contains("되풀이됩니다")).isNotEmpty().allMatch(u -> u.startsWith(BizPipelineService.DOC_CALL_MARK))
+                .anyMatch(u -> u.contains("담당자는 접수된 자료를 검토 중이다"));
     }
 
     // ── 7. 난이도 참고 지표(AI 단독 풀이) ─────────────────────────────
@@ -219,10 +223,12 @@ class GenFixRegressionTest {
     @Test
     @DisplayName("7: 결함 유형 목록은 단독 풀이가 놓친 유형(D5, B5)을 먼저 두고 나머지는 '쉽게 잡음'으로 표시하며, 설계도 프롬프트에 결함 배치 안내가 있다")
     void flawTypesPutMissedFirstAndPromptGuidesPlacement() {
-        String types = TaskPromptService.resource("taskgen/flaw-types.md");
-        assertThat(types.indexOf("D5 ")).isLessThan(types.indexOf("D1 "));
+        String types = TaskPromptService.resource("taskgen/flaw-types-dev.md") + TaskPromptService.resource("taskgen/flaw-types-biz.md");
         assertThat(types.indexOf("B5 ")).isLessThan(types.indexOf("B1 "));
-        assertThat(types).contains("D1 월말").contains("B6 단위 환산").contains("쉽게 잡음");
-        assertThat(TaskPromptService.blueprint(true, 40, "깊이")).contains("두 곳 이상을 대조할 때만").contains("단위 열이 함정을 알려 주는 CSV");
+        // g7(E3 다시 고름): DEV 는 업무 규칙형(R1~R6)만, 일반 버그(정수 넘침·부동소수점·월말·캐시)는 뺐다
+        assertThat(types).contains("R1 경계 포함 여부").contains("R4 적용 순서").contains("B9 실적 정의").contains("B8 적용 순서")
+                .doesNotContain("B6 단위 환산").doesNotContain("B4 부가세") // g8: 일반 상식 함정(부가세 1.1, 단위 환산)은 뺐다
+                .doesNotContain("D3 정수 넘침").doesNotContain("D4 부동소수점").doesNotContain("D7 오래된 캐시");
+        assertThat(TaskPromptService.blueprint(true, 40, "깊이")).contains("two documents or a document and a CSV are compared").contains("a unit column that announces the trap");
     }
 }

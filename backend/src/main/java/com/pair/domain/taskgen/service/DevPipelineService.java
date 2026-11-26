@@ -66,7 +66,7 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
                 || n.equals(DevCheckService.NO_HINT) || n.equals(DevCheckService.FORMAT))) {
             return EnumSet.of(Stage.FILLER);
         }
-        if (n.equals(TaskPipelineService.MENTION_CHECK)) return EnumSet.of(Stage.WRITING);
+        if (n.equals(TaskPipelineService.MENTION_CHECK) || n.equals(TaskPipelineService.GEN_META_CHECK) || n.equals(TaskPipelineService.FLAW_POINTER_CHECK)) return EnumSet.of(Stage.WRITING);
         if (n.equals(DevCheckService.FAKE_IMPL)) return EnumSet.of(Stage.BLUEPRINT); // 반대 결과 사례가 없다: 사례를 더해야 하는 설계도 문제
         if (n.equals(DevCheckService.NO_HINT) || n.equals(DevCheckService.START_PASSES) || n.equals(TaskPipelineService.STUB_CHECK)) return EnumSet.of(Stage.CODE);
         if (n.equals(DevCheckService.HIDDEN_CATCHES) || n.equals(DevCheckService.SOLVED_PASSES) || n.equals(DevCheckService.WRONG_FIXES)
@@ -107,6 +107,7 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         private FillerDto filler;
         private List<GenCheckResultDto> checks = List.of();
         private List<String> redone = List.of();
+        private final List<List<String>> blueprintRetries = new ArrayList<>(); // 설계도 형식 검사로 다시 받은 이유(report.json details.blueprintRetries)
         private List<GenCheckResultDto> previous = List.of(); // 바로 앞 다시 만들기 때 실패한 검사(같은 이유의 되풀이를 알아내는 데 쓴다)
 
         DevRun(TaskGenRequest form, StageCallService calls, boolean e6) {
@@ -151,6 +152,13 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         }
 
         @Override
+        public DevDraftDto resumeFrom(Stage stage, Consumer<String> onStep) {
+            StageRouteService.Plan plan = StageRouteService.from(stage, e6 ? ALL_E6 : ALL);
+            redone = plan.stages().stream().map(Enum::name).toList();
+            return execute(plan, onStep);
+        }
+
+        @Override
         public DevDraftDto redo(List<GenCheckResultDto> failed, Consumer<String> onStep) {
             StageRouteService.Plan plan = plan(failed);
             redone = plan.stages().stream().map(Enum::name).toList();
@@ -190,9 +198,9 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         /** E6·M6 단계 4': 결함을 모르는 싼 모델이 관련 적은 자료를 쓴다. 자료 전체가 맥락 한도의 2.3배가 되도록 파일당 분량을 알려 준다 */
         private FillerDto fill(String feedback) {
             if (bp.fillers().isEmpty()) return new FillerDto(List.of());
-            int neededChars = MaterialGateService.chars(materials(TaskAssemblyService.dev(form, bp, writing, code, answer, null)), bp.neededFiles());
+            int neededChars = MaterialGateService.bundleChars(materials(TaskAssemblyService.dev(form, bp, writing, code, answer, null)), bp.neededFiles());
             int per = MaterialGateService.perFillerChars(bp, neededChars, limits);
-            FillerDto raw = calls.call(Stage.FILLER, TaskPromptService.filler(false), FillerService.input(bp, per, feedback), FillerDto.class);
+            FillerDto raw = FillerService.merge(calls.callParallel(Stage.FILLER, TaskPromptService.filler(false), FillerService.inputs(bp, per, feedback), FillerDto.class)); // 파일마다 동시에
             return FillerService.sanitized(raw, bp);
         }
 
@@ -204,17 +212,19 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         }
 
         private BlueprintDto blueprint(String feedback) {
-            String system = TaskPromptService.blueprint(false, form.minutes(), DevTaskGeneratorService.depth(form.minutes()), e6);
+            String system = TaskPromptService.blueprint(false, form.minutes(), TaskPromptService.stageDepth(false, form.minutes(), e6), e6);
             String user = "제한 시간: " + form.minutes() + "분\n주제: " + form.topic() + "\n함정: " + form.trap() + (feedback.isEmpty() ? "" : "\n\n" + feedback);
-            BlueprintDto b = BlueprintService.normalized(calls.call(Stage.BLUEPRINT, system, user, BlueprintDto.class), false);
+            BlueprintDto b = BlueprintService.normalized(calls.call(Stage.BLUEPRINT, system, user, com.pair.domain.taskgen.dto.DevBlueprintDto.class).toBlueprint(), false);
             List<String> problems = blueprintProblems(b);
             if (problems.isEmpty()) problems = earlyReview(b); // 코드 검사를 통과하면 글에 들어갈 문장만 싸게 한 번 더 본다
             // 설계도가 모자라면 뒤 단계를 돌리기 전에 설계도만 다시 받는다(코드 검사에 걸리면 최대 2번, 다시 받은 것도 검사한다)
             for (int retry = 0; !problems.isEmpty() && retry < 2; retry++) {
+                blueprintRetries.add(List.copyOf(problems));
                 b = BlueprintService.normalized(calls.call(Stage.BLUEPRINT, system,
-                        user + "\n\n설계도가 아래 문제로 걸렸습니다. 고쳐서 다시 내세요:\n- " + String.join("\n- ", problems), BlueprintDto.class), false);
+                        user + "\n\n설계도가 아래 문제로 걸렸습니다. 고쳐서 다시 내세요:\n- " + String.join("\n- ", problems), com.pair.domain.taskgen.dto.DevBlueprintDto.class).toBlueprint(), false);
                 problems = blueprintProblems(b);
             }
+            if (!problems.isEmpty()) blueprintRetries.add(List.copyOf(problems)); // 재시도를 다 쓰고도 남은 문제
             return b;
         }
 
@@ -240,7 +250,7 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
 
         private DevCodeDto writeCode(String feedback) {
             String user = StageCallService.json(bp) + (feedback.isEmpty() ? "" : "\n\n" + feedback);
-            DevCodeDto c = calls.call(Stage.CODE, TaskPromptService.code(DevTaskGeneratorService.depth(form.minutes()), e6, form.minutes()), user, DevCodeDto.class);
+            DevCodeDto c = calls.call(Stage.CODE, TaskPromptService.code(TaskPromptService.stageDepth(false, form.minutes(), e6), e6, form.minutes()), user, DevCodeDto.class);
             return new DevCodeDto(nz(c.files()));
         }
 
@@ -275,6 +285,8 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
             java.util.List<String> visible = new ArrayList<>(code.files().stream().map(DevDraftDto.FileDraft::path).toList());
             if (!writing.notes().isBlank()) visible.add("NOTES.md");
             out.add(TaskWritingService.mentionedFilesCheck(String.join("\n", writing.description()) + "\n" + String.join("\n", writing.requirements()), visible));
+            out.add(TaskWritingService.genMetaCheck(String.join("\n", writing.description()) + "\n" + String.join("\n", writing.requirements()) + "\n" + writing.notes()));
+            out.add(TaskWritingService.flawPointerCheck(bp, writing.description(), writing.requirements()));
             out.add(CaseCheckService.stubs(bp, code.files())); // 틀이 없으면 숨은 테스트가 컴파일되지 않으니 이 검사가 먼저 시작 코드 단계를 가리킨다
             out.add(CaseCheckService.addedCalled(bp, answer.hiddenTests()));
             java.util.Map<String, String> han = new java.util.LinkedHashMap<>(); // 숨은 글(정답·오답 사유 등)까지 모든 글 칸
@@ -288,6 +300,9 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
             if (e6) { // E6·M6: 필요한 묶음은 한도의 70% 이하, 자료 전체는 한도의 2배 이상
                 var mats = materials(draft);
                 out.add(MaterialGateService.needed(bp, mats, limits));
+                out.add(MaterialGateService.neededMin(bp, mats, limits));
+                out.add(MaterialGateService.evidence(bp));
+                out.add(MaterialGateService.confusing(bp));
                 out.add(MaterialGateService.total(bp, mats, limits));
             }
             return out;
@@ -311,6 +326,11 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         @Override
         public List<String> redone() {
             return redone;
+        }
+
+        @Override
+        public List<List<String>> blueprintRetries() {
+            return List.copyOf(blueprintRetries);
         }
     }
 

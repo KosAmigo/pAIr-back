@@ -54,15 +54,24 @@ public class BizSoloSolveService {
 
     /** 응시자가 AI 에 붙여 넣을 만한 글(제한 없이 자료 전부). 정답, 계산식, 체크리스트, 함정 정보는 넣지 않는다 */
     static String prompt(BizDraftDto d) {
-        return prompt(d, null);
+        return prompt(d, (AiLimitsDto) null);
     }
 
     /** limits 가 있으면 자료를 앞에서부터 붙이되 첨부 개수·맥락 글자 한도까지만 붙인다(E6, 고르지 않는 풀이) */
     static String prompt(BizDraftDto d, AiLimitsDto limits) {
+        return prompt(d, SoloLimitService.attach(materials(d), limits));
+    }
+
+    /** 과제 글(설명·요구사항·문항, 자료 없음). 고르기 질문에 쓴다 */
+    static String taskText(BizDraftDto d) {
         StringBuilder sb = new StringBuilder();
         sb.append("[설명]\n").append(String.join("\n", d.description())).append("\n\n[요구사항]\n");
         for (String r : d.requirements()) sb.append("- ").append(r).append('\n');
-        for (var m : SoloLimitService.attach(materials(d), limits).attached()) sb.append(m.text());
+        appendQuestions(sb, d);
+        return sb.toString();
+    }
+
+    private static void appendQuestions(StringBuilder sb, BizDraftDto d) {
         sb.append("\n[문항]\n");
         int n = 1;
         for (var q : d.questions()) {
@@ -71,6 +80,15 @@ public class BizSoloSolveService {
                 for (int j = 0; j < q.choices().size(); j++) sb.append("  ").append(j + 1).append(") ").append(q.choices().get(j).content()).append('\n');
             }
         }
+    }
+
+    /** 붙인 자료로 풀이 질문을 만든다 */
+    static String prompt(BizDraftDto d, SoloLimitService.Attached attached) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[설명]\n").append(String.join("\n", d.description())).append("\n\n[요구사항]\n");
+        for (String r : d.requirements()) sb.append("- ").append(r).append('\n');
+        for (var m : attached.attached()) sb.append(m.text());
+        appendQuestions(sb, d);
         return sb.append('\n').append(REQUEST).toString();
     }
 
@@ -122,19 +140,22 @@ public class BizSoloSolveService {
     public Result run(BizDraftDto d, AiLimitsDto limits) {
         String model = props.soloModel() == null || props.soloModel().isBlank() ? pair.assistant().model() : props.soloModel();
         String system = pair.assistant().systemPrompt() == null ? "" : pair.assistant().systemPrompt();
+        // g8: AI 가 파일 목록을 보고 직접 골라 붙인다(g7: 이름순 앞에서부터 붙여 필요한 자료를 하나도 못 붙임)
+        SoloLimitService.Picked picked = SoloLimitService.pick(ai, model, system, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort(), taskText(d), materials(d), limits);
+        String pickNote = SoloLimitService.note(picked, limits);
         TaskGenAiService.Output<SoloBizAnswerDto> o;
         try {
-            o = ai.generate(model, system, prompt(d, limits), SoloBizAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
+            o = ai.generate(model, system, prompt(d, picked.attached()), SoloBizAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
         } catch (RuntimeException e) {
-            return new Result(unchecked("모델 호출 실패: " + e.getMessage()), 0, 0, List.of());
+            return new Result(unchecked("모델 호출 실패: " + e.getMessage()), picked.inputTokens(), picked.outputTokens(), List.of());
         }
         List<SoloBizItemDto> items = o.value() == null || o.value().answers() == null ? List.of() : o.value().answers();
-        if (items.isEmpty()) return new Result(unchecked("풀이 모델이 답을 주지 않음"), o.inputTokens(), o.outputTokens(), List.of());
+        if (items.isEmpty()) return new Result(unchecked("풀이 모델이 답을 주지 않음"), o.inputTokens() + picked.inputTokens(), o.outputTokens() + picked.outputTokens(), List.of());
         List<String> answers = matchByNumber(items, d.questions().size());
         if (answers == null) {
             // 번호가 문항과 맞지 않거나 빠졌다: 틀림으로 세지 않고 확인하지 못한 것으로 둔다. 기록에는 받은 그대로 남긴다
             List<String> raw = items.stream().map(it -> it == null ? null : it.no() + ":" + it.answer()).toList();
-            return new Result(new GenCheckResultDto(NAME, true, UNMATCHED, GenCheckResultDto.WARN), o.inputTokens(), o.outputTokens(), raw);
+            return new Result(new GenCheckResultDto(NAME, true, UNMATCHED, GenCheckResultDto.WARN), o.inputTokens() + picked.inputTokens(), o.outputTokens() + picked.outputTokens(), raw);
         }
 
         List<Integer> traps = trapQuestions(d);
@@ -147,15 +168,15 @@ public class BizSoloSolveService {
         }
         GenCheckResultDto check;
         if (!missed.isEmpty()) {
-            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요. " + limitNote(d, limits) + "자료를 그대로 받고 낸 답이 함정 문항에서 틀렸어요: " + String.join(", ", missed), GenCheckResultDto.WARN);
+            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요. " + pickNote + "고른 자료로 낸 답이 함정 문항에서 틀렸어요: " + String.join(", ", missed), GenCheckResultDto.WARN);
         } else {
             String evidence = d.trap() == null || d.trap().evidence() == null ? "" : d.trap().evidence().strip();
-            String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요. " + limitNote(d, limits) + "(함정 문항 " + passed.size() + "개를 모두 맞힘): "
+            String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요. " + pickNote + "(함정 문항 " + passed.size() + "개를 모두 맞힘): "
                     + String.join(", ", passed) + ". 난이도가 낮거나 단서가 자료에 많이 드러났는지 검수하세요."
                     + (evidence.isEmpty() ? "" : " AI 가 단서로 썼을 만한 자료 문장: " + (evidence.length() > 150 ? evidence.substring(0, 150) + "…" : evidence));
             check = new GenCheckResultDto(NAME, true, detail, GenCheckResultDto.WARN);
         }
-        return new Result(check, o.inputTokens(), o.outputTokens(), answers);
+        return new Result(check, o.inputTokens() + picked.inputTokens(), o.outputTokens() + picked.outputTokens(), answers);
     }
 
     /**
@@ -173,10 +194,6 @@ public class BizSoloSolveService {
         return List.of(byNo);
     }
 
-    /** 제한 안에서 무엇을 붙였는지(검수자가 난이도를 가늠하는 데 쓴다) */
-    private static String limitNote(BizDraftDto d, AiLimitsDto limits) {
-        return SoloLimitService.note(SoloLimitService.attach(materials(d), limits), limits);
-    }
 
     private static GenCheckResultDto unchecked(String why) {
         return new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(" + why + ")", GenCheckResultDto.WARN);

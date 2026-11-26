@@ -29,6 +29,8 @@ final class BizNumbersService {
     private static final Pattern CSV_ROW = Pattern.compile("^\\s*[^\\s,]+(,[^\\s,]+){2,}\\s*$");
     /** 날짜·쪽·차례·시각·사람 수·조항·팀 수 같은 숫자는 수치가 아니다 */
     private static final Pattern NOT_A_FIGURE = Pattern.compile("^\\s*(월|일|년|분기|쪽|페이지|번째|차\\b|시|명|개|조|호|팀|곳|가지)");
+    /** 설계도 사실 숫자 검사에서 빼는 날짜·쪽·차례 숫자 */
+    private static final Pattern DATE_OR_PAGE = Pattern.compile("^\\s*(월|일|년|분기|쪽|페이지|번째|차\\b|시\\b)");
     private static final int SHOWN = 5;
 
     private BizNumbersService() {}
@@ -119,7 +121,12 @@ final class BizNumbersService {
         }
         Set<String> known = new LinkedHashSet<>(tableNumbers(b));
         known.addAll(figureNumbers(b));
-        List<String> unknown = factNumbers(b).stream().filter(n -> !known.contains(n)).toList();
+        // 날짜·쪽·차례 숫자는 세지 않는다(점검 #7: "7월 3일"의 7, 3 때문에 설계도를 되풀이해 다시 받음). 사람 수·개수는 값일 수 있어 그대로 센다
+        Set<String> factValues = new LinkedHashSet<>();
+        for (var f : b.facts() == null ? List.<BlueprintDto.Fact>of() : b.facts()) {
+            for (Hit h : scan(f.text())) if (!DATE_OR_PAGE.matcher(h.after()).find()) factValues.add(h.canon());
+        }
+        List<String> unknown = factValues.stream().filter(n -> !known.contains(n)).toList();
         if (!unknown.isEmpty()) bad.add("사실 목록의 숫자가 숫자표(tables·figures)에 없습니다: " + unknown + ". 숫자는 숫자표에 먼저 정하세요");
         return bad;
     }

@@ -53,7 +53,7 @@ final class TaskAssemblyService {
         var first = b.flaws().get(0);
         var trap = new BizDraftDto.Trap(first.what(), first.evidence(), b.conclusion().correct(), b.conclusion().wrong());
         String own = w.taskFollowUp() == null || w.taskFollowUp().isBlank() ? GeneratedTaskRepository.DEV_FOLLOW_UPS.get(2) : w.taskFollowUp().strip();
-        List<String> followUps = List.of(GeneratedTaskRepository.DEV_FOLLOW_UPS.get(0), GeneratedTaskRepository.DEV_FOLLOW_UPS.get(1), own);
+        List<String> followUps = List.of(GeneratedTaskRepository.BIZ_FOLLOW_UPS.get(0), GeneratedTaskRepository.BIZ_FOLLOW_UPS.get(1), own);
         List<BizDraftDto.DocDraft> docs = new ArrayList<>(bizDocs(b, w));
         docs.addAll(FillerService.bizDocs(filler));
         List<DevDraftDto.FileDraft> csvs = new ArrayList<>(BizNumbersService.csvFiles(b));

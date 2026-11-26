@@ -34,6 +34,33 @@ final class FillerService {
         return sb.toString();
     }
 
+    /** 파일마다 따로 부를 입력들(동시 호출용). 같은 시나리오·필요한 묶음 이름에 파일 하나씩만 만들게 한다. 헷갈리는 자료는 표시한다 */
+    static List<String> inputs(BlueprintDto bp, int perFileChars, String feedback) {
+        List<String> out = new ArrayList<>();
+        for (var f : bp.fillers()) {
+            StringBuilder sb = new StringBuilder("[상황]\n").append(bp.scenario()).append("\n\n[만들 파일: 이 파일 하나만 만든다]\n");
+            sb.append("- ").append(f.path()).append(": ").append(f.summary()).append('\n');
+            if (f.confusingFlag()) {
+                sb.append("\n[헷갈리는 자료] 이 파일은 과제와 같은 영역의 이름·내용으로 실제처럼 그럴듯하게 쓴다(예: 옛 정책, 지난 버전, 비슷한 기능의 다른 클래스). ")
+                        .append("다만 어떤 규칙이 맞는지 결론짓지 않고, 필요한 파일의 로직을 대신 설명하거나 정답·판단 근거로 읽힐 문장·값은 쓰지 않는다.\n");
+            }
+            sb.append("\n[함께 있는 다른 파일의 이름(내용은 모름, 이 파일들을 부르거나 인용하지 않는다)]\n");
+            for (String n : bp.neededFiles()) sb.append("- ").append(n).append('\n');
+            for (var o : bp.fillers()) if (!o.path().equals(f.path())) sb.append("- ").append(o.path()).append('\n');
+            sb.append("\n[파일 하나의 분량] 한글·코드 합쳐 약 ").append(perFileChars).append("자(이보다 짧으면 안 된다)\n");
+            if (feedback != null && !feedback.isBlank()) sb.append('\n').append(feedback);
+            out.add(sb.toString());
+        }
+        return out;
+    }
+
+    /** 파일별 결과를 하나로 합친다 */
+    static FillerDto merge(List<FillerDto> parts) {
+        List<DevDraftDto.FileDraft> all = new ArrayList<>();
+        for (FillerDto p : parts) if (p != null && p.files() != null) all.addAll(p.files());
+        return new FillerDto(all);
+    }
+
     /** 설계도가 정한 경로의 파일만, 비지 않은 것만, 같은 경로는 처음 것만 남긴다 */
     static FillerDto sanitized(FillerDto raw, BlueprintDto bp) {
         Set<String> want = new LinkedHashSet<>();

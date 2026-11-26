@@ -12,6 +12,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * pipeline: staged(기본, 설계 pAIr-docs 설계/과제_생성_파이프라인.md 의 단계별 생성) 또는 oneshot(옛 방식: 한 번에 과제 전체).
  * stages: staged 단계별 모델·추론 강도·출력 한도. 직군마다 따로(stages.dev.*, stages.biz.*). 비우면 아래 기본값.
  * costCap: 과제 1개를 만드는 데 쓸 수 있는 비용 상한($, 기본 0.6). 다음 다시 만들기가 넘기면 멈추고 검수 전(HIDDEN)으로 저장한다.
+ * costCaps: 직군·제한시간별 상한(키 dev, biz-20, biz-40, biz-60; 2026-11-26 사용자 결정, 파이프라인 문서 5장). 키가 없으면 costCap.
  * pricing: 모델별 $/1M 토큰. 비우면 코드 기본값(application.yml 의 pair.pricing 과 같은 값).
  * materialGate: E6·M6(필요한 묶음만 첨부하면 풀리고 자료 전체는 맥락 한도를 넘음)를 단계별 생성에 켠다. 켜면 설계도가 필요한 묶음·관련 적은 자료 목록을 내고,
  * 단계 4'(stages.*.filler, 기본 gpt-6.1-terra)가 관련 적은 자료를 만들며, M6 관문(분량 검사, stages.*.filler-review 가 다른 회사 모델로 답 노출 검사)이 돈다. 비우면 꺼짐(옛 동작).
@@ -20,7 +21,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record TaskGenProperties(String model, Integer maxConcurrent, String effort, Integer maxTokens, String solverModel,
         String suggestModel, Integer suggestMaxTokens, String suggestEffort,
         Boolean soloEnabled, String soloModel, Integer soloAttempts, String leakModel, Integer leakMaxTokens,
-        String pipeline, Stages stages, String solverEffort, Double costCap, java.util.Map<String, Price> pricing, Boolean materialGate) {
+        String pipeline, Stages stages, String solverEffort, Double costCap, java.util.Map<String, Price> pricing, Boolean materialGate,
+        java.util.Map<String, Double> costCaps) {
+
+    /** 직군·제한시간별 상한 없이 만든다(테스트·옛 설정용): 모든 과제에 costCap */
+    public TaskGenProperties(String model, Integer maxConcurrent, String effort, Integer maxTokens, String solverModel,
+            String suggestModel, Integer suggestMaxTokens, String suggestEffort,
+            Boolean soloEnabled, String soloModel, Integer soloAttempts, String leakModel, Integer leakMaxTokens,
+            String pipeline, Stages stages, String solverEffort, Double costCap, java.util.Map<String, Price> pricing, Boolean materialGate) {
+        this(model, maxConcurrent, effort, maxTokens, solverModel, suggestModel, suggestMaxTokens, suggestEffort, soloEnabled, soloModel, soloAttempts,
+                leakModel, leakMaxTokens, pipeline, stages, solverEffort, costCap, pricing, materialGate, null);
+    }
+
+    /** 이 과제의 비용 상한: costCaps 의 dev 또는 biz-20·biz-40·biz-60(30분 이하 20, 50분 이하 40, 그 위 60). 키가 없으면 costCap */
+    public double costCap(boolean dev, int minutes) {
+        String key = dev ? "dev" : "biz-" + (minutes <= 30 ? 20 : minutes <= 50 ? 40 : 60);
+        Double v = costCaps == null ? null : costCaps.get(key);
+        return v == null || v <= 0 ? costCap : v;
+    }
 
     /** 단계 하나의 모델·추론 강도·출력 토큰 한도(생각 토큰 포함). 비운 값은 기본값으로 채운다 */
     public record Stage(String model, String effort, Integer maxTokens) {

@@ -589,7 +589,7 @@ class TaskReviewLoopTest {
         assertThat(TaskPromptService.check("answer-key")).contains("판단 지점을 객관식으로 물음").contains("계산 검증은 코드가 합니다");
         assertThat(TaskPromptService.check("consistency")).contains("의도한 결함").contains("경고용");
         assertThat(TaskPromptService.check("alt-solution")).contains("서버가 이 풀이를 숨은 테스트로 실제로 돌립니다");
-        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("[결함 유형 목록]").contains("D3 정수 넘침").contains("B4 부가세");
+        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("[Flaw types]").contains("R3 회사 반올림").doesNotContain("B4 부가세");
         assertThat(java.util.Arrays.stream(TaskPipelineService.Stage.values()).map(Enum::name)).doesNotContain("FIX");
     }
 
