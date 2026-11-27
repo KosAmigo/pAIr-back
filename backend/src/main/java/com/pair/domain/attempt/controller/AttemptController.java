@@ -200,6 +200,7 @@ public class AttemptController {
     public List<TurnResponse> chat(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
         AttemptStateDto a = store.load(id);
+        attempts.checkChatRate(id);
         List<ChatTurnStateDto> added = attempts.chat(id, req.message(), req.attachments(), null);
         var edits = attempts.edits(id);
         var attached = chatAttachments.views(Long.parseLong(id));
@@ -216,6 +217,7 @@ public class AttemptController {
     public org.springframework.web.servlet.mvc.method.annotation.SseEmitter chatStream(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
         AttemptStateDto a = store.load(id);
+        attempts.checkChatRate(id); // 스트림을 열기 전에: 넘으면 429(오류 이벤트가 아니라)
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(6 * 60 * 1000L);
         streams.submit(() -> {
             try {

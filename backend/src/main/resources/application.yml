@@ -266,6 +266,9 @@ pair:
     # 추론 강도: none, low, medium, high, xhigh (gpt-6 계열은 minimal 없음). 낮을수록 빠르고 싸며 한도에 덜 걸린다.
     reasoning-effort: low
     max-turns: 40
+    # AI 채팅 분당 호출 제한(스트림을 열기 전에 확인, 넘으면 429 + Retry-After). 1인(실전은 응시 1건) / 서비스 전체
+    rate-limit-per-minute: 10
+    total-rate-limit-per-minute: 300
     # 응시자 질문 한 번의 최대 글자 수 (프론트 입력창 글자 수 표시와 같은 값)
     max-input-chars: 1000
     # 질문에 붙이는 첨부(파일 트리에서 끌어온 작업 파일·과제 PDF 쪽 글): 질문 1개당 파일 수·합계 글자 수,
