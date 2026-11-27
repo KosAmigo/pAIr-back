@@ -31,4 +31,13 @@ class BizLeakRecordFilterTest {
         assertThat(TaskReviewService.recordedDefinition(v("집계 대상으로 기록되어 있다.", "문항 3 보기1"))).isFalse();
         assertThat(TaskReviewService.recordedDefinition(v("집계 대상은 확정액이다.", "자료/지침.pdf 2쪽"))).isFalse();
     }
+
+    @Test
+    void 설계도가_넣은_근거_문장은_답_노출_입력에_의도한_근거로_실린다() {
+        var bp = TaskPipelineServiceTest.bizBlueprint();
+        String out = TaskReviewService.intendedFacts(bp);
+        assertThat(out).startsWith("[자료에 의도적으로 넣은 근거 문장");
+        bp.facts().forEach(f -> assertThat(out).contains(f.text().strip()));
+        assertThat(TaskReviewService.intendedFacts(null)).isEmpty();
+    }
 }

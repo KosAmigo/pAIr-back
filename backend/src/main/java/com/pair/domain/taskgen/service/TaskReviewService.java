@@ -193,6 +193,7 @@ final class TaskReviewService {
             case LEAK -> {
                 sb.append("[숨은 결함(출제자만 아는 정보)]\n").append(flaws(bp));
                 if (bp != null && bp.conclusion() != null) sb.append("정답 결론: ").append(bp.conclusion().correct()).append(" / 함정에 빠진 결론: ").append(bp.conclusion().wrong()).append('\n');
+                sb.append(intendedFacts(bp)); // g16 03: 설계도가 근거로 넣은 사실 문장(함정 근거)을 점검이 답 노출로 걸었다
                 sb.append(visibleBiz(d, true)).append(answers(d));
             }
             case ANSWER_KEY -> {
@@ -249,6 +250,22 @@ final class TaskReviewService {
         if (bp == null) return "";
         StringBuilder sb = new StringBuilder();
         for (var f : bp.flaws()) sb.append("- ").append(f.what()).append(" (위치: ").append(f.where()).append(")\n");
+        return sb.toString();
+    }
+
+    /**
+     * 답 노출 점검용(BIZ): 설계도가 결함 근거·판단 근거로 자료에 일부러 넣은 사실 문장. 이 문장이 자료에 그대로 있는 것은 위반이 아니다
+     * (설계도 단계의 조기 점검이 이미 규칙·절차 말투인지 봤다). 이 문장에 계산 절차나 응시자 지시가 더 붙은 경우만 위반이다
+     */
+    static String intendedFacts(BlueprintDto bp) {
+        if (bp == null) return "";
+        java.util.LinkedHashSet<String> texts = new java.util.LinkedHashSet<>();
+        for (var f : nz(bp.facts())) if (f != null && f.text() != null && !f.text().isBlank()) texts.add(f.text().strip());
+        for (var f : nz(bp.flaws())) if (f != null && f.evidence() != null && !f.evidence().isBlank()) texts.add(f.evidence().strip());
+        for (var j : nz(bp.judgments())) for (var o : nz(j.options())) if (o != null && o.fact() != null && !o.fact().isBlank()) texts.add(o.fact().strip());
+        if (texts.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("[자료에 의도적으로 넣은 근거 문장(이 문장 그대로는 위반이 아님. 계산 절차·응시자 지시·정답 문장이 더 붙었을 때만 위반)]\n");
+        texts.forEach(t -> sb.append("- ").append(t).append('\n'));
         return sb.toString();
     }
 
