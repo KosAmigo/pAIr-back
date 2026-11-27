@@ -40,4 +40,19 @@ class BizLeakRecordFilterTest {
         bp.facts().forEach(f -> assertThat(out).contains(f.text().strip()));
         assertThat(TaskReviewService.intendedFacts(null)).isEmpty();
     }
+
+    @Test
+    void BIZ_점검_입력에는_관련_적은_자료가_빠진다() {
+        var bp = TaskPipelineServiceTest.bizBlueprint().withMaterials(java.util.List.of("자료/검토 안내.pdf"),
+                java.util.List.of(new com.pair.domain.taskgen.dto.BlueprintDto.Filler("자료/지난 회의록.pdf", "지난 분기 회의", true)));
+        var draft = TaskAssemblyService.biz(new com.pair.domain.taskgen.dto.TaskGenRequest("BIZ", "캠페인 검토", "지표 정의 차이", "SELF", 20), bp,
+                TaskPipelineServiceTest.bizWriting(""), java.util.List.of(), TaskPipelineServiceTest.bizAnswer(),
+                new com.pair.domain.taskgen.dto.FillerDto(java.util.List.of(new com.pair.domain.taskgen.dto.DevDraftDto.FileDraft("자료/지난 회의록.pdf", "회의에서 일정을 정했다. 관련 적은 고유문장"))));
+        assertThat(draft.documents()).extracting("path").contains("자료/지난 회의록.pdf");
+        var needed = FillerService.withoutFillers(draft, bp);
+        assertThat(needed.documents()).extracting("path").doesNotContain("자료/지난 회의록.pdf");
+        assertThat(needed.questions()).isEqualTo(draft.questions());
+        String leakInput = TaskReviewService.bizInput(TaskReviewService.Check.LEAK, new com.pair.domain.taskgen.dto.TaskGenRequest("BIZ", "캠페인 검토", "지표 정의 차이", "SELF", 20), bp, draft);
+        assertThat(leakInput).doesNotContain("관련 적은 고유문장");
+    }
 }

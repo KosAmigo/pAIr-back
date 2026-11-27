@@ -136,7 +136,7 @@ class GenFixRegressionTest {
         String leak = TaskPromptService.check("blueprint-leak");
         // g8 결정: 회사 정의를 기록 말투로 한 번 쓰는 것은 허용(함정의 정답 해석을 정해 줘도), 절차·지시로 쓰면 M5
         assertThat(leak).contains("회사 정의 기록은 위반이 아닙니다").contains("함정의 정답 해석").contains("계산 절차");
-        assertThat(TaskPromptService.check("leak")).contains("회사 정의 기록").contains("빼서 구한다");
+        assertThat(TaskPromptService.check("leak-biz")).contains("회사 정의 기록").contains("빼서 구한다");
     }
 
     // ── 6. 군더더기 문장 ─────────────────────────────

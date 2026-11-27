@@ -21,7 +21,7 @@ final class TaskReviewService {
 
     /** 점검 목록. ids: 이 점검이 낼 수 있는 항목 번호. gate 는 실패하면 단계를 다시 돌리는 관문, 아니면 경고만 */
     enum Check {
-        LEAK("leak", true, true, Set.of("M5"), true), // 답 노출: 응시자에게 보이는 글 전부 + 숨은 결함
+        LEAK("leak-dev", true, true, Set.of("M5"), true), // 답 노출: 응시자에게 보이는 글 전부 + 숨은 결함. 프롬프트는 직군별 leak-dev.md / leak-biz.md (run 에서 고름)
         BACKING("backing", true, false, Set.of("M2"), true), // 테스트 근거(DEV): 숨은 테스트 단정 + 보이는 자료
         ANSWER_KEY("answer-key", false, true, Set.of("M2"), true), // 정답 키(BIZ): 문항·보기·인정 답 + 사례·판단 지점
         ALT("alt-solution", true, false, Set.of("M2"), true), // 다른 풀이 실행(DEV): 풀이를 쓰게 하고 숨은 테스트로 돌림
@@ -79,9 +79,11 @@ final class TaskReviewService {
 
     Findings run(Check check, Stage stage, String input) {
         // 테스트 근거: 설계도 사례가 있으면 사례별 점검 프롬프트, 없으면 단정별 점검 프롬프트(사례 없는 과제에서 오탐이 많았다)
-        String resource = check == Check.BACKING && input.contains(CASES_MARK) ? "backing-cases" : check.resource;
-        ReviewResultDto r = calls.call(stage, check.name(), TaskPromptService.check(resource) + OUTPUT, input, ReviewResultDto.class);
         boolean biz = input.startsWith("직군: BIZ");
+        String resource = check == Check.BACKING && input.contains(CASES_MARK) ? "backing-cases"
+                : check == Check.LEAK && biz ? "leak-biz" // 답 노출은 직군별 프롬프트(BIZ 만 바꿀 때 DEV 가 흔들리지 않게)
+                : check.resource;
+        ReviewResultDto r = calls.call(stage, check.name(), TaskPromptService.check(resource) + OUTPUT, input, ReviewResultDto.class);
         List<Violation> kept = nz(r.violations()).stream().filter(v -> v != null && v.item() != null && (isQ(v) || check.ids.contains(v.item().strip().toUpperCase())))
                 .filter(v -> !(check == Check.LEAK && biz && recordedDefinition(v))).toList(); // g9: 검수 모델이 허용 규칙을 어기고 회사 정의 기록을 걸어 BIZ 8/10이 떨어짐
         return new Findings(check, kept, nz(r.violations()).size() - kept.size());
@@ -188,6 +190,7 @@ final class TaskReviewService {
 
     static String bizInput(Check check, TaskGenRequest form, BlueprintDto bp, BizDraftDto d) {
         if (!check.biz) return null;
+        d = FillerService.withoutFillers(d, bp); // 관련 적은 자료는 FILLER 관문이 따로 본다(입력 약 1/3 로)
         StringBuilder sb = new StringBuilder("직군: BIZ, 제한 시간: ").append(form.minutes()).append("분\n");
         switch (check) {
             case LEAK -> {

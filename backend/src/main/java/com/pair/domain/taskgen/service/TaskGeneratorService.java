@@ -385,6 +385,14 @@ public abstract class TaskGeneratorService<D> {
             } else if (gated) {
                 round.put("gates", "코드 검사가 실패해 돌리지 않음");
             }
+            if (!hasFail(results) && !gateSkipped && gates.stream().allMatch(g -> g.result().ok())) { // 비싼 마지막 검사는 앞 검사·관문을 모두 통과한 시도에서만
+                List<GenCheckResultDto> last = lastChecks(form, draft, run.blueprint());
+                if (!last.isEmpty()) {
+                    results = new ArrayList<>(results);
+                    results.addAll(last);
+                    round.put("lastChecksFailed", last.stream().filter(GenCheckResultDto::needsRegeneration).map(GenCheckResultDto::name).toList());
+                }
+            }
             gateRounds.add(round);
             double checkCost = spent(run, reviewCalls) - checkStart; // 이번 시도의 검사(관문·풀이) 비용: 다시 만들면 한 번 더 든다
             List<GenCheckResultDto> all = new ArrayList<>(results);
@@ -642,6 +650,11 @@ public abstract class TaskGeneratorService<D> {
 
     private static String clip(String s) {
         return s == null ? "" : s.length() > 80 ? s.substring(0, 80) + "…" : s;
+    }
+
+    /** 코드 검사와 AI 관문을 모두 통과한 시도에서만 도는 비싼 검사(BIZ: 다른 회사 모델이 풀기). 기본은 없음 */
+    protected List<GenCheckResultDto> lastChecks(TaskGenRequest form, D draft, BlueprintDto bp) {
+        return List.of();
     }
 
     /** 실행·계산 검사(+ run 이 있으면 단계 결과를 코드가 확인한 검사). 고친 Draft 는 run 의 단계 상태와 달라 run 검사는 건너뛴다 */

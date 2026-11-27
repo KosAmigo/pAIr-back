@@ -75,6 +75,21 @@ public final class BizCheckService {
 
     /** form: 폼의 함정 문장에서 핵심어를 더 뽑는 데 쓴다. null 이면 모델이 정한 핵심어만 본다 */
     static List<GenCheckService<BizDraftDto>> forDraft(PdfService pdf, TaskGenSolverService solver, String solverModel, BizDraftDto draft, int minutes, TaskGenRequest form) {
+        return forDraft(pdf, solver, solverModel, draft, minutes, form, true);
+    }
+
+    /** withSolve=false 면 다른 회사 모델이 풀기(SOLVE, 가장 비싼 검사)를 빼고 돌린다. 생성기는 관문을 다 통과한 뒤 solveOnly 로 따로 부른다(2026-11-27) */
+    static List<GenCheckService<BizDraftDto>> forDraft(PdfService pdf, TaskGenSolverService solver, String solverModel, BizDraftDto draft, int minutes, TaskGenRequest form, boolean withSolve) {
+        List<GenCheckService<BizDraftDto>> all = allChecks(pdf, solver, solverModel, draft, minutes, form);
+        return withSolve ? all : all.stream().filter(c -> !c.name().equals(SOLVE)).toList();
+    }
+
+    /** 다른 회사 모델이 풀기 하나만(관련 적은 자료를 뺀 draft 를 넘기면 필요한 자료만으로 풀린다는 M1·M6 확인도 된다) */
+    static GenCheckService<BizDraftDto> solveOnly(PdfService pdf, TaskGenSolverService solver, String solverModel, BizDraftDto draft, int minutes, TaskGenRequest form) {
+        return allChecks(pdf, solver, solverModel, draft, minutes, form).stream().filter(c -> c.name().equals(SOLVE)).findFirst().orElseThrow();
+    }
+
+    private static List<GenCheckService<BizDraftDto>> allChecks(PdfService pdf, TaskGenSolverService solver, String solverModel, BizDraftDto draft, int minutes, TaskGenRequest form) {
         Ctx ctx = new Ctx(pdf, draft, minutes);
         return List.of(
                 check(FORMAT, d -> ctx.problem != null ? fail(ctx.problem) : ctx.soft != null ? fail(ctx.soft) : ok("필수 항목과 경로가 모두 맞습니다.")),

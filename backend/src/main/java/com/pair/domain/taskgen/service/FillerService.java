@@ -88,6 +88,20 @@ final class FillerService {
         return docs;
     }
 
+    /**
+     * BIZ: 관련 적은 문서·CSV 를 뺀 과제(필요한 자료만). 관련 적은 자료는 따로 점검(FILLER 관문)하므로 답 노출·정답 키·일관성·풀이 점검은 이것만 읽는다.
+     * 자료 글자의 약 3/4 이 관련 적은 자료라 점검 입력이 크게 준다(2026-11-27 g16: 이 점검들이 비용의 절반)
+     */
+    static BizDraftDto withoutFillers(BizDraftDto d, BlueprintDto bp) {
+        if (d == null || bp == null || bp.fillers() == null || bp.fillers().isEmpty()) return d;
+        Set<String> skip = new LinkedHashSet<>();
+        bp.fillers().forEach(f -> skip.add(f.path()));
+        List<BizDraftDto.DocDraft> docs = d.documents() == null ? null : d.documents().stream().filter(x -> !skip.contains(x.path())).toList();
+        List<DevDraftDto.FileDraft> csvs = d.csvFiles() == null ? null : d.csvFiles().stream().filter(x -> !skip.contains(x.path())).toList();
+        return new BizDraftDto(d.title(), d.summary(), d.code(), d.category(), d.description(), d.requirements(), d.followUps(), docs, csvs, d.checklist(), d.trap(),
+                d.questions(), d.difficulty(), d.competencies(), d.trapKeywords(), d.judgmentPoints(), d.hiddenFlaws());
+    }
+
     /** BIZ: .csv 는 그대로 */
     static List<DevDraftDto.FileDraft> bizCsvs(FillerDto f) {
         return devFiles(f).stream().filter(x -> x.path().endsWith(".csv")).toList();
