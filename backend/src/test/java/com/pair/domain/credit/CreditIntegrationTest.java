@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -275,6 +277,43 @@ class CreditIntegrationTest extends BearerIntegrationTest {
             assertThat(results.get(0).get(30, TimeUnit.SECONDS) ^ results.get(1).get(30, TimeUnit.SECONDS)).isTrue();
         }
         assertThat(credits.balance(userId)).isZero();
+    }
+
+    @Test
+    void simultaneousChatsCannotOverspend() throws Exception {
+        var user = signup();
+        long userId = user.user().id();
+        // 같은 응시의 채팅은 한 줄로 처리되므로 응시 두 개로 겹친다. 19번 시작하면 잔액은 채팅 1번 값(10)만 남는다
+        var ids = new ArrayList<String>();
+        for (int i = 0; i < 19; i++) ids.add(attempts.startSelf(TestTasks.SELF_DEV, userId).id());
+        List<String> chatting = ids.subList(0, 2);
+        // 두 요청이 모두 AI 호출까지 와야 답을 준다 = 둘 다 사전 잔액 확인을 통과한 상태에서 차감이 겹친다
+        var bothInAiCall = new CyclicBarrier(2);
+        when(assistant.send(any())).thenAnswer(invocation -> {
+            bothInAiCall.await(10, TimeUnit.SECONDS);
+            return new AssistantClient.Reply("answer", "test", 10, 20, 0, "stop", 1);
+        });
+        var charged = new ArrayList<String>();
+        var rejected = new ArrayList<String>();
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var results = chatting.stream().map(id -> executor.submit(() -> attempts.chat(id, "hello"))).toList();
+            for (int i = 0; i < 2; i++) {
+                try {
+                    results.get(i).get(30, TimeUnit.SECONDS);
+                    charged.add(chatting.get(i));
+                } catch (ExecutionException e) {
+                    assertThat(e.getCause()).isInstanceOf(InsufficientCreditException.class);
+                    rejected.add(chatting.get(i));
+                }
+            }
+        }
+        assertThat(charged).hasSize(1);
+        assertThat(rejected).hasSize(1);
+        assertThat(credits.balance(userId)).isZero();
+        assertThat(store.turns(charged.get(0))).hasSize(2);
+        // 차감에 실패한 쪽은 질문·답·체크포인트도 남지 않는다
+        assertThat(store.turns(rejected.get(0))).isEmpty();
+        assertThat(checkpoints.list(rejected.get(0))).isEmpty();
     }
 
     @Test
