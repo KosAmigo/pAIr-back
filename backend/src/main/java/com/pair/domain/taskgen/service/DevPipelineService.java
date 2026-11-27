@@ -302,6 +302,7 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
             out.add(TaskWritingService.mentionedFilesCheck(String.join("\n", writing.description()) + "\n" + String.join("\n", writing.requirements()), visible));
             out.add(TaskWritingService.genMetaCheck(String.join("\n", writing.description()) + "\n" + String.join("\n", writing.requirements()) + "\n" + writing.notes()));
             out.add(TaskWritingService.flawPointerCheck(bp, writing.description(), writing.requirements()));
+            out.add(TaskWritingService.featureLinesCheck(bp, writing.requirements())); // 경고만
             out.add(CaseCheckService.stubs(bp, code.files())); // 틀이 없으면 숨은 테스트가 컴파일되지 않으니 이 검사가 먼저 시작 코드 단계를 가리킨다
             out.add(CaseCheckService.addedCalled(bp, answer.hiddenTests()));
             java.util.Map<String, String> han = new java.util.LinkedHashMap<>(); // 숨은 글(정답·오답 사유 등)까지 모든 글 칸
