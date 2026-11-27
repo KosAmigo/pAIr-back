@@ -142,14 +142,14 @@ class TaskAutoServiceTest {
     @Test
     @DisplayName("자동 시작: topics 가 있으면 AI 를 부르지 않고 그대로 작업을 만든다(함정 앞에 [유형] 표시)")
     void startWithGivenTopics() {
-        when(jobs.startAll(anyList(), eq(7L), eq("BATCH"), eq(1))).thenReturn(new TaskGenJobService.Batch("b-1", List.of("j1", "j2")));
+        when(jobs.startAll(anyList(), eq(7L), eq("BATCH"), eq(3))).thenReturn(new TaskGenJobService.Batch("b-1", List.of("j1", "j2")));
         var topics = List.of(new AutoTopicDto("환불 기간", "당일 포함 여부를 놓침", "R1 경계 포함 여부", List.of("control")),
                 new AutoTopicDto("정산 마감", "마감 시각을 놓침", null, List.of("usage")));
-        var b = auto.start(new TaskGenAutoRequest("dev", 20, null, 5, "BATCH", 1, topics), 7L);
+        var b = auto.start(new TaskGenAutoRequest("dev", 20, null, 5, "BATCH", 3, topics), 7L);
 
         assertThat(b.jobIds()).containsExactly("j1", "j2");
         assertThat(ai.users).isEmpty();
-        List<TaskGenRequest> forms = captureForms(7L, "BATCH", 1);
+        List<TaskGenRequest> forms = captureForms(7L, "BATCH", 3);
         assertThat(forms).hasSize(2);
         assertThat(forms.get(0).topic()).isEqualTo("환불 기간");
         assertThat(forms.get(0).trap()).isEqualTo("[R1 경계 포함 여부] 당일 포함 여부를 놓침");
