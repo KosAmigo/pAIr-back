@@ -75,6 +75,7 @@ class BizFlowTest {
     static void props(DynamicPropertyRegistry r) {
         r.add("pair.data-dir", () -> dataDir.toString());
         r.add("pair.taskgen.file-storage", () -> "local");
+        r.add("pair.taskgen.worker.enabled", () -> "true"); // 이 테스트는 대기열 워커를 켜고 tick() 으로 바로 돌린다
         r.add("pair.taskgen.pipeline", () -> "oneshot"); // 한 번에 과제 전체를 돌려주는 가짜 AI 용
     }
 
@@ -119,6 +120,8 @@ class BizFlowTest {
     }
 
     @Autowired MockMvc mvc;
+    @Autowired com.pair.domain.taskgen.repository.TaskGenJobRepository jobRepo;
+    @Autowired TaskGenJobService jobSvc;
     @MockitoBean JavaMailSender mail;
     @Autowired ScriptedAi ai;
     @Autowired BizFixtures.FakeSolver solver;
@@ -144,6 +147,7 @@ class BizFlowTest {
         ai.soloScript.clear();
         ai.soloUsers.clear();
         steps.clear();
+        jobRepo.deleteAll(); // 앞선 테스트가 대기열에 남긴 작업이 이 테스트의 AI 호출을 가로채지 않게
         solver.error = null;
         solver.reply = "{\"answers\": [\"1\", \"2\", \"21080\", \"2000\"]}";
     }
@@ -401,7 +405,9 @@ class BizFlowTest {
         String done = null;
         for (int i = 0; i < 100; i++) {
             done = mvc.perform(admin(get("/api/admin/task-gen/" + jobId))).andReturn().getResponse().getContentAsString();
-            if (!json.readTree(done).get("status").asText().equals("RUNNING")) break;
+            String st = json.readTree(done).get("status").asText();
+            if (!st.equals("RUNNING") && !st.equals("QUEUED")) break;
+            jobSvc.tick(); // 테스트는 워커를 끄고 대기열을 직접 돌린다
             Thread.sleep(100);
         }
         var j = json.readTree(done);

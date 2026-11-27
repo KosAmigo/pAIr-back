@@ -32,7 +32,6 @@ import com.pair.domain.task.repository.TaskFileRepository;
 import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
-import com.pair.domain.taskgen.exception.TooManyJobsException;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.infra.storage.TaskFileStorage;
 
@@ -46,8 +45,10 @@ import com.pair.infra.storage.TaskFileStorage;
 @Tag("slow")
 class TaskGenBatchLiveTest {
 
-    static final int CONCURRENT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_PARALLEL", "6")); // 라이브 배치만: 한 번에 도는 작업 수(운영 max-concurrent 와 무관)
+    static final int CONCURRENT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_PARALLEL", "10")); // 라이브 배치만: 한 번에 도는 작업 수(운영 max-concurrent 와 무관)
     static final long ADMIN_ID = 1L;
+    /** 과제마다 report 의 timing(모델 호출 초, 단계별 초, 코드 실행 대기·실행 초). summary 의 평균 한 줄에 쓴다 */
+    static final List<JsonNode> TIMINGS = java.util.Collections.synchronizedList(new ArrayList<>());
     static final Path OUT = Path.of("build", "taskgen-batch").toAbsolutePath();
 
     @DynamicPropertySource
@@ -55,6 +56,9 @@ class TaskGenBatchLiveTest {
         r.add("pair.data-dir", () -> OUT.resolve("data").toString());
         r.add("pair.taskgen.file-storage", () -> "local");
         r.add("pair.taskgen.max-concurrent", () -> String.valueOf(CONCURRENT));
+        // 테스트 공통 설정(application-examtest.yml)은 대기열 워커를 끈다. 워커가 꺼지면 tick() 도 아무것도 안 해서
+        // 작업이 QUEUED 에서 영영 안 움직인다(2026-11-27 g14 첫 실행이 1시간 멈춤). 실제 생성을 돌리는 이 테스트만 켠다
+        r.add("pair.taskgen.worker.enabled", () -> "true");
         r.add("spring.ai.openai.api-key", () -> "${OPENAI_API_KEY:}");
         r.add("spring.ai.anthropic.api-key", () -> "${ANTHROPIC_API_KEY:}");
     }
@@ -69,10 +73,16 @@ class TaskGenBatchLiveTest {
     @Autowired ObjectMapper json;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
-    /** 한 번에 만들 과제 수. 6 = DEV/BIZ × 20·40·60분 1개씩. 12로 올리면 같은 조합을 한 번 더(6의 배수만). 환경변수 PAIR_TASKGEN_COUNT=12 (Gradle 은 -D 를 테스트 JVM 에 넘기지 않는다) */
-    static final int COUNT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_COUNT", "6"));
+    /**
+     * 한 번에 만들 과제 수(1~10, 기본 10: 생성 동시 상한과 같다). 과제 번호 순서대로 DEV, BIZ 를 번갈아(홀수면 DEV 가 하나 더 많다) 배정하고,
+     * 제한 시간은 20·40·60분을 번호 순서대로 돌아가며 배정한다. 환경변수 PAIR_TASKGEN_COUNT=8 (Gradle 은 -D 를 테스트 JVM 에 넘기지 않는다)
+     */
+    static final int COUNT = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_COUNT", "10"));
+    /** 실행 방식: PAIR_TASKGEN_MODE=BATCH 면 배치(비용 약 절반, 느림), 기본 NOW. 배치 마감은 PAIR_TASKGEN_DEADLINE_HOURS(1·3·6, 기본 3). 배치는 실제 돈이 든다 */
+    static final String MODE = System.getenv().getOrDefault("PAIR_TASKGEN_MODE", "NOW").strip().toUpperCase();
+    static final int DEADLINE_HOURS = Integer.parseInt(System.getenv().getOrDefault("PAIR_TASKGEN_DEADLINE_HOURS", "3"));
     static final int[] MINUTES = {20, 40, 60};
-    /** 구성 고르기: PAIR_TASKGEN_TRACKS=DEV,BIZ PAIR_TASKGEN_MINUTES=40 이면 직군마다 40분 과제 1개씩. 둘 다 없으면 위 기본(6개) */
+    /** 구성 고르기: PAIR_TASKGEN_TRACKS=DEV,BIZ PAIR_TASKGEN_MINUTES=40 이면 직군마다 40분 과제 1개씩. 둘 다 없으면 위 기본(COUNT 개) */
     static final String TRACKS_ENV = System.getenv("PAIR_TASKGEN_TRACKS"), MINUTES_ENV = System.getenv("PAIR_TASKGEN_MINUTES");
 
     /** 직군과 제한 시간 목록(직군마다 시간마다 1개). 환경변수를 안 쓰면 null */
@@ -81,25 +91,63 @@ class TaskGenBatchLiveTest {
                 : List.of((TRACKS_ENV == null || TRACKS_ENV.isBlank() ? "DEV,BIZ" : TRACKS_ENV).trim().split("\\s*,\\s*"));
     }
 
+    /** DEV, BIZ 를 번갈아 COUNT 개(홀수면 DEV 가 하나 더), 시간은 20·40·60 순환. 주제는 직군마다 한 번에 필요한 만큼 추천받는다 */
+    private List<TaskGenRequest> interleaved() {
+        int dev = (COUNT + 1) / 2, biz = COUNT / 2;
+        Map<String, List<TaskSuggestionService.Suggestion>> picks = new LinkedHashMap<>();
+        for (var e : Map.of("DEV", dev, "BIZ", biz).entrySet()) {
+            String track = e.getKey();
+            int need = e.getValue();
+            List<TaskSuggestionService.Suggestion> picked = new ArrayList<>();
+            for (int tries = 0; picked.size() < need && tries < 5; tries++) {
+                List<String> exclude = picked.stream().map(TaskSuggestionService.Suggestion::situation).toList();
+                TaskSuggestionService.Result res;
+                try {
+                    res = suggestions.suggest(new TaskSuggestionService.Request(track, "", exclude), ADMIN_ID);
+                } catch (com.pair.infra.ai.AiUnavailableException cut) {
+                    continue; // 추천 한 번이 출력 한도에서 끊겨도(g5 첫 실행) 배치 전체를 멈추지 않고 다시 묻는다
+                }
+                for (var sg : res.suggestions()) if (picked.size() < need) picked.add(sg);
+            }
+            if (picked.size() < need) throw new IllegalStateException(track + " 추천을 " + need + "개 받지 못했습니다");
+            picks.put(track, picked);
+        }
+        List<TaskGenRequest> forms = new ArrayList<>();
+        for (int i = 0; i < COUNT; i++) {
+            String track = i % 2 == 0 ? "DEV" : "BIZ";
+            var sg = picks.get(track).get(i / 2);
+            forms.add(new TaskGenRequest(track, sg.situation(), sg.trap(), "SELF", MINUTES[i % MINUTES.length], sg.competencies()).validated());
+        }
+        return forms;
+    }
+
     /** 매번 새 주제: 과제 추천(TaskSuggestionService, 주제 없음 모드)에서 직군마다 받는다. 이미 있는 과제·앞서 받은 후보와는 겹치지 않는다 */
     private List<TaskGenRequest> pickForms() {
         List<String> tracks = customTracks();
         int[] minutes = MINUTES;
         int per;
         if (tracks == null) {
-            if (COUNT < 6 || COUNT % 6 != 0) throw new IllegalArgumentException("count 는 6의 배수여야 합니다: " + COUNT);
-            tracks = List.of("DEV", "BIZ");
-            per = COUNT / 2;
+            if (COUNT < 1 || COUNT > 10) throw new IllegalArgumentException("count 는 1~10 이어야 합니다(생성 동시 상한이 10): " + COUNT);
+            return interleaved();
         } else {
             if (MINUTES_ENV != null && !MINUTES_ENV.isBlank()) minutes = java.util.Arrays.stream(MINUTES_ENV.trim().split("\\s*,\\s*")).mapToInt(Integer::parseInt).toArray();
             per = minutes.length; // 직군마다 시간마다 1개
+            if (MINUTES_ENV == null || MINUTES_ENV.isBlank()) { // PAIR_TASKGEN_TRACKS=DEV 만 주면 그 직군만 COUNT 개, 시간은 20·40·60 순환
+                if (COUNT < 1 || COUNT > 10) throw new IllegalArgumentException("count 는 1~10 이어야 합니다(생성 동시 상한이 10): " + COUNT);
+                per = Math.max(1, COUNT / tracks.size());
+            }
         }
         List<TaskGenRequest> forms = new ArrayList<>();
         for (String track : tracks) {
             List<TaskSuggestionService.Suggestion> picked = new ArrayList<>();
-            for (int tries = 0; picked.size() < per && tries < 5; tries++) {
+            for (int tries = 0; picked.size() < per && tries < 8; tries++) {
                 List<String> exclude = picked.stream().map(TaskSuggestionService.Suggestion::situation).toList();
-                var res = suggestions.suggest(new TaskSuggestionService.Request(track, "", exclude), ADMIN_ID);
+                TaskSuggestionService.Result res;
+                try {
+                    res = suggestions.suggest(new TaskSuggestionService.Request(track, "", exclude), ADMIN_ID);
+                } catch (com.pair.infra.ai.AiUnavailableException cut) {
+                    continue; // 추천 한 번이 끊겨도 배치를 멈추지 않는다
+                }
                 for (var sg : res.suggestions()) if (picked.size() < per) picked.add(sg);
             }
             if (picked.size() < per) throw new IllegalStateException(track + " 추천을 " + per + "개 받지 못했습니다");
@@ -138,8 +186,49 @@ class TaskGenBatchLiveTest {
             if (m.find()) sum += Double.parseDouble(m.group(1));
         }
         md.append(String.format(java.util.Locale.ROOT, "\n비용 합계 $%.3f (각 줄의 attempts=시도 수, cost=토큰×가격)\n", sum));
+        md.append(soloLine(lines)).append('\n');
+        md.append(timingLine()).append('\n');
         md.append("\n총 ").append(sec).append("초 (작업별 시간은 각 줄의 '초', 시작 후 완료까지)\n");
         Files.writeString(OUT.resolve("summary.md"), md.toString(), StandardCharsets.UTF_8);
+    }
+
+    /** 단계별 평균 시간(과제 1개당 초): 모델 호출 합, 단계별 모델 호출, 코드 실행 줄서기, 코드 실행 */
+    static String timingLine() {
+        List<JsonNode> ts;
+        synchronized (TIMINGS) { ts = new ArrayList<>(TIMINGS); }
+        if (ts.isEmpty()) return "\n단계별 평균 시간: 기록 없음";
+        int n = ts.size();
+        double model = 0, wait = 0, run = 0, runs = 0;
+        Map<String, Double> stage = new java.util.TreeMap<>();
+        for (JsonNode t : ts) {
+            model += t.path("modelSeconds").asDouble();
+            wait += t.path("runWaitSeconds").asDouble();
+            run += t.path("runSeconds").asDouble();
+            runs += t.path("runCount").asDouble();
+            t.path("modelSecondsByStage").fields().forEachRemaining(e -> stage.merge(e.getKey(), e.getValue().asDouble(), Double::sum));
+        }
+        StringBuilder sb = new StringBuilder(String.format(java.util.Locale.ROOT,
+                "\n단계별 평균 시간(과제 %d개, 과제당 초): 모델 호출 %.0f, 코드 실행 줄서기 %.1f, 코드 실행 %.1f (실행 %.1f번)", n, model / n, wait / n, run / n, runs / n));
+        final int cnt = n;
+        sb.append(" | 모델 단계별: ").append(stage.entrySet().stream()
+                .map(e -> String.format(java.util.Locale.ROOT, "%s %.0f", e.getKey(), e.getValue() / cnt)).collect(Collectors.joining(", ")));
+        return sb.toString();
+    }
+
+    /** 난이도 목표(AI 단독 풀이가 결함을 놓친 비율 50% 이상, 참고)를 보는 한 줄. 놓침 / 돌린 것(놓침+잡음), 안 돌았거나 확인 못 한 것은 따로 센다 */
+    static String soloLine(String[] lines) {
+        int missed = 0, caught = 0, notRun = 0, invalid = 0;
+        for (String l : lines) {
+            var m = java.util.regex.Pattern.compile("\\| solo=(\\S+)").matcher(l == null ? "" : l);
+            String st = m.find() ? m.group(1) : "";
+            if (st.equals("missed")) missed++;
+            else if (st.equals("caught")) caught++;
+            else if (st.equals("invalid")) invalid++; // 컴파일 실패·결함과 상관없는 테스트 실패: 분모에서 뺀다
+            else if (l != null && l.contains("| passed=")) notRun++; // 건너뜀·확인 못 함·알 수 없음
+        }
+        int ran = missed + caught;
+        return String.format(java.util.Locale.ROOT, "\nAI 단독 풀이 놓침 %d/%d (%s), 무효(컴파일 실패 등) %d개, 안 돌았거나 확인 못 함 %d개 (목표 50%% 이상, 참고)", missed, ran,
+                ran == 0 ? "-" : Math.round(missed * 100.0 / ran) + "%", invalid, notRun);
     }
 
     /** 한 과제를 만든다. 한 과제가 실패해도 예외를 밖으로 내보내지 않고 summary 한 줄로 남긴다 */
@@ -152,7 +241,8 @@ class TaskGenBatchLiveTest {
             t = System.nanoTime(); // 자리가 나서 실제로 시작한 때부터 잰다
             TaskGenJobService.JobStatus st;
             String lastStep = "";
-            while ((st = jobs.status(jobId)).status() == TaskGenJobService.State.RUNNING) {
+            while ((st = jobs.status(jobId)).status() == TaskGenJobService.State.RUNNING || st.status() == TaskGenJobService.State.QUEUED) {
+                jobs.tick(); // 워커가 꺼진 테스트 설정에서도 대기 작업을 줍는다
                 if (!st.step().equals(lastStep)) {
                     lastStep = st.step();
                     System.out.println("[batch " + nn + "] " + lastStep);
@@ -164,19 +254,21 @@ class TaskGenBatchLiveTest {
             code = st.taskCode();
             export(OUT.resolve(nn + "-" + code), form, code);
 
-            String tokens = "-", cost = "미제공";
+            String tokens = "-", cost = "미제공", solo = "알 수 없음";
             int attempts = 0;
             try {
                 JsonNode rep = json.readTree(writer.report(code));
                 tokens = rep.path("inputTokens").asLong() + "/" + rep.path("outputTokens").asLong();
                 attempts = rep.path("attempts").asInt();
+                solo = rep.path("details").path("solo").path("status").asText("알 수 없음");
+                if (rep.path("details").has("timing")) TIMINGS.add(rep.path("details").path("timing"));
                 JsonNode c = rep.path("details").path("cost");
                 if (!c.isMissingNode()) cost = String.format(java.util.Locale.ROOT, "$%.3f%s", c.path("totalUsd").asDouble(), c.path("stoppedByCap").asBoolean() ? "(비용 상한)" : "");
             } catch (Exception ignore) { }
             System.out.println("[batch " + nn + "] 완료 code=" + code + " passed=" + st.passed() + " " + sec + "초");
             return "- " + nn + " | " + form.track() + " | " + form.minutes() + "분 | " + form.usage() + " | " + code
                     + " | passed=" + st.passed() + " | attempts=" + attempts + " | " + sec + "초 | tokens(in/out)=" + tokens
-                    + " | cost=" + cost + " | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
+                    + " | cost=" + cost + " | solo=" + solo + " | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
         } catch (Throwable e) {
             long sec = Math.round((System.nanoTime() - t) / 1e9);
             e.printStackTrace();
@@ -191,15 +283,9 @@ class TaskGenBatchLiveTest {
         }
     }
 
-    /** 동시 실행 상한(429)에 걸리면 자리가 날 때까지 기다렸다가 다시 넣는다 */
-    private String startWhenFree(TaskGenRequest form, String nn) throws InterruptedException {
-        while (true) {
-            try {
-                return jobs.start(form, ADMIN_ID);
-            } catch (TooManyJobsException full) {
-                Thread.sleep(3000);
-            }
-        }
+    /** 대기열에 넣는다(상한을 넘으면 서비스가 알아서 기다리게 한다) */
+    private String startWhenFree(TaskGenRequest form, String nn) {
+        return jobs.start(form, ADMIN_ID, MODE, MODE.equals("BATCH") ? DEADLINE_HOURS : null, null);
     }
 
     private static String names(List<GenCheckResultDto> checks, boolean warn) {

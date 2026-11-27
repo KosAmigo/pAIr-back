@@ -64,6 +64,7 @@ class TaskGenFlowTest {
     static void props(DynamicPropertyRegistry r) {
         r.add("pair.data-dir", () -> dataDir.toString());
         r.add("pair.taskgen.max-concurrent", () -> "2");
+        r.add("pair.taskgen.worker.enabled", () -> "true"); // 이 테스트는 대기열 워커를 켜고 tick() 으로 바로 돌린다
         r.add("pair.taskgen.pipeline", () -> "oneshot"); // 이 테스트는 한 번에 과제 전체를 돌려주는 가짜 AI 를 쓴다(단계별 생성은 TaskPipelineServiceTest)
     }
 
@@ -115,9 +116,18 @@ class TaskGenFlowTest {
         TaskGenFixtures.FakeRunner fakeRunner() {
             return new TaskGenFixtures.FakeRunner();
         }
+
+        /** 생성기는 전용 실행 장치를 받는다: 가짜 러너를 감싼다 */
+        @Bean
+        @Primary
+        TaskGenRunService taskGenRunService(TaskGenFixtures.FakeRunner fake) {
+            return new TaskGenRunService(fake, 4);
+        }
     }
 
     @Autowired MockMvc mvc;
+    @Autowired com.pair.domain.taskgen.repository.TaskGenJobRepository jobRepo;
+    @Autowired TaskGenJobService jobSvc;
     @MockitoBean JavaMailSender mail;
     @Autowired ScriptedAi ai;
     @Autowired CodeRunner runner;
@@ -136,6 +146,7 @@ class TaskGenFlowTest {
         ai.soloScript.clear();
         ai.soloUsers.clear();
         ai.gate = null;
+        jobRepo.deleteAll(); // 앞선 테스트가 대기열에 남긴 작업이 이 테스트의 AI 호출을 가로채지 않게
         steps.clear();
         ((TaskGenFixtures.FakeRunner) runner).bugCaught = true;
     }
@@ -223,7 +234,7 @@ class TaskGenFlowTest {
 
         var settings = json.readTree(settingsOf("flow-comp-req"));
         assertThat(settings.get("competencies")).extracting(n -> n.asText()).containsExactly("control", "delegation");
-        assertThat(settings.get("openFile").asText()).isEqualTo("src/shop/Cart.java"); // 기존 키는 그대로
+        assertThat(settings.get("openFile").asText()).isEqualTo("test/shop/CartTest.java"); // 기존 키는 그대로(g8: 공개 테스트를 먼저 연다)
         assertThat(settings.has("d4Minutes")).isTrue();
         var report = json.readTree(writer.report("flow-comp-req"));
         assertThat(report.get("form").get("competencies")).extracting(n -> n.asText()).containsExactly("control", "delegation");
@@ -293,7 +304,7 @@ class TaskGenFlowTest {
         assertThat(def.requirements()).containsExactlyElementsOf(d.requirements());
         assertThat(def.followUps()).containsExactly(GeneratedTaskRepository.DEV_FOLLOW_UPS.get(0),
                 GeneratedTaskRepository.DEV_FOLLOW_UPS.get(1), d.taskFollowUp()); // 3번째는 과제 맞춤 질문
-        assertThat(def.openFile()).isEqualTo("src/shop/Cart.java");
+        assertThat(def.openFile()).isEqualTo("test/shop/CartTest.java");
         assertThat(def.d4Minutes()).containsExactly(20, 30, 40, 50);
 
         assertThat(tasks.visibleFiles("flow-roundtrip")).containsOnlyKeys("src/shop/Cart.java", "test/shop/CartTest.java", "NOTES.md")
@@ -524,7 +535,9 @@ class TaskGenFlowTest {
         for (int i = 0; i < 100; i++) {
             String body = mvc.perform(as(get("/api/admin/task-gen/" + jobId), "ADMIN")).andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
-            if (!json.readTree(body).get("status").asText().equals("RUNNING")) return body;
+            String st = json.readTree(body).get("status").asText();
+            if (!st.equals("RUNNING") && !st.equals("QUEUED")) return body;
+            jobSvc.tick(); // 테스트는 워커를 끄고(pair.taskgen.worker.enabled=false) 대기열을 직접 돌린다
             Thread.sleep(100);
         }
         throw new AssertionError("작업이 끝나지 않았습니다");
@@ -564,21 +577,24 @@ class TaskGenFlowTest {
     }
 
     @Test
-    @DisplayName("동시에 도는 작업이 상한(2)을 넘으면 429, 끝나면 다시 받는다")
+    @DisplayName("동시에 도는 작업이 상한(2)을 넘으면 거절하지 않고 대기열에 둔다(대기 순번 1). 하나가 끝나면 세 번째가 시작한다")
     void concurrencyLimit() throws Exception {
         ai.gate = new CountDownLatch(1);
         ai.script.add(good("flow-limit-1"));
         ai.script.add(good("flow-limit-2"));
+        ai.script.add(good("flow-limit-3"));
         String a = startJob();
         String b = startJob();
-        mvc.perform(as(post("/api/admin/task-gen"), "ADMIN").contentType(MediaType.APPLICATION_JSON).content(FORM))
-                .andExpect(status().isTooManyRequests());
+        String c = startJob(); // 상한을 넘어도 202
+        jobSvc.tick();
+        assertThat(jobSvc.status(c).status()).isEqualTo(TaskGenJobService.State.QUEUED);
+        assertThat(jobSvc.status(c).queuePosition()).isEqualTo(1);
 
         ai.gate.countDown();
         waitDone(a);
         waitDone(b);
-        ai.script.add(good("flow-limit-3"));
-        waitDone(startJob());
+        waitDone(c);
+        assertThat(jobSvc.status(c).status()).isEqualTo(TaskGenJobService.State.DONE);
     }
 
     private static com.pair.domain.taskgen.dto.SoloAnswerDto soloAnswer(String content) {

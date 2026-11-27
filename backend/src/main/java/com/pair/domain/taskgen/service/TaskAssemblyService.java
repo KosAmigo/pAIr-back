@@ -8,6 +8,7 @@ import com.pair.domain.taskgen.dto.DevAnswerDto;
 import com.pair.domain.taskgen.dto.DevCodeDto;
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.DevWritingDto;
+import com.pair.domain.taskgen.dto.FillerDto;
 import com.pair.domain.taskgen.dto.TaskGenRequest;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import java.util.ArrayList;
@@ -26,8 +27,16 @@ final class TaskAssemblyService {
      * 주인이 아닌 단계가 만든 파일은 버리고, 같은 경로가 남으면 앞의 것만 둔다(저장 때 task_files 경로 중복 방지).
      */
     static DevDraftDto dev(TaskGenRequest form, BlueprintDto b, DevWritingDto w, DevCodeDto c, DevAnswerDto a) {
-        List<DevDraftDto.FileDraft> files = new ArrayList<>(unique(nz(c.files()).stream().filter(f -> startsWith(f, "src/") || startsWith(f, "test/")).toList()));
+        return dev(form, b, w, c, a, null);
+    }
+
+    /** filler: 단계 4' 관련 적은 자료(E6). 설계도 fillers 의 경로는 이 단계가 주인이라 시작 코드 단계가 같은 경로를 만들었으면 그것은 버린다 */
+    static DevDraftDto dev(TaskGenRequest form, BlueprintDto b, DevWritingDto w, DevCodeDto c, DevAnswerDto a, FillerDto filler) {
+        List<String> fillerPaths = FillerService.devFiles(filler).stream().map(DevDraftDto.FileDraft::path).toList();
+        List<DevDraftDto.FileDraft> files = new ArrayList<>(unique(nz(c.files()).stream()
+                .filter(f -> (startsWith(f, "src/") || startsWith(f, "test/")) && !fillerPaths.contains(f.path())).toList()));
         if (w.notes() != null && !w.notes().isBlank()) files.add(new DevDraftDto.FileDraft("NOTES.md", w.notes()));
+        files.addAll(FillerService.devFiles(filler));
         List<DevDraftDto.AltSolution> alts = nz(a.altSolutions()).stream().map(x -> new DevDraftDto.AltSolution(x.note(), unique(x.files()))).toList();
         List<DevDraftDto.WrongFix> wrongs = nz(a.wrongFixes()).stream().map(x -> new DevDraftDto.WrongFix(x.reason(), unique(x.files()))).toList();
         return new DevDraftDto(b.title(), b.summary(), b.code(), b.category(), w.description(), w.requirements(), a.answer(), files,
@@ -36,18 +45,26 @@ final class TaskAssemblyService {
     }
 
     static BizDraftDto biz(TaskGenRequest form, BlueprintDto b, BizWritingDto w, List<BizDraftDto.QuestionDraft> assembled, BizAnswerDto a) {
+        return biz(form, b, w, assembled, a, null);
+    }
+
+    /** filler: 단계 4' 관련 적은 자료(E6). 문서는 설계도 문서 계획 뒤에, CSV 는 숫자표 CSV 뒤에 붙는다 */
+    static BizDraftDto biz(TaskGenRequest form, BlueprintDto b, BizWritingDto w, List<BizDraftDto.QuestionDraft> assembled, BizAnswerDto a, FillerDto filler) {
         var first = b.flaws().get(0);
         var trap = new BizDraftDto.Trap(first.what(), first.evidence(), b.conclusion().correct(), b.conclusion().wrong());
         String own = w.taskFollowUp() == null || w.taskFollowUp().isBlank() ? GeneratedTaskRepository.DEV_FOLLOW_UPS.get(2) : w.taskFollowUp().strip();
-        List<String> followUps = List.of(GeneratedTaskRepository.DEV_FOLLOW_UPS.get(0), GeneratedTaskRepository.DEV_FOLLOW_UPS.get(1), own);
-        List<BizDraftDto.DocDraft> docs = bizDocs(b, w);
+        List<String> followUps = List.of(GeneratedTaskRepository.BIZ_FOLLOW_UPS.get(0), GeneratedTaskRepository.BIZ_FOLLOW_UPS.get(1), own);
+        List<BizDraftDto.DocDraft> docs = new ArrayList<>(bizDocs(b, w));
+        docs.addAll(FillerService.bizDocs(filler));
+        List<DevDraftDto.FileDraft> csvs = new ArrayList<>(BizNumbersService.csvFiles(b));
+        csvs.addAll(FillerService.bizCsvs(filler));
         // 문항 근거(sources)는 실제 파일 경로로만. 글자 차이만 나는 경로는 고치고, 그래도 없는 경로는 버린다(저장 때 task_file_id 가 비면 DB 오류).
         // 버린 것은 bizSourceProblems 가 따로 알려 형식 실패로 다시 만들게 한다
         List<String> paths = filePaths(b, docs);
         List<BizDraftDto.QuestionDraft> questions = nz(assembled).stream().map(q -> new BizDraftDto.QuestionDraft(q.type(), q.content(), q.choices(),
                 q.accepted(), q.calc(), resolvedSources(q, paths), q.commonWrongAnswers())).toList();
         return new BizDraftDto(b.title(), b.summary(), b.code(), b.category(), w.description(), w.requirements(), followUps, docs,
-                BizNumbersService.csvFiles(b), a.checklist(), trap, questions, TaskGenRequest.difficultyOf(form.minutes()), b.competencies(),
+                csvs, a.checklist(), trap, questions, TaskGenRequest.difficultyOf(form.minutes()), b.competencies(),
                 b.trapKeywords(), judgments(b), flaws(b, true));
     }
 

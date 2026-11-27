@@ -13,14 +13,15 @@ import java.util.function.Consumer;
  */
 public interface TaskPipelineService<D> {
 
-    /** 1 설계도, 2 작성, 2' 시작 코드(DEV), 3 문항 글(BIZ), 4 정답 쪽, REVIEW·REVIEW2 관문 검사(직군마다 생성과 다른 회사 모델). 순서대로 앞 단계 결과가 뒤 단계의 입력이다 */
-    enum Stage { BLUEPRINT, WRITING, CODE, QUESTIONS, ANSWER, REVIEW, REVIEW2 }
+    /** 1 설계도, 2 작성, 2' 시작 코드(DEV), 3 문항 글(BIZ), 4 정답 쪽, 4' 관련 적은 자료(FILLER, 싼 모델, E6), REVIEW·REVIEW2·FILLER_REVIEW 관문 검사(직군마다 생성과 다른 회사 모델). 순서대로 앞 단계 결과가 뒤 단계의 입력이다 */
+    enum Stage { BLUEPRINT, WRITING, CODE, QUESTIONS, ANSWER, FILLER, REVIEW, REVIEW2, FILLER_REVIEW }
 
     String STEP_BLUEPRINT = "설계도 작성 중";
     String STEP_WRITING = "글 작성 중";
     String STEP_CODE = "시작 코드 작성 중";
     String STEP_QUESTIONS = "문항 글 작성 중";
     String STEP_ANSWER = "정답 쪽 작성 중";
+    String STEP_FILLER = "관련 적은 자료 작성 중";
 
     /** 코드가 단계 결과를 보고 확인하는 검사 이름(실행·계산 검사와 같이 results 에 들어간다) */
     String BLUEPRINT_CHECK = "설계도 형식"; // 설계도 단계
@@ -33,6 +34,14 @@ public interface TaskPipelineService<D> {
     String BACKING_GATE = "테스트 근거 점검"; // DEV
     String ALT_GATE = "다른 풀이 실행 점검"; // DEV
 
+    String FILLER_GATE = "관련 적은 자료 점검(M6)"; // 관문(AI, 생성과 다른 회사): 관련 적은 자료에 답·결함 근거·판단 근거가 없다
+    String M6_NEEDED_CHECK = "필요한 묶음이 맥락 한도 안(M6)"; // 코드: 필요한 묶음 글자 수 ≤ 맥락 한도의 70%. 실패하면 설계도를 다시
+    String M6_EVIDENCE_CHECK = "결함 근거가 필요한 파일 2개 이상(M6)"; // 코드(경고만): 결함 위치·사례 근거가 가리키는 필요한 파일 ≥ 2
+    String FLAW_POINTER_CHECK = "설명이 결함 위치를 지목하지 않음"; // 작성 단계(경고만, g8): 설명·요구사항에 결함 클래스 이름, 기존 메서드 검토 지시, 결함 사례 입력이 없다
+    String M6_NEEDED_MIN_CHECK = "필요한 묶음이 맥락 한도의 40% 이상(M6)"; // 코드(경고만)
+    String M6_CONFUSING_CHECK = "헷갈리는 자료가 1/3 이상(M6)"; // 코드(경고만)
+    String M6_TOTAL_CHECK = "자료 전체가 맥락 한도를 넘음(M6)"; // 코드: 자료 전체 ≥ 맥락 한도의 2배. 실패하면 단계 4'를 다시
+
     String BASIS_CHECK = "사례 근거 문장이 글에 그대로 있음"; // 작성 단계: 사례의 기대 결과를 정하는 문장(M2)
 
     String BLUEPRINT_SENTENCE_CHECK = "설계도 문장이 관문에 걸림"; // 관문이 지적한 문장이 설계도의 사실·근거·예 문장이거나, 같은 실패가 되풀이됨: 글 단계가 아니라 설계도를 고친다
@@ -40,6 +49,7 @@ public interface TaskPipelineService<D> {
     String ADDED_CALLED_CHECK = "추가하라는 메서드를 숨은 테스트가 호출함"; // 정답 쪽 단계(DEV): 새로 만들 메서드를 숨은 테스트가 한 번도 안 부르면 구현 여부를 못 가린다
     String DUPLICATE_CHECK = "같은 문장이 자료에 한 번만 나옴"; // 작성 단계(BIZ)
     String META_CHECK = "자료에 과제 설계자의 말이 없음"; // 작성 단계(BIZ): 문서는 실제 업무 문서여야 한다(응시자·AI·기획안 양식을 말하지 않음)
+    String GEN_META_CHECK = "응시자 글에 생성기 내부 정보 없음"; // 작성 단계(경고만, 2026-11-26 g6 판정): 파일 수·글자 수·맥락 한도·필요한 묶음 같은 생성기 말이 응시자 글에 없다
     String MENTION_CHECK = "설명에서 말한 파일이 실제로 있음"; // 작성 단계: 설명·요구사항이 말한 파일(*.java, *.md, *.pdf, *.csv)이 응시자에게 보이는 파일에 있다
     String FILLER_CHECK = "군더더기 문장 없음"; // 작성 단계(BIZ, 경고): 사람의 동작만 서술하는 문장
     String HAN_CHECK = "한자가 섞이지 않음"; // 글을 만든 단계마다. 상세 앞의 [작성]·[문항]·[정답]이 다시 돌릴 단계를 가른다
@@ -63,6 +73,11 @@ public interface TaskPipelineService<D> {
             return StageRouteService.kinds(failed, c -> StageRouteService.gateOwners(c, false));
         }
 
+        /** 출력 한도 끊김(StageOutputLimitException)으로 stage 에서 멈췄을 때 그 단계부터 끝까지 이어 만든다. 단계별 생성이 아니면 지원하지 않는다 */
+        default D resumeFrom(Stage stage, Consumer<String> onStep) {
+            throw new UnsupportedOperationException("단계별 생성만 이어 만들 수 있습니다");
+        }
+
         /** 실패한 검사를 낸 단계부터 다시 만든다. 단계를 정하지 못하면 설계도부터 처음부터 */
         D redo(List<GenCheckResultDto> failed, Consumer<String> onStep);
 
@@ -77,8 +92,18 @@ public interface TaskPipelineService<D> {
             return null;
         }
 
+        /** failed 로 redo 하면 다시 돌 단계 이름들(비용 어림용). 모르면 빈 목록 */
+        default List<String> plannedStages(List<GenCheckResultDto> failed) {
+            return List.of();
+        }
+
         /** 마지막 redo 가 다시 돌린 단계 이름들(없으면 빈 목록) */
         List<String> redone();
+
+        /** 설계도 형식 검사에 걸려 설계도를 다시 받을 때마다 그 문제 목록(마지막 항목은 재시도를 다 쓰고도 남은 문제일 수 있다). 단계별 생성이 아니면 빈 목록 */
+        default List<List<String>> blueprintRetries() {
+            return List.of();
+        }
 
         /** failed 로 redo 하면 설계도부터 다시 만드는가(설계도 문제이거나 어느 단계 탓인지 모를 때). 단계별 생성이 아니면 false */
         default boolean restartsFrom(List<GenCheckResultDto> failed) {

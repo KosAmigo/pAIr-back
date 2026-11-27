@@ -193,14 +193,18 @@ class SoloSolveServiceTest {
     }
 
     @Test
-    @DisplayName("컴파일 안 되는 답은 실패로 센다 (2번 중 1번)")
+    @DisplayName("컴파일 안 되는 답은 놓침이 아니라 무효로 센다(g5 03): 1번은 풀고 1번은 무효면 '잡음 2번 중 1번, 무효 1번', 모두 무효면 무효")
     void compileFailure() {
         ai.script.add(answer(BROKEN));
         ai.script.add(answer(RIGHT));
         var r = service().run(draft());
 
         assertThat(r.check().ok()).isTrue();
-        assertThat(r.check().detail()).contains("2번 중 1번 숨은 테스트에서 실패").contains("지나쳤어요");
+        assertThat(r.check().detail()).contains("잡았어요(2번 중 1번").contains("무효 1번(풀이가 컴파일되지 않음)").doesNotContain("지나쳤");
+
+        ai.script.clear();
+        ai.script.add(answer(BROKEN));
+        assertThat(service().run(draft()).check().detail()).startsWith(SoloSolveService.INVALID_PREFIX + "풀이가 컴파일되지 않음");
     }
 
     @Test
@@ -226,7 +230,7 @@ class SoloSolveServiceTest {
 
         assertThat(r.check().ok()).isTrue();
         assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
-        assertThat(r.check().detail()).isEqualTo("AI 단독 풀이를 확인하지 못했어요(호출 실패)");
+        assertThat(r.check().detail()).startsWith("AI 단독 풀이를 확인하지 못했어요(").contains("호출 실패");
         assertThat(r.inputTokens()).isZero();
     }
 

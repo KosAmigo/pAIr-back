@@ -213,6 +213,11 @@ public abstract class TaskGeneratorService<D> {
         return false;
     }
 
+    /** E6·M6 관련 적은 자료의 응시자에게 보이는 글(경로 → 글). 단계별 생성의 Dev/Biz 하위 클래스가 채운다. 없으면 빈 맵 */
+    protected Map<String, String> fillerTexts(D draft, BlueprintDto bp) {
+        return Map.of();
+    }
+
     /** "다른 풀이" 점검: 검수자가 낸 풀이를 숨은 테스트로 실제로 돌려 떨어지면 위반으로 돌려준다(DEV). notes 는 report 용 */
     protected ReviewExtra altRun(D draft, List<DevDraftDto.FileDraft> alt) {
         return new ReviewExtra(List.of(), Map.of());
@@ -245,7 +250,8 @@ public abstract class TaskGeneratorService<D> {
     private List<GateRun> runGates(TaskReviewService reviewer, TaskGenRequest form, BlueprintDto bp, D draft) {
         List<GateRun> out = new ArrayList<>();
         for (TaskReviewService.Gate g : TaskReviewService.gates(devTrack())) {
-            String input = checkInput(g.check(), form, bp, draft);
+            if (g.check() == TaskReviewService.Check.FILLER && !props.materialGate()) continue; // E6·M6 가 꺼져 있으면 점검하지 않는다
+            String input = g.check() == TaskReviewService.Check.FILLER ? TaskReviewService.fillerInput(bp, fillerTexts(draft, bp)) : checkInput(g.check(), form, bp, draft);
             if (input == null) continue;
             List<Violation> violations;
             int dropped = 0;
@@ -281,11 +287,39 @@ public abstract class TaskGeneratorService<D> {
 
     public final Outcome generate(TaskGenRequest form, long adminId, Consumer<String> onStep) {
         EXTRA_USAGE.set(new ArrayList<>());
+        RUN_TALLY.set(new long[3]);
         try {
             return generateInner(form, adminId, onStep);
         } finally {
             EXTRA_USAGE.remove();
+            RUN_TALLY.remove();
         }
+    }
+
+    /** 코드 실행 1번의 기록(생성기 전용 실행 장치가 부른다): 줄 서서 기다린 밀리초와 실제 실행 밀리초. 이 생성 작업의 report timing 에 합쳐진다 */
+    static void recordRun(long waitMillis, long runMillis) {
+        long[] t = RUN_TALLY.get();
+        if (t == null) return;
+        t[0]++;
+        t[1] += waitMillis;
+        t[2] += runMillis;
+    }
+
+    private static final ThreadLocal<long[]> RUN_TALLY = new ThreadLocal<>();
+
+    /** 단계별 시간(초): 모델 호출(단계별 합과 호출 수)과 코드 실행(횟수, 대기, 실행) */
+    private static Map<String, Object> timing(List<StageUsageDto> usage) {
+        Map<String, Object> t = new LinkedHashMap<>();
+        Map<String, Long> byStage = new LinkedHashMap<>();
+        for (StageUsageDto u : usage) byStage.merge(u.stage(), u.seconds(), Long::sum);
+        t.put("modelCalls", usage.size());
+        t.put("modelSeconds", usage.stream().mapToLong(StageUsageDto::seconds).sum());
+        t.put("modelSecondsByStage", byStage);
+        long[] r = RUN_TALLY.get() == null ? new long[3] : RUN_TALLY.get();
+        t.put("runCount", r[0]);
+        t.put("runWaitSeconds", Math.round(r[1] / 100.0) / 10.0);
+        t.put("runSeconds", Math.round(r[2] / 100.0) / 10.0);
+        return t;
     }
 
     /** 검사 안에서 부른 모델(BIZ 풀이 검사 등)의 토큰을 이 생성 작업의 report 에 남긴다 */
@@ -315,11 +349,18 @@ public abstract class TaskGeneratorService<D> {
         boolean gateSkipped = false;
         int attempts = 1, stageRegens = 0, textRegens = 0, testRegens = 0, restarts = 0;
         boolean capStopped = false;
+        List<Map<String, Object>> costEstimates = new ArrayList<>(); // 다시 만들기 전 비용 어림과 근거
         String capDetail = "";
-        double cap = props.costCap();
+        double cap = props.costCap(devTrack(), form.minutes()); // 직군·제한시간별 상한(report cost.capUsd 에 남는다)
 
         long attemptStarted = System.nanoTime();
-        D draft = run.create(onStep); // 첫 생성이 실패하면 예외를 그대로 던지고 저장하지 않는다
+        List<Map<String, Object>> outputLimitLog = new ArrayList<>(); // 출력 한도 끊김으로 단계부터 이어 만든 기록
+        int[] used = new int[3]; // 이어 만들기도 단계 다시 만들기 예산을 쓴다: {글, 테스트, 설계도부터}
+        // 첫 생성이 실패하면 예외를 그대로 던지고 저장하지 않는다. 단, 출력 한도 끊김은 예산 안에서 그 단계부터 이어 만든다
+        D draft = withResume(run, () -> run.create(onStep), onStep, used, outputLimitLog);
+        textRegens = used[0];
+        testRegens = used[1];
+        restarts = used[2];
         double createCost = StageCallService.cost(props, run.usage()); // 처음부터 다시 만들 때 드는 비용의 어림값
         List<GenCheckResultDto> results;
         List<GateRun> gates;
@@ -358,28 +399,49 @@ public abstract class TaskGeneratorService<D> {
             boolean textLeft = textRegens < MAX_TEXT_REGENS, testLeft = testRegens < MAX_TEST_REGENS;
             boolean byStage = staged && !natural && kinds.stream().allMatch(k -> k.equals("text") ? textLeft : testLeft);
             if (!byStage && restarts >= MAX_RESTARTS) break;
-            // 비용 상한: 다음 다시 만들기 비용(단계만이면 지금까지 가장 비싼 단계 호출, 처음부터면 첫 생성 비용, 더하기 검사 비용)이 상한을 넘기면 멈춘다
+            boolean restart = !byStage;
+            List<GenCheckResultDto> redoArg = failed;
+            if (restart && staged && !natural) {
+                redoArg = List.of(new GenCheckResultDto(RESTART_CHECK, false, failed.stream().map(c -> c.name() + ": " + c.detail()).collect(Collectors.joining(" / "))));
+            }
+            // 비용 상한: 다음 다시 만들기 비용 = 다시 돌 단계들이 바로 앞 시도에서 쓴 비용 + 검사 비용. 다시 돌 단계를 모르면 처음부터 만든 비용
             double spent = spent(run, reviewCalls);
-            double estimate = (byStage ? run.usage().stream().mapToDouble(u -> props.cost(u.model(), u.inputTokens(), u.outputTokens())).max().orElse(0) : createCost) + checkCost;
+            List<String> planned = staged ? run.plannedStages(redoArg) : List.of();
+            Map<String, Double> stageUsd = new LinkedHashMap<>();
+            for (String st : planned) stageUsd.put(st, lastStageCost(run.usage(), st));
+            double regenCost = planned.isEmpty() ? createCost : stageUsd.values().stream().mapToDouble(Double::doubleValue).sum();
+            double estimate = regenCost + checkCost;
+            Map<String, Object> est = new LinkedHashMap<>(); // report.json 에 남기는 어림 근거
+            est.put("attempt", attempts);
+            est.put("method", planned.isEmpty() ? "처음부터 만든 비용 + 검사 비용" : "다시 돌 단계가 바로 앞 시도에서 쓴 비용 + 검사 비용");
+            est.put("stages", planned);
+            est.put("stageUsd", stageUsd.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> round4(e.getValue()), (a, b) -> a, LinkedHashMap::new)));
+            est.put("regenUsd", round4(regenCost));
+            est.put("checkUsd", round4(checkCost));
+            est.put("spentUsd", round4(spent));
+            est.put("estimateUsd", round4(estimate));
+            costEstimates.add(est);
             if (spent + estimate > cap) {
                 capStopped = true;
                 capDetail = String.format(java.util.Locale.ROOT, "지금까지 $%.2f, 다음 다시 만들기 예상 $%.2f → 상한 $%.2f 초과. 마지막 실패: %s", spent, estimate, cap,
                         failed.stream().map(c -> c.name() + ": " + clip(c.detail())).collect(Collectors.joining(" / ")));
                 break;
             }
-            boolean restart = !byStage;
             if (byStage) {
                 stageRegens++;
                 if (kinds.contains("text")) textRegens++;
                 if (kinds.contains("test")) testRegens++;
             } else restarts++;
-            List<GenCheckResultDto> redoArg = failed;
-            if (restart && staged && !natural) {
-                redoArg = List.of(new GenCheckResultDto(RESTART_CHECK, false, failed.stream().map(c -> c.name() + ": " + c.detail()).collect(Collectors.joining(" / "))));
-            }
             attemptStarted = System.nanoTime();
             try {
-                draft = run.redo(redoArg, onStep);
+                List<GenCheckResultDto> redoFinal = redoArg;
+                used[0] = textRegens;
+                used[1] = testRegens;
+                used[2] = restarts;
+                draft = withResume(run, () -> run.redo(redoFinal, onStep), onStep, used, outputLimitLog);
+                textRegens = used[0];
+                testRegens = used[1];
+                restarts = used[2];
             } catch (RuntimeException e) {
                 // 다시 만들기가 실패해도 이미 만든 결과는 버리지 않고 실패 표시와 함께 저장한다
                 retryError = String.valueOf(e.getMessage());
@@ -423,22 +485,35 @@ public abstract class TaskGeneratorService<D> {
 
         Map<String, Object> detail = new LinkedHashMap<>(details(draft));
         detail.putAll(extra.details());
+        detail.put("solo", soloOutcome(extra.checks())); // 난이도 참고 지표(AI 단독 풀이): missed·caught·skipped(이유)·error(이유)
         List<StageUsageDto> usage = new ArrayList<>(run.usage());
         usage.addAll(reviewCalls.usage());
         usage.addAll(EXTRA_USAGE.get()); // 검사 안에서 부른 모델(BIZ 풀이 검사 등)
+        detail.put("timing", timing(usage));
         Map<String, Object> soloTokens = extra.details().get("soloTokens") instanceof Map<?, ?> m ? castTokens(m) : Map.of();
         double soloCost = soloTokens.isEmpty() ? 0 : props.cost(props.soloModel() == null || props.soloModel().isBlank() ? "gpt-6-luna" : props.soloModel(),
                 ((Number) soloTokens.get("input")).longValue(), ((Number) soloTokens.get("output")).longValue());
         if (staged) { // 단계별 모델·토큰·시간(비용 확인용), 관문 결과, 다시 만든 이력
             detail.put("stages", usage);
+            Map<String, Object> limit = new LinkedHashMap<>(); // 출력 한도 끊김: 추론 강도를 낮춰 받은 호출 수, 낮춰도 끊긴 단계 수, 이어 만든 기록
+            limit.put("effortLowered", usage.stream().filter(u -> StageCallService.OUTPUT_LIMIT_LOWERED.equals(u.outputLimit())).count());
+            limit.put("stageFailures", usage.stream().filter(u -> StageCallService.OUTPUT_LIMIT_FAILED.equals(u.outputLimit())).count());
+            limit.put("resumes", outputLimitLog);
+            detail.put("outputLimit", limit);
+            JobCallService batchJob = JobCallService.current();
+            if (batchJob != null && batchJob.window() != null) detail.put("batch", batchSummary(usage, batchJob.deadlineAt())); // 배치 작업: 배치로 받은 호출 수, 바로 호출로 바꾼 수와 이유
+            detail.put("blueprintRetries", run.blueprintRetries()); // 설계도 형식 검사로 다시 받은 이유(점검: taskgen-runs/_verify/prompt-audit-2026-11-26.md)
             Map<String, Object> cost = new LinkedHashMap<>(); // 호출 비용 = 토큰 × 가격. byStage 는 단계(점검)별 합계
             Map<String, Double> byStageCost = new LinkedHashMap<>();
-            for (StageUsageDto u : usage) byStageCost.merge(u.stage(), round4(props.cost(u.model(), u.inputTokens(), u.outputTokens())), Double::sum);
+            for (StageUsageDto u : usage) byStageCost.merge(u.stage(), round4(StageCallService.cost(props, u)), Double::sum);
             if (soloCost > 0) byStageCost.put("SOLO", round4(soloCost));
             cost.put("totalUsd", round4(StageCallService.cost(props, usage) + soloCost));
             cost.put("capUsd", cap);
             cost.put("attempts", attempts);
             cost.put("stoppedByCap", capStopped);
+            JobCallService saved = JobCallService.current();
+            cost.put("reusedCalls", saved == null ? 0 : saved.reusedCount()); // 끊긴 작업을 이어 가며 저장된 결과를 다시 쓴 호출 수(그 비용은 위 합계에 한 번만 들어 있다)
+            cost.put("estimates", costEstimates);
             cost.put("byStageUsd", byStageCost);
             detail.put("cost", cost);
             if (!run.redone().isEmpty()) detail.put("redoStages", run.redone());
@@ -472,9 +547,63 @@ public abstract class TaskGeneratorService<D> {
         return new Outcome(code, passed, attempts, results);
     }
 
+    /** 배치 작업의 요약(report details.batch): 배치로 받은 호출 수·평균 대기, 바로 호출로 바꾼 수와 이유(wait 대기 초과, deadline 마감, length 끊김, failed 실패) */
+    static Map<String, Object> batchSummary(List<StageUsageDto> usage, java.time.Instant deadlineAt) {
+        Map<String, Object> b = new LinkedHashMap<>();
+        List<StageUsageDto> viaBatch = usage.stream().filter(u -> StageUsageDto.BATCH.equals(u.via()) && u.directReason().isEmpty()).toList();
+        b.put("batchCalls", viaBatch.size());
+        b.put("avgWaitSeconds", viaBatch.isEmpty() ? 0 : Math.round(viaBatch.stream().mapToLong(StageUsageDto::waitedMs).sum() / 1000.0 / viaBatch.size()));
+        b.put("maxWaitSeconds", Math.round(viaBatch.stream().mapToLong(StageUsageDto::waitedMs).max().orElse(0) / 1000.0));
+        Map<String, Long> direct = new LinkedHashMap<>();
+        for (String r : List.of(BatchCallService.WAIT, BatchCallService.DEADLINE, BatchCallService.LENGTH, BatchCallService.FAILED)) {
+            direct.put(r, usage.stream().filter(u -> StageUsageDto.DIRECT.equals(u.via()) && r.equals(u.directReason())).count());
+        }
+        b.put("directCalls", direct.values().stream().mapToLong(Long::longValue).sum());
+        b.put("directByReason", direct);
+        b.put("deadlineAt", deadlineAt == null ? null : deadlineAt.toString());
+        return b;
+    }
+
     /** 지금까지 쓴 비용($): 단계 호출 + 관문 호출 + 검사 안의 풀이 호출 */
     private double spent(TaskPipelineService.Run<D> run, StageCallService reviewCalls) {
         return StageCallService.cost(props, run.usage()) + reviewCalls.cost() + StageCallService.cost(props, EXTRA_USAGE.get());
+    }
+
+    /**
+     * 참고 지표(AI 단독 풀이) 결과를 report 에 남길 모양으로: status 는 missed(놓침: 목표 쪽)·caught(잡음)·skipped(건너뜀)·error(확인 못 함), reason 은 건너뛴·못 한 이유.
+     * 이 검사는 항상 warn 이라 통과 여부에 영향을 주지 않는다
+     */
+    static Map<String, Object> soloOutcome(List<GenCheckResultDto> checks) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        GenCheckResultDto c = checks.stream().filter(x -> SoloSolveService.NAME.equals(x.name()) || BizSoloSolveService.NAME.equals(x.name())).findFirst().orElse(null);
+        if (c == null) {
+            m.put("status", "skipped");
+            m.put("reason", "단독 풀이 검사가 실행되지 않음");
+            return m;
+        }
+        String d = c.detail() == null ? "" : c.detail();
+        if (d.startsWith("건너뜀: ")) {
+            m.put("status", "skipped");
+            m.put("reason", d.substring("건너뜀: ".length()));
+        } else if (d.startsWith(SoloSolveService.INVALID_PREFIX)) { // 컴파일 실패·결함과 상관없는 테스트 실패: 놓침 비율 분모에서 뺀다
+            m.put("status", "invalid");
+            m.put("reason", d.substring(SoloSolveService.INVALID_PREFIX.length()));
+        } else if (d.contains("지나쳤")) m.put("status", "missed");
+        else if (d.contains("잡았")) m.put("status", "caught");
+        else {
+            m.put("status", "error");
+            m.put("reason", d);
+        }
+        return m;
+    }
+
+    /** stage 를 마지막으로 부른 호출 하나의 비용($). 부른 적 없으면 0 */
+    private double lastStageCost(List<StageUsageDto> usage, String stage) {
+        for (int i = usage.size() - 1; i >= 0; i--) {
+            StageUsageDto u = usage.get(i);
+            if (u.stage().equals(stage)) return StageCallService.cost(props, u);
+        }
+        return 0;
     }
 
     private static double round4(double d) {
@@ -485,6 +614,30 @@ public abstract class TaskGeneratorService<D> {
         Map<String, Object> out = new LinkedHashMap<>();
         m.forEach((k, v) -> out.put(String.valueOf(k), v));
         return out.get("input") instanceof Number && out.get("output") instanceof Number ? out : Map.of();
+    }
+
+    /**
+     * action 을 돌리다 생성 단계가 출력 한도에서 끊기면(StageOutputLimitException) 그 단계부터 이어 만든다. 예산은 단계 다시 만들기와 같다:
+     * 작성·문항 글은 글 예산, 시작 코드·정답 쪽·관련 적은 자료는 테스트 예산, 설계도는 처음부터 예산. 예산이 없으면 그대로 던진다
+     */
+    private D withResume(TaskPipelineService.Run<D> run, java.util.function.Supplier<D> action, Consumer<String> onStep, int[] used, List<Map<String, Object>> log) {
+        while (true) {
+            try {
+                return action.get();
+            } catch (com.pair.domain.taskgen.exception.StageOutputLimitException e) {
+                Stage stage = Stage.valueOf(e.stage());
+                int kind = stage == Stage.BLUEPRINT ? 2 : stage == Stage.WRITING || stage == Stage.QUESTIONS ? 0 : 1;
+                int max = kind == 0 ? MAX_TEXT_REGENS : kind == 1 ? MAX_TEST_REGENS : MAX_RESTARTS;
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("stage", e.stage());
+                m.put("detail", clip(e.getMessage()));
+                m.put("resumed", used[kind] < max);
+                log.add(m);
+                if (used[kind] >= max) throw e;
+                used[kind]++;
+                action = () -> run.resumeFrom(stage, onStep);
+            }
+        }
     }
 
     private static String clip(String s) {

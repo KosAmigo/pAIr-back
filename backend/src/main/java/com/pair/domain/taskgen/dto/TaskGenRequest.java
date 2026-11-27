@@ -42,6 +42,14 @@ public record TaskGenRequest(String track, String topic, String trap, String usa
     }
     public static final Set<Integer> MINUTES = Set.of(20, 40, 60);
 
+    /** 직군 값 검사: 대문자 DEV 또는 BIZ. 아니면 IllegalArgumentException(400) */
+    public static String cleanTrack(String track) {
+        String t = clean(track).toUpperCase();
+        if (t.isEmpty()) throw new IllegalArgumentException("직군 구분(track)을 입력하세요.");
+        if (!t.equals("DEV") && !t.equals("BIZ")) throw new IllegalArgumentException("track 은 DEV 또는 BIZ 여야 합니다: " + track);
+        return t;
+    }
+
     /** 빈 값·범위를 검사하고 기본값을 채운 새 폼을 돌려준다. 잘못되면 IllegalArgumentException(400) */
     public TaskGenRequest validated() {
         String t = clean(track).toUpperCase();

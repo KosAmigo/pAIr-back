@@ -71,7 +71,7 @@ class TaskTextCheckTest {
         assertThat(BlueprintService.problems(withFlaw(b, ok, cases), false)).noneMatch(p -> p.contains("가르는 사례"));
 
         assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("flaws.wrongAnswer").contains("separatedBy");
-        assertThat(TaskPromptService.answerDev(40)).contains("flaws.wrongAnswer").contains("separatedBy").contains("직접 호출");
+        assertThat(TaskPromptService.answerDev(40)).contains("flaws.wrongAnswer").contains("separatedBy").contains("call the api's \"추가:\" methods directly");
         // 정답 쪽 입력의 설계도에 오답 방식이 그대로 실린다
         assertThat(StageCallService.json(BlueprintService.withoutFacts(withFlaw(b, ok, cases)))).contains("반올림으로 때운다").contains("roundingDiffers");
     }
@@ -105,7 +105,7 @@ class TaskTextCheckTest {
         assertThat(r.detail()).contains("이 페이지는").contains("응시자가 작성하는 기획안에서").contains("AI 어시스턴트");
         assertThat(BizPipelineService.owners(r)).containsExactly(TaskPipelineService.Stage.WRITING);
         assertThat(TaskWritingService.writerFeedback(List.of(r), meta)).contains("실제 업무 문서").contains("고칠 문장");
-        assertThat(TaskPromptService.writingBiz(40)).contains("실제 회사의 업무 문서").contains("응시자");
+        assertThat(TaskPromptService.writingBizDoc(40, false, 2)).contains("real company record").contains("candidate");
     }
 
     private static BlueprintDto withApi(List<String> api) {
@@ -136,7 +136,7 @@ class TaskTextCheckTest {
         // 제네릭 매개변수도 비교된다
         var generic = withApi(List.of("추가: Pager.group(List<String> names, Map<String, Integer> sizes): int"));
         assertThat(CaseCheckService.stubs(generic, src("int group(List<String> n, Map<String, Integer> s) { throw new UnsupportedOperationException(\"TODO\"); }")).ok()).isTrue();
-        assertThat(TaskPromptService.code("깊이")).contains("반드시 틀로 둔다").contains("UnsupportedOperationException(\"TODO\")").doesNotContain("없애거나");
+        assertThat(TaskPromptService.code("깊이")).contains("as a stub").contains("UnsupportedOperationException(\"TODO\")").doesNotContain("없애거나");
     }
 
     @Test
@@ -258,8 +258,8 @@ class TaskTextCheckTest {
         var bp = new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), b.facts(), b.examples(), b.flaws(),
                 b.judgments(), b.trapKeywords(), b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan(), cases);
 
-        assertThat(BlueprintService.optionConflicts(bp)).anyMatch(p -> p.contains("Q8") && p.contains("Q9") && p.contains("보기"));
-        assertThat(BlueprintService.optionConflicts(b)).isEmpty();
+        assertThat(BizBlueprintService.optionConflicts(bp)).anyMatch(p -> p.contains("Q8") && p.contains("Q9") && p.contains("보기"));
+        assertThat(BizBlueprintService.optionConflicts(b)).isEmpty();
         assertThat(BlueprintService.problems(bp, true)).anyMatch(p -> p.contains("보기에 있습니다"));
     }
 
@@ -271,14 +271,14 @@ class TaskTextCheckTest {
         var pinnedCase = new BlueprintDto.Case("pinned", "상황", "0.00", optionFact);
         var withPinned = new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), b.facts(), b.examples(), b.flaws(),
                 b.judgments(), b.trapKeywords(), b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan(), List.of(b.cases().get(0), pinnedCase));
-        assertThat(BlueprintService.pinnedJudgments(withPinned)).anyMatch(p -> p.contains("pinned"));
+        assertThat(DevBlueprintService.pinnedJudgments(withPinned)).anyMatch(p -> p.contains("pinned"));
         assertThat(BlueprintService.problems(withPinned, false)).anyMatch(p -> p.contains("그 선택으로 결과가 정해집니다"));
 
         var pinnedExample = new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), b.facts(),
                 List.of(new BlueprintDto.Example("입력 " + optionFact, "0.00")), b.flaws(), b.judgments(), b.trapKeywords(), b.conclusion(), b.tables(), b.figures(),
                 b.docs(), b.questionPlan(), b.cases());
-        assertThat(BlueprintService.pinnedJudgments(pinnedExample)).anyMatch(p -> p.contains("예("));
-        assertThat(BlueprintService.pinnedJudgments(b)).isEmpty();
+        assertThat(DevBlueprintService.pinnedJudgments(pinnedExample)).anyMatch(p -> p.contains("예("));
+        assertThat(DevBlueprintService.pinnedJudgments(b)).isEmpty();
     }
 
     @Test
@@ -298,7 +298,7 @@ class TaskTextCheckTest {
     void c1_addedMethodNeedsCase() {
         BlueprintDto b = TaskPipelineServiceTest.devBlueprint();
         var noCase = withApi(List.of("기존: PaymentDiscount.totalDiscount(): BigDecimal", "추가: PaymentDiscount.payable(String price): BigDecimal"));
-        assertThat(BlueprintService.addedMethodCases(noCase)).anyMatch(p -> p.contains("payable()") && p.contains("사례"));
+        assertThat(DevBlueprintService.addedMethodCases(noCase)).anyMatch(p -> p.contains("payable()") && p.contains("사례"));
         assertThat(BlueprintService.problems(noCase, false)).anyMatch(p -> p.contains("payable()"));
 
         var payableCase = new BlueprintDto.Case("payableAfterDiscount", "할인 1.25, 2.25 등록 뒤 payable(\"10.00\")", "6.50", "할인 1.25, 2.25 등록 뒤 payable(\"10.00\") → 6.50");
@@ -307,7 +307,7 @@ class TaskTextCheckTest {
         var ok = new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(),
                 List.of("기존: PaymentDiscount.totalDiscount(): BigDecimal", "추가: PaymentDiscount.payable(String price): BigDecimal"), b.facts(), b.examples(), b.flaws(),
                 b.judgments(), b.trapKeywords(), b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan(), cases);
-        assertThat(BlueprintService.addedMethodCases(ok)).isEmpty();
+        assertThat(DevBlueprintService.addedMethodCases(ok)).isEmpty();
         // 숨은 테스트 메서드 이름 검사는 이 사례를 허용한다(사례 name 과 같은 테스트 메서드)
         var tests = List.of(new DevDraftDto.FileDraft("test/shop/H.java", "class H { @Test void totalsExactly() {} @Test void payableAfterDiscount() { payable(\"10.00\"); } }"));
         assertThat(CaseCheckService.dev(ok, tests).ok()).isTrue();
@@ -315,10 +315,10 @@ class TaskTextCheckTest {
         var flawCase = new BlueprintDto.Case("totalsExactly", "payable(\"10.00\") 합계", "0.30", "근거 문장 하나둘셋넷다섯");
         var bad = new BlueprintDto(ok.title(), ok.summary(), ok.code(), ok.category(), ok.competencies(), ok.scenario(), ok.api(), ok.facts(), ok.examples(), ok.flaws(),
                 ok.judgments(), ok.trapKeywords(), ok.conclusion(), ok.tables(), ok.figures(), ok.docs(), ok.questionPlan(), List.of(flawCase, payableCase));
-        assertThat(BlueprintService.addedMethodCases(bad)).anyMatch(p -> p.contains("결함을 잡는 사례"));
+        assertThat(DevBlueprintService.addedMethodCases(bad)).anyMatch(p -> p.contains("결함을 잡는 사례"));
         // 프롬프트의 좋은 예
         String example = TaskPromptService.blueprint(false, 40, "깊이");
-        assertThat(example).contains("payableAfterDiscount").contains("추가:").contains("\"추가:\" 메서드마다 그 메서드를 부르는 사례");
+        assertThat(example).contains("payableAfterPoints").contains("추가:").contains("Each 추가 method needs at least 1 case");
     }
 
     @Test
@@ -330,7 +330,7 @@ class TaskTextCheckTest {
         assertThat(TaskReviewService.basisKind(b, example)).isEqualTo("예");
         assertThat(TaskReviewService.basisKind(b, fact)).isEqualTo("사실");
         assertThat(TaskPromptService.check("backing-cases")).contains("근거 종류가 \"사실\"").contains("끌어낼 수 있으면 충분").contains("stage");
-        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("끌어낼 수 있는 사실").contains("결함이 샌다");
+        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("a fact from which the expected result can be derived").contains("the flaw would leak");
     }
 
     @Test
@@ -499,13 +499,13 @@ class TaskTextCheckTest {
                 .containsExactly(TaskPipelineService.Stage.BLUEPRINT);
         // 틀이 없는 과제(기존 코드만)는 확인할 가짜가 없어 영향 없음
         assertThat(FakeImplService.fakes(TaskGenFixtures.good())).isEmpty();
-        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("참이 되는 사례와 거짓이 되는 사례");
+        assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("one true and one false case");
     }
 
     @Test
     @DisplayName("g1-3: 설계도 프롬프트는 여러 조건 기준의 결합 방식을 사실로 적게 하고, 정답 키 관문은 자료(문서·CSV)를 받아 결합 방식이 적혀 있는지 본다")
     void g1_combinationWording() {
-        assertThat(TaskPromptService.blueprint(true, 40, "깊이")).contains("모두 충족해야 통과한다").contains("결합");
+        assertThat(TaskPromptService.blueprint(true, 40, "깊이")).contains("모두 충족해야 통과한다").contains("how they combine");
         assertThat(TaskPromptService.check("answer-key")).contains("여러 조건 기준의 결합 방식이 자료에 없음").contains("모두 충족해야");
         var d = BizFixtures.good("g1");
         String in = TaskReviewService.bizInput(TaskReviewService.Check.ANSWER_KEY, TaskGenFixtures.form(), TaskPipelineServiceTest.bizBlueprint(), d);
@@ -534,6 +534,6 @@ class TaskTextCheckTest {
         assertThat(warn.level()).isEqualTo(com.pair.domain.taskgen.dto.GenCheckResultDto.WARN);
         assertThat(warn.needsRegeneration()).isFalse();
         assertThat(warn.detail()).contains("4개").contains("펼쳤다").doesNotContain("수수료는 10퍼센트");
-        assertThat(TaskPromptService.writingBiz(40)).contains("사실, 숫자, 판단, 요청 중 하나").contains("서류를 펼쳤다");
+        assertThat(TaskPromptService.writingBizDoc(40, false, 2)).contains("carries a fact, number, judgment or request").contains("서류를 펼쳤다");
     }
 }

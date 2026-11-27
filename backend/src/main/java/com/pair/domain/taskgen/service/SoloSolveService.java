@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.taskgen.dto.DevDraftDto;
 import com.pair.domain.taskgen.dto.GenCheckResultDto;
 import com.pair.domain.taskgen.dto.SoloAnswerDto;
@@ -28,7 +29,8 @@ public class SoloSolveService {
 
     /** 참고 지표(DEV). 옛 이름은 "AI 혼자 바로 풀리지 않음"(M5 필수 조건이던 때). 프런트는 이 이름을 따로 쓰지 않는다 */
     static final String NAME = "참고: AI 단독 풀이";
-    static final String REQUEST = "이 문제를 고쳐 주세요. 고친 src 파일의 전체 내용을 주세요.";
+    static final String REQUEST = "이 문제를 고쳐 주세요. 고친 src 파일의 전체 내용을 주세요. "
+            + "기존 클래스·메서드의 이름, 매개변수, 반환형, 접근 범위(public·static·record 등)는 바꾸지 말고 그대로 두세요. 공개 테스트와 다른 파일이 고치지 않은 채로 컴파일되어야 합니다.";
 
     /** 검사 결과, 풀이 파일(경로는 "1/src/x/Y.java" 처럼 시도 번호가 앞에 붙음), 쓴 토큰 */
     public record Result(GenCheckResultDto check, Map<String, String> files, long inputTokens, long outputTokens) {}
@@ -37,6 +39,11 @@ public class SoloSolveService {
     private final TaskGenProperties props;
     private final PairProperties pair;
     private final CodeRunner runner;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SoloSolveService(TaskGenAiService ai, TaskGenProperties props, PairProperties pair, TaskGenRunService run) {
+        this(ai, props, pair, run.runner());
+    }
 
     public SoloSolveService(TaskGenAiService ai, TaskGenProperties props, PairProperties pair, CodeRunner runner) {
         this.ai = ai;
@@ -56,12 +63,34 @@ public class SoloSolveService {
 
     /** 응시자가 AI 에 붙여 넣을 만한 글. 숨은 테스트, 정답, 오답, 함정 핵심어는 넣지 않는다 */
     static String prompt(DevDraftDto d) {
+        return prompt(d, (AiLimitsDto) null);
+    }
+
+    /** limits 가 있으면 파일을 앞에서부터 붙이되 첨부 개수·맥락 글자 한도까지만 붙인다(E6, 고르지 않는 풀이) */
+    static String prompt(DevDraftDto d, AiLimitsDto limits) {
+        return prompt(d, SoloLimitService.attach(materials(d), limits));
+    }
+
+    /** 과제 글(설명·요구사항)만. 고르기 질문과 풀이 질문이 같이 쓴다. 파일 내용(NOTES 포함)은 붙인 것만 따로 들어간다 */
+    static String taskText(DevDraftDto d) {
         StringBuilder sb = new StringBuilder();
         sb.append("[설명]\n").append(String.join("\n", d.description())).append("\n\n");
         sb.append("[요구사항]\n");
         for (String r : d.requirements()) sb.append("- ").append(r).append('\n');
-        for (var f : d.files()) sb.append("\n[파일 ").append(f.path()).append("]\n").append(f.content()).append('\n');
+        return sb.toString();
+    }
+
+    /** 붙인 파일로 풀이 질문을 만든다 */
+    static String prompt(DevDraftDto d, SoloLimitService.Attached attached) {
+        StringBuilder sb = new StringBuilder(taskText(d));
+        for (var m : attached.attached()) sb.append("\n[파일 ").append(m.path()).append("]\n").append(m.text()).append('\n');
         return sb.append('\n').append(REQUEST).toString();
+    }
+
+    private static List<SoloLimitService.Material> materials(DevDraftDto d) {
+        List<SoloLimitService.Material> out = new ArrayList<>();
+        for (var f : d.files()) out.add(new SoloLimitService.Material(f.path(), f.content()));
+        return out;
     }
 
     /**
@@ -69,14 +98,22 @@ public class SoloSolveService {
      * 숨은 테스트까지 모두 통과하면 "잡음", 한 번이라도 실패하면 "지나침"(풀린 경우엔 어디를 고쳐 풀렸는지 검수용으로 적는다)
      */
     public Result run(DevDraftDto d) {
+        return run(d, null);
+    }
+
+    /** limits: 과제의 AI 제한(E6). null 이면 보이는 파일을 제한 없이 모두 붙인다 */
+    public Result run(DevDraftDto d, AiLimitsDto limits) {
         String model = props.soloModel() == null || props.soloModel().isBlank() ? pair.assistant().model() : props.soloModel();
         String system = pair.assistant().systemPrompt() == null ? "" : pair.assistant().systemPrompt();
-        String user = prompt(d);
+        // g8: AI 가 파일 목록을 보고 직접 골라 붙인다(SoloLimitService.pick). 제한이 없으면 모두 붙인다
+        SoloLimitService.Picked picked = SoloLimitService.pick(ai, model, system, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort(), taskText(d), materials(d), limits);
+        String user = prompt(d, picked.attached());
+        String pickNote = SoloLimitService.note(picked, limits);
         int attempts = props.soloAttempts();
         Map<String, String> files = new LinkedHashMap<>();
-        long in = 0, out = 0;
-        int solved = 0, failedHidden = 0, callFailed = 0;
-        String firstFix = null;
+        long in = picked.inputTokens(), out = picked.outputTokens();
+        int solved = 0, failedHidden = 0, callFailed = 0, invalid = 0;
+        String firstFix = null, failure = "", invalidWhy = "";
 
         for (int n = 1; n <= attempts; n++) {
             TaskGenAiService.Output<SoloAnswerDto> o;
@@ -84,6 +121,7 @@ public class SoloSolveService {
                 o = ai.generate(model, system, user, SoloAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
             } catch (RuntimeException e) {
                 callFailed++;
+                failure = "모델 호출 실패: " + e.getMessage();
                 continue;
             }
             in += o.inputTokens();
@@ -98,28 +136,81 @@ public class SoloSolveService {
                 r = runner.run(sources);
             } catch (RuntimeException e) {
                 callFailed++;
+                failure = "풀이 실행 실패: " + e.getMessage();
                 continue;
             }
             if (!answer.isEmpty() && r.allPassed() && r.millis() < DevCheckService.TIME_LIMIT_MS) {
                 solved++;
                 if (firstFix == null) firstFix = fixSummary(d, answer);
-            } else failedHidden++;
+            } else {
+                String why = invalidReason(d, answer, r);
+                if (why == null) failedHidden++;
+                else {
+                    invalid++;
+                    invalidWhy = why;
+                }
+            }
         }
 
         GenCheckResultDto check;
-        if (failedHidden > 0) {
-            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요(" + attempts + "번 중 " + failedHidden
-                    + "번 숨은 테스트에서 실패). 검증이 필요한 과제입니다.", GenCheckResultDto.WARN);
+        String invalidNote = invalid > 0 ? " 무효 " + invalid + "번(" + invalidWhy + ")." : "";
+        if (failedHidden == 0 && solved == 0 && invalid > 0) {
+            // 풀이가 컴파일되지 않거나 결함과 상관없는 테스트에서 떨어짐: 난이도 신호가 아니다(g5 03: static 으로 바꿔 컴파일 실패). 놓침 비율 분모에서 뺀다
+            check = new GenCheckResultDto(NAME, true, INVALID_PREFIX + invalidWhy + " (" + attempts + "번 중 " + invalid + "번). " + pickNote.strip(), GenCheckResultDto.WARN);
+        } else if (failedHidden > 0) {
+            check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요" + (limits == null ? "" : ". " + pickNote.strip() + " ") + "(" + attempts + "번 중 " + failedHidden
+                    + "번 숨은 테스트에서 실패). 검증이 필요한 과제입니다." + invalidNote, GenCheckResultDto.WARN);
         } else if (callFailed > 0) {
-            check = new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패)", GenCheckResultDto.WARN);
+            check = new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(" + failure + ")", GenCheckResultDto.WARN);
         } else {
-            String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요(" + attempts + "번 모두 숨은 테스트 통과). 난이도가 낮거나 단서가 자료에 많이 드러났는지 검수하세요. "
-                    + sourcesNote(d)
+            String detail = "참고: AI 단독 풀이(" + model + ")가 숨은 결함을 잡았어요(" + (solved == attempts ? attempts + "번 모두" : attempts + "번 중 " + solved + "번") + " 숨은 테스트 통과)." + invalidNote + " 난이도가 낮거나 단서가 자료에 많이 드러났는지 검수하세요. "
+                    + pickNote + sourcesNote(d, picked.attached())
                     + (firstFix == null || firstFix.isBlank() ? "" : " AI 가 바로 고친 곳: " + firstFix + ".")
                     + clueNote(d, firstFix);
             check = new GenCheckResultDto(NAME, true, detail, GenCheckResultDto.WARN);
         }
         return new Result(check, files, in, out);
+    }
+
+    /** 무효 판정 상세의 앞말(TaskGeneratorService.soloOutcome 이 status invalid 로 읽는다) */
+    static final String INVALID_PREFIX = "참고: AI 단독 풀이 무효: ";
+
+    /**
+     * 풀지 못한 시도가 놓침(missed)인지 무효인지. 놓침은 컴파일되고 공개 테스트를 모두 통과했는데 결함을 겨냥한 숨은 테스트(hiddenFlaws.caughtBy)가 실패한 경우뿐이다.
+     * 무효면 그 이유, 놓침이면 null. 컴파일 실패, 시간 초과, 공개 테스트 실패, 결함 사례 밖 숨은 테스트만 실패한 경우가 무효다(고친 파일이 없으면 고칠 곳을 못 찾은 것이라 놓침)
+     */
+    static String invalidReason(DevDraftDto d, Map<String, String> answer, RunResult r) {
+        if (answer.isEmpty()) return null; // 고칠 곳이 없다고 본 것: 결함을 놓친 것이다
+        if (!r.compiled()) {
+            String diag = r.diagnostics() == null || r.diagnostics().isEmpty() ? "" : ": " + r.diagnostics().get(0).file() + " " + r.diagnostics().get(0).message();
+            return "풀이가 컴파일되지 않음" + (diag.length() > 160 ? diag.substring(0, 160) + "…" : diag);
+        }
+        if (r.millis() >= DevCheckService.TIME_LIMIT_MS) return "시간 초과";
+        java.util.Set<String> publicClasses = new java.util.HashSet<>();
+        for (var f : d.files()) if (f.path() != null && f.path().startsWith("test/") && f.path().endsWith(".java")) publicClasses.add(simpleClass(f.path()));
+        java.util.Set<String> flawTests = new java.util.HashSet<>();
+        for (var h : d.hiddenFlaws() == null ? List.<DevDraftDto.HiddenFlaw>of() : d.hiddenFlaws()) if (h.caughtBy() != null && !h.caughtBy().isBlank()) flawTests.add(h.caughtBy().strip());
+        List<String> failed = r.tests().stream().filter(t -> !t.passed()).map(com.pair.infra.sandbox.CodeRunner.TestCase::name).toList();
+        if (failed.isEmpty()) return null; // 테스트별 결과가 없으면 가를 수 없어 예전처럼 놓침으로 둔다
+        List<String> publicFailed = failed.stream().filter(n -> publicClasses.contains(testClass(n))).toList();
+        if (!publicFailed.isEmpty()) return "공개(기존) 테스트 실패 " + publicFailed;
+        if (failed.stream().noneMatch(n -> flawTests.contains(testMethod(n)))) return "결함을 겨냥하지 않은 숨은 테스트만 실패 " + failed;
+        return null;
+    }
+
+    private static String simpleClass(String path) {
+        String base = path.substring(path.lastIndexOf('/') + 1);
+        return base.endsWith(".java") ? base.substring(0, base.length() - 5) : base;
+    }
+
+    /** 테스트 이름 "패키지.클래스.메서드" 의 클래스 이름 */
+    private static String testClass(String name) {
+        String[] p = name.split("\\.");
+        return p.length >= 2 ? p[p.length - 2] : name;
+    }
+
+    private static String testMethod(String name) {
+        return name.substring(name.lastIndexOf('.') + 1);
     }
 
     /** AI 가 단서로 썼을 만한 요구사항·메모·summary 문장 목록 (없으면 직접 점검하라는 말) */
@@ -131,12 +222,13 @@ public class SoloSolveService {
 
     /** 풀이에 AI 가 본 자료. 요구사항·메모·로그가 정답을 알려 줬는지 검수자가 가늠하게 한다 */
     static String sourcesNote(DevDraftDto d) {
-        List<String> notes = new ArrayList<>();
-        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
-            if (f != null && f.path() != null && !f.path().startsWith("src/") && !f.path().startsWith("test/")) notes.add(f.path());
-        }
-        return "AI 가 본 자료: 설명, 요구사항 " + (d.requirements() == null ? 0 : d.requirements().size()) + "줄, 시작 코드·공개 테스트"
-                + (notes.isEmpty() ? "" : ", " + String.join(", ", notes)) + ".";
+        return sourcesNote(d, SoloLimitService.attach(materials(d), null));
+    }
+
+    /** AI 가 실제로 본 자료: 설명·요구사항 + 붙인 파일만(g7 판정: 붙이지 않은 NOTES 까지 본 것처럼 적혀 헷갈렸음) */
+    static String sourcesNote(DevDraftDto d, SoloLimitService.Attached attached) {
+        return "AI 가 본 자료: 설명, 요구사항 " + (d.requirements() == null ? 0 : d.requirements().size()) + "줄, 붙인 파일 "
+                + attached.attached().stream().map(SoloLimitService.Material::path).toList() + ".";
     }
 
     /** AI 풀이가 시작 코드에서 바꾼 줄(추가·삭제)을 짧게 줄인 글 */

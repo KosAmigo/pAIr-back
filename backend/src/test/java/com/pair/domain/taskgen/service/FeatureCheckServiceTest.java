@@ -124,10 +124,10 @@ class FeatureCheckServiceTest {
     @Test
     @DisplayName("프롬프트: 설계도 api 는 기존/추가를 구분하고, 작성의 후속 질문은 일반 틀로만, 답 노출 점검은 '어디를 확인하라'는 위치 힌트를 위반으로 본다")
     void promptRules() {
-        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("\"기존: \"").contains("추가: PaymentDiscount.payable").contains("기대 결과를 직접 정하는 예 문장");
-        assertThat(TaskPromptService.WRITING_DEV).contains("\"기존:\" 메서드는 이미 있는 것이라").contains("일반 질문 틀").contains("어디를 확인하라는 말도 쓰지 않는다");
-        assertThat(TaskPromptService.writingBiz(20)).contains("일반 질문 틀").contains("어디를 확인하라는 말도 쓰지 않는다");
-        assertThat(TaskPromptService.code("깊이")).contains("\"추가:\" 메서드는 시작 코드에 반드시 틀로 둔다");
+        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("\"기존: Class.method").contains("추가: OrderCheckout.payable").contains("a sentence that fixes this expected result directly");
+        assertThat(TaskPromptService.WRITING_DEV).contains("\"기존:\" methods already exist").contains("generic frame").contains("no hint where to look");
+        assertThat(TaskPromptService.WRITING_BIZ_BRIEF).contains("generic frame").contains("no hint where to look");
+        assertThat(TaskPromptService.code("깊이")).contains("must exist in the starter code as a stub");
         assertThat(TaskPromptService.check("leak")).contains("결함이 있는 곳을 콕 집어 확인하라고 한다").contains("후속 질문과 문항 문구 포함");
         // 후속 질문은 답 노출 점검 입력에 들어 있다(DEV·BIZ)
         DevDraftDto dev = TaskGenFixtures.edit(TaskGenFixtures.good(), x -> x.taskFollowUp("후속 질문입니다 비고란을 함께 확인하세요"));

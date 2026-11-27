@@ -34,9 +34,17 @@ import com.pair.global.config.PairProperties;
 public class LocalJvmRunner implements CodeRunner {
 
     private final int timeoutSeconds;
+    private final List<String> jvmArgs;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public LocalJvmRunner(PairProperties props) {
-        this.timeoutSeconds = props.run().timeoutSeconds();
+        this(props.run().timeoutSeconds(), List.of());
+    }
+
+    /** 직접 만들 때(스프링 빈이 아님): 시간 제한과 테스트 JVM 에 더할 옵션(예: -Xmx256m). 과제 생성기 전용 실행 장치가 쓴다 */
+    public LocalJvmRunner(int timeoutSeconds, List<String> jvmArgs) {
+        this.timeoutSeconds = timeoutSeconds;
+        this.jvmArgs = List.copyOf(jvmArgs);
     }
 
     /**
@@ -69,7 +77,10 @@ public class LocalJvmRunner implements CodeRunner {
             }
             lines.add("$ junit execute --scan-class-path");
             String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-            ProcessBuilder pb = new ProcessBuilder(javaBin,
+            List<String> cmd = new ArrayList<>();
+            cmd.add(javaBin);
+            cmd.addAll(jvmArgs);
+            cmd.addAll(List.of(
                     "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
                     "-jar", junitJar, "execute",
                     "--class-path", out.toString(),
@@ -78,7 +89,8 @@ public class LocalJvmRunner implements CodeRunner {
                     "--disable-ansi-colors",
                     "--details=tree",
                     "--details-theme=ascii",
-                    "--reports-dir", reports.toString());
+                    "--reports-dir", reports.toString()));
+            ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             Process proc = pb.start();
             Thread reader = Thread.ofVirtual().start(() -> {

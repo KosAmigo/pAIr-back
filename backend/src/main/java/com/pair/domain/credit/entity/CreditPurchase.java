@@ -7,7 +7,8 @@ import jakarta.persistence.*;
 @Entity
 @Table(name = "credit_purchases")
 public class CreditPurchase {
-    public enum Status { READY, CONFIRMING, PAID, FAILED, CANCELED, REFUNDED }
+    /** REFUNDING: 크레딧을 빼고 토스 결제 취소를 요청한 중간 상태 */
+    public enum Status { READY, CONFIRMING, PAID, FAILED, CANCELED, REFUNDING, REFUNDED }
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "purchase_id")
@@ -34,6 +35,11 @@ public class CreditPurchase {
     private Instant paidAt;
     @Column(name = "refunded_at")
     private Instant refundedAt;
+    /** 마지막 토스 결제 취소 요청의 멱등 키 */
+    @Column(name = "refund_key", length = 36)
+    private String refundKey;
+    @Column(name = "refund_started_at")
+    private Instant refundStartedAt;
 
     protected CreditPurchase() {}
 
@@ -55,7 +61,16 @@ public class CreditPurchase {
     public void paid() { status = Status.PAID; paidAt = Instant.now(); }
     public void failed() { status = Status.FAILED; }
     public void cancel() { status = Status.CANCELED; }
+    public void beginRefund(String idempotencyKey) {
+        status = Status.REFUNDING;
+        refundKey = idempotencyKey;
+        refundStartedAt = Instant.now();
+    }
+    /** 결과를 모르는 취소를 다시 요청한다(새 멱등 키). 처음 요청한 시각은 그대로 둔다 */
+    public void retryRefund(String idempotencyKey) { refundKey = idempotencyKey; }
     public void refunded() { status = Status.REFUNDED; refundedAt = Instant.now(); }
+    /** 토스가 취소를 거절했다: 결제는 그대로 완료 상태다 */
+    public void refundRejected() { status = Status.PAID; }
     public Long getId() { return id; }
     public Long getUserId() { return userId; }
     public int getCredits() { return credits; }
@@ -68,4 +83,6 @@ public class CreditPurchase {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getPaidAt() { return paidAt; }
     public Instant getRefundedAt() { return refundedAt; }
+    public String getRefundKey() { return refundKey; }
+    public Instant getRefundStartedAt() { return refundStartedAt; }
 }

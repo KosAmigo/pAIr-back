@@ -1,6 +1,6 @@
 package com.pair.domain.taskgen.exception;
 
-/** 동시에 도는 과제 생성 작업이 상한(pair.taskgen.max-concurrent)을 넘었을 때. 429 로 돌려준다 */
+/** AI 추천 호출이 분당 한도를 넘었을 때 등 요청이 너무 잦을 때. 429 로 돌려준다(생성 작업은 상한을 넘으면 거절하지 않고 대기열에서 기다린다) */
 public class TooManyJobsException extends RuntimeException {
     public TooManyJobsException(String message) {
         super(message);

@@ -126,10 +126,29 @@ public class CreditService {
         ledger.save(CreditLedger.purchase(userId, amount, next, "PURCHASE", purchaseId));
     }
 
+    /** 환불할 구매분을 뺀다. 잔액이 구매한 크레딧보다 적으면 InsufficientCreditException */
     @Transactional(propagation = Propagation.MANDATORY)
     public void refundPurchase(Long userId, int amount, Long purchaseId) {
-        int current = check(userId, amount);
+        lock(userId);
+        int current = balance(userId);
+        if (current < amount) {
+            throw new InsufficientCreditException("남은 크레딧(" + current + ")이 구매한 크레딧(" + amount + ")보다 적어 환불할 수 없습니다.");
+        }
         ledger.save(CreditLedger.purchase(userId, -amount, current - amount, "PURCHASE_REFUND", purchaseId));
+    }
+
+    /** 토스가 결제 취소를 거절해 refundPurchase 로 뺐던 크레딧을 되돌린다 */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void undoPurchaseRefund(Long userId, int amount, Long purchaseId) {
+        lock(userId);
+        int next = Math.addExact(balance(userId), amount);
+        ledger.save(CreditLedger.purchase(userId, amount, next, "PURCHASE_REFUND_UNDO", purchaseId));
+    }
+
+    /** 토스가 이 구매의 환불을 거절한 적이 있는지 (되돌린 기록은 구매 1건에 한 번만 남길 수 있다) */
+    @Transactional(readOnly = true)
+    public boolean refundWasRejected(Long purchaseId) {
+        return ledger.existsByPurchaseIdAndReason(purchaseId, "PURCHASE_REFUND_UNDO");
     }
 
     private void charge(Long userId, int cost, String reason, Long attemptId, Long turnId) {

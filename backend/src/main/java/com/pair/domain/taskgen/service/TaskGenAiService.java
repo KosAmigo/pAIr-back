@@ -3,7 +3,13 @@ package com.pair.domain.taskgen.service;
 /** 과제 생성용 AI 호출. 구조화 출력(JSON Schema)으로 type 하나를 받는다. 테스트에서는 가짜로 바꿔 끼운다 */
 public interface TaskGenAiService {
 
-    record Output<T>(T value, long inputTokens, long outputTokens) {}
+    /** effortLowered: 출력 한도에서 빈 답이 와 추론 강도를 한 단계 낮춰 다시 부른 호출(토큰은 두 호출의 합) */
+    record Output<T>(T value, long inputTokens, long outputTokens, boolean effortLowered) {
+
+        public Output(T value, long inputTokens, long outputTokens) {
+            this(value, inputTokens, outputTokens, false);
+        }
+    }
 
     /** 호출이 실패하면 AiUnavailableException */
     <T> Output<T> generate(String model, String system, String user, Class<T> type);

@@ -390,6 +390,34 @@ class TaskReviewLoopTest {
     }
 
     @Test
+    @DisplayName("비용 상한: 다음 다시 만들기 비용은 다시 돌 단계(ANSWER)가 앞 시도에서 쓴 비용만으로 어림한다(설계도가 비싸도 정답 쪽만 다시 돌면 상한 안). 어림 근거가 report 에 남는다")
+    void estimatesOnlyRegeneratedStages() {
+        var ai = ai(found(m5()), CLEAN);
+        var run = new FakeRun(List.of(draft(BAD), draft(OK))) {
+            @Override
+            public List<StageUsageDto> usage() {
+                return List.of(new StageUsageDto("BLUEPRINT", "gpt-6.1-terra", "medium", 100_000, 60_000, 1), // 약 $0.4: 예전 어림(가장 비싼 호출)이면 상한 0.6 을 넘는다
+                        new StageUsageDto("ANSWER", "gpt-6.1-terra", "medium", 2_000, 2_000, 1));
+            }
+
+            @Override
+            public List<String> plannedStages(List<GenCheckResultDto> failed) {
+                return List.of("ANSWER");
+            }
+        };
+        var cap = new TaskGenProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 0.6, null);
+        var h = new Harness(ai, run, null, cap);
+        var o = h.generate(FORM, 1, s -> {});
+
+        assertThat(run.redos).hasSize(1);
+        assertThat(o.passed()).isTrue();
+        @SuppressWarnings("unchecked")
+        var cost = (Map<String, Object>) h.report.details().get("cost");
+        assertThat(cost).containsEntry("stoppedByCap", false).containsEntry("capUsd", 0.6);
+        assertThat(cost.get("estimates").toString()).contains("stages=[ANSWER]").contains("stageUsd={ANSWER=").contains("method=");
+    }
+
+    @Test
     @DisplayName("설계도 문제로 가리키는 실패는 단계 예산을 쓰지 않고 곧바로 설계도부터(1번)")
     void blueprintFailureRestartsDirectly() {
         var ai = leakyAi(false);
@@ -561,7 +589,7 @@ class TaskReviewLoopTest {
         assertThat(TaskPromptService.check("answer-key")).contains("판단 지점을 객관식으로 물음").contains("계산 검증은 코드가 합니다");
         assertThat(TaskPromptService.check("consistency")).contains("의도한 결함").contains("경고용");
         assertThat(TaskPromptService.check("alt-solution")).contains("서버가 이 풀이를 숨은 테스트로 실제로 돌립니다");
-        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("[결함 유형 목록]").contains("D3 정수 넘침").contains("B4 부가세");
+        assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("[Flaw types]").contains("R3 회사 반올림").doesNotContain("B4 부가세");
         assertThat(java.util.Arrays.stream(TaskPipelineService.Stage.values()).map(Enum::name)).doesNotContain("FIX");
     }
 

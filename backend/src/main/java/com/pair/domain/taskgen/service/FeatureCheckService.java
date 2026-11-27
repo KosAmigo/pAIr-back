@@ -97,7 +97,7 @@ final class FeatureCheckService {
         int open = sig.indexOf('(');
         if (open < 0) return null;
         String head = sig.substring(0, open).strip();
-        String name = head.substring(head.lastIndexOf('.') + 1).trim();
+        String name = head.substring(Math.max(head.lastIndexOf('.'), head.lastIndexOf(' ')) + 1).trim(); // "클래스.이름" 이 정석, "pkg.Class.public static long 이름" 처럼 수정자·반환형이 붙어도 이름만
         int depth = 0, close = -1;
         for (int i = open; i < sig.length() && close < 0; i++) {
             if (sig.charAt(i) == '(') depth++;

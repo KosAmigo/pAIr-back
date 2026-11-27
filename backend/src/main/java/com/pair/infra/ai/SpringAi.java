@@ -68,19 +68,62 @@ final class SpringAi {
         return new AiUnavailableException(provider + " 호출 실패: " + shorten(m));
     }
 
-    /** 호출하고, Spring AI 예외를 화면에 보여 줄 수 있는 AiUnavailableException 으로 바꾼다. */
+    /** 429·일시 오류를 만나면 기다렸다가 다시 부르는 횟수(첫 호출 제외)와 첫 대기(밀리초). 대기는 2배씩 늘고 조금씩 흔들린다 */
+    static final int MAX_RETRIES = 3;
+    static final long BACKOFF_MILLIS = 2000;
+
+    /** 호출하고, Spring AI 예외를 화면에 보여 줄 수 있는 AiUnavailableException 으로 바꾼다. 429·과부하·일시 오류는 최대 3번 다시 부른다. */
     static ChatResponse call(String provider, Supplier<ChatResponse> call) {
-        long started = System.nanoTime();
+        return call(provider, call, SpringAi::sleep);
+    }
+
+    /** 테스트용: 기다리는 방법(밀리초)을 넘긴다 */
+    static ChatResponse call(String provider, Supplier<ChatResponse> call, java.util.function.LongConsumer sleeper) {
+        for (int attempt = 0; ; attempt++) {
+            try {
+                return once(provider, call);
+            } catch (RuntimeException e) {
+                if (attempt >= MAX_RETRIES || !retryable(e)) throw convert(provider, e);
+                long wait = BACKOFF_MILLIS << attempt;
+                sleeper.accept(wait + java.util.concurrent.ThreadLocalRandom.current().nextLong(wait / 4 + 1));
+            }
+        }
+    }
+
+    /** 다시 불러 볼 만한 오류: 일시 오류(TransientAiException), 429, 과부하(529·overloaded), 5xx */
+    static boolean retryable(RuntimeException e) {
+        if (e instanceof TransientAiException) return true;
+        if (!(e instanceof NonTransientAiException)) return false;
+        String m = String.valueOf(e.getMessage());
+        return m.contains("429") || m.contains("529") || m.toLowerCase().contains("overloaded") || m.contains("rate limit")
+                || m.contains(" 500") || m.contains(" 502") || m.contains(" 503") || m.contains(" 504");
+    }
+
+    private static ChatResponse once(String provider, Supplier<ChatResponse> call) {
+        return measured(provider, call, System.nanoTime());
+    }
+
+    private static RuntimeException convert(String provider, RuntimeException e) {
+        if (e instanceof NonTransientAiException) {
+            String m = String.valueOf(e.getMessage());
+            if (m.contains("401")) return new AiUnavailableException(provider + " API 키가 올바르지 않습니다 (401).");
+            if (m.contains("429")) return new AiUnavailableException(provider + " 요청 한도에 걸렸습니다 (429). 잠시 후 다시 시도하세요.");
+            return new AiUnavailableException(provider + " 호출 실패: " + shorten(m));
+        }
+        if (e instanceof TransientAiException) {
+            String m = String.valueOf(e.getMessage());
+            if (m.contains("429")) return new AiUnavailableException(provider + " 요청 한도에 걸렸습니다 (429). 잠시 후 다시 시도하세요.");
+            return new AiUnavailableException(provider + " 호출 실패(일시 오류): " + shorten(m));
+        }
+        return e;
+    }
+
+    private static void sleep(long millis) {
         try {
-            return measured(provider, call, started);
-        } catch (NonTransientAiException e) {
-            String m = String.valueOf(e.getMessage());
-            if (m.contains("401")) throw new AiUnavailableException(provider + " API 키가 올바르지 않습니다 (401).");
-            throw new AiUnavailableException(provider + " 호출 실패: " + shorten(m));
-        } catch (TransientAiException e) {
-            String m = String.valueOf(e.getMessage());
-            if (m.contains("429")) throw new AiUnavailableException(provider + " 요청 한도에 걸렸습니다 (429). 잠시 후 다시 시도하세요.");
-            throw new AiUnavailableException(provider + " 호출 실패(일시 오류): " + shorten(m));
+            Thread.sleep(millis);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new AiUnavailableException("호출을 기다리다 중단됐습니다.");
         }
     }
 
