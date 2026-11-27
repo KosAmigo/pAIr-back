@@ -172,24 +172,32 @@ public class CreditPurchaseService {
             result = toss.cancel(info.paymentKey(), REFUND_REASON, info.key());
         } catch (PaymentRejectedException e) {
             undoRefund(userId, info);
+            log.warn("환불 거절: 토스가 결제 취소를 거절해 크레딧을 되돌렸습니다. orderId={} userId={} {}", orderId, userId, e.getMessage());
             throw e;
         } catch (PaymentUnavailableException e) {
             // 이미 취소됨·처리 중·일시 장애: 토스에 실제 상태를 물어본다. 그래도 모르면 REFUNDING 으로 남는다
             result = toss.find(info.paymentKey());
-            if (result == null || !"CANCELED".equals(result.status())) throw e;
+            if (result == null || !"CANCELED".equals(result.status())) {
+                log.warn("환불 결과 모름: REFUNDING 으로 남깁니다(다시 확인 또는 자동 재확인). orderId={} userId={} 토스 상태={}",
+                        orderId, userId, result == null ? null : result.status());
+                throw e;
+            }
         }
         if (result == null || !info.paymentKey().equals(result.paymentKey()) || !orderId.equals(result.orderId())
                 || !"CANCELED".equals(result.status())) {
             throw new PaymentUnavailableException("토스 환불 상태가 예상과 다릅니다. 잠시 후 다시 환불을 눌러 확인해 주세요.");
         }
         // 토스가 이 결제의 취소를 확인했으므로 키가 바뀌었어도(동시에 다시 누름) 환불 완료로 둔다
-        return transactions.execute(status -> {
+        PurchaseResponse done = transactions.execute(status -> {
             CreditPurchase p = owned(userId, orderId);
             if (p.getStatus() == CreditPurchase.Status.REFUNDED) return PurchaseResponse.from(p);
             if (p.getStatus() != CreditPurchase.Status.REFUNDING) throw new ConflictException("주문 상태가 변경되었습니다.");
             p.refunded();
             return PurchaseResponse.from(p);
         });
+        log.info("환불 완료: 토스 결제 취소 확인. purchaseId={} orderId={} userId={} credits={} amountKrw={}",
+                done.purchaseId(), orderId, userId, done.credits(), done.amountKrw());
+        return done;
     }
 
     /**
