@@ -57,13 +57,14 @@ public class AttemptService {
     private final JavaDiagnostics diagnostics;
     private final TaskMaterialService materials;
     private final RunRateLimitService runRateLimit;
+    private final ChatRateLimitService chatRateLimit;
 
     public AttemptService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
                           TaskCatalogService catalog, AttemptRegistryService registry, CheckpointService checkpoints, CreditService credits,
                           ChatTurnRepository chatRecords, TransactionTemplate transactions,
                           ChatAttachmentService attachments, JavaDiagnostics diagnostics,
-                          TaskMaterialService materials, RunRateLimitService runRateLimit) {
+                          TaskMaterialService materials, RunRateLimitService runRateLimit, ChatRateLimitService chatRateLimit) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -80,6 +81,7 @@ public class AttemptService {
         this.diagnostics = diagnostics;
         this.materials = materials;
         this.runRateLimit = runRateLimit;
+        this.chatRateLimit = chatRateLimit;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -146,8 +148,20 @@ public class AttemptService {
 
     /** 빌드·실행 횟수 제한. 자가진단은 회원 1명, 실전(회원 없음)은 응시 1건 단위로 센다 */
     private void checkRunRate(String id) {
+        runRateLimit.check(rateKey(id));
+    }
+
+    /**
+     * AI 채팅 분당 호출 제한(1인·서비스 전체). 스트리밍은 답을 다른 스레드에서 받으므로, 컨트롤러가 스트림을 열기 전에
+     * 이것을 불러야 넘었을 때 오류 이벤트가 아니라 429 로 돌려줄 수 있다
+     */
+    public void checkChatRate(String id) {
+        chatRateLimit.check(rateKey(id));
+    }
+
+    private String rateKey(String id) {
         Long userId = registry.find(id).map(Attempt::getUserId).orElse(null);
-        runRateLimit.check(userId != null ? "user:" + userId : "attempt:" + id);
+        return userId != null ? "user:" + userId : "attempt:" + id;
     }
 
     /** 빌드 버튼: 응시자 코드를 컴파일만 한다. */
