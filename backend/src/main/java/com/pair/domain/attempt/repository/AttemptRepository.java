@@ -14,6 +14,15 @@ public interface AttemptRepository extends JpaRepository<Attempt, Long> {
     /** 내 자가진단 기록 (최근 순) */
     List<Attempt> findByUserIdAndModeOrderByStartedAtDesc(Long userId, Attempt.Mode mode);
 
+    /** 제출하지 않은 응시만 지운 것으로 표시한다. 바뀐 행 수(0이면 이미 지웠거나 제출을 마친 응시) */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update Attempt a set a.deletedAt = :at
+            where a.id = :id and a.deletedAt is null
+              and a.status in (com.pair.domain.attempt.dto.AttemptStateDto.Status.SOLVING, com.pair.domain.attempt.dto.AttemptStateDto.Status.FOLLOWUP)
+            """)
+    int softDelete(@Param("id") Long id, @Param("at") java.time.Instant at);
+
     List<Attempt> findByParticipantIdOrderByIdAsc(Long participantId);
 
     /** 상태별 응시 수 (모니터링: 채점 대기 건수) */
@@ -58,7 +67,7 @@ public interface AttemptRepository extends JpaRepository<Attempt, Long> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("""
             update Attempt a set a.status = com.pair.domain.attempt.dto.AttemptStateDto.Status.SCORING, a.followupsDoneAt = :at
-            where a.id = :id and a.status = com.pair.domain.attempt.dto.AttemptStateDto.Status.FOLLOWUP
+            where a.id = :id and a.status = com.pair.domain.attempt.dto.AttemptStateDto.Status.FOLLOWUP and a.deletedAt is null
             """)
     int startScoring(@Param("id") Long id, @Param("at") java.time.Instant at);
 

@@ -2,14 +2,21 @@ package com.pair.domain.attempt.service;
 
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.entity.Attempt;
+import com.pair.domain.attempt.entity.Checkpoint;
+import com.pair.domain.attempt.repository.CheckpointRepository;
+import com.pair.global.error.ConflictException;
+import com.pair.global.error.ForbiddenException;
 import com.pair.domain.attempt.repository.AttemptRepository;
 import com.pair.domain.attempt.repository.DbAttemptStateRepository;
 import java.time.Instant;
+import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 응시 행(DB attempts)을 만들고 찾는다. 응시 ID 는 DB 가 만든 attempt_id 를 문자열로 쓴다.
@@ -21,9 +28,30 @@ public class AttemptRegistryService {
     private static final Logger log = LoggerFactory.getLogger(AttemptRegistryService.class);
 
     private final AttemptRepository records;
+    private final CheckpointRepository checkpoints;
 
-    public AttemptRegistryService(AttemptRepository records) {
+    public AttemptRegistryService(AttemptRepository records, CheckpointRepository checkpoints) {
         this.records = records;
+        this.checkpoints = checkpoints;
+    }
+
+    /**
+     * 복기에서 지우기: 제출하지 않은 자가진단 응시만. 주인 확인은 AttemptOwnerInterceptor 가 한다.
+     * 실전 응시자도 이 주소(/api/attempts/{id})는 통과하므로 여기서 막는다. 갈래가 남아 있으면 복기 트리가 끊겨 막는다.
+     * 크레딧은 돌려주지 않는다.
+     */
+    @Transactional
+    public void delete(String attemptId) {
+        Attempt r = find(attemptId).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + attemptId));
+        if (r.getMode() != Attempt.Mode.SELF) throw new ForbiddenException("실전 시험 응시는 삭제할 수 없습니다.");
+        List<Long> checkpointIds = checkpoints.findByAttemptIdIn(List.of(r.getId())).stream().map(Checkpoint::getId).toList();
+        if (!checkpointIds.isEmpty()
+                && records.findByForkedFromCheckpointIdIn(checkpointIds).stream().anyMatch(c -> !c.isDeleted())) {
+            throw new ConflictException("이 풀이에서 갈라진 갈래가 있어 삭제할 수 없습니다.");
+        }
+        if (records.softDelete(r.getId(), Instant.now()) == 0) {
+            throw new ConflictException("제출하지 않은 풀이만 삭제할 수 있습니다.");
+        }
     }
 
     public Attempt save(Attempt r) {
