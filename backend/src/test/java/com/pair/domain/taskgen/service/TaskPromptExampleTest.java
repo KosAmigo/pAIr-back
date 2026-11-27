@@ -149,6 +149,20 @@ class TaskPromptExampleTest {
     }
 
     @Test
+    @DisplayName("요구사항 만들 기능 줄(2026-11-27): 추가 메서드마다 '만들 기능: `시그니처` — …' 줄이 있으면 통과, 없으면 경고(다시 만들지 않음)")
+    void featureLinesInRequirements() throws Exception {
+        BlueprintDto dev = parse(TaskPromptService.DEV_EXAMPLE, false); // 추가: OrderCheckout.payable(long usedPoints): long
+        List<String> good = List.of("만들 기능: `OrderCheckout.payable(long usedPoints): long` — 적립금을 쓴 뒤 결제할 금액을 돌려준다",
+                "- usedPoints: 이번 주문에 쓸 적립금", "addItem(\"노트\", 10000, 2) 뒤 payable(500) → 19500");
+        assertThat(TaskWritingService.featureLinesCheck(dev, good).ok()).isTrue();
+        var missing = TaskWritingService.featureLinesCheck(dev, List.of("addItem(\"노트\", 10000, 2) 뒤 payable(500) → 19500"));
+        assertThat(missing.ok()).isFalse();
+        assertThat(missing.needsRegeneration()).isFalse();
+        assertThat(missing.detail()).contains("payable");
+        assertThat(TaskPromptService.WRITING_DEV).contains("만들 기능: `").contains("never HOW it is computed");
+    }
+
+    @Test
     @DisplayName("g13 Q2: 설명에 요구사항과 똑같은 예 줄이 있으면 뺀다(띄어쓰기·문장부호 무시). 다른 문장과 빈 문단은 건드리지 않는다")
     void descriptionDropsRepeatedExamples() {
         List<String> req = List.of("addItem(\"노트\", 10000, 2) 뒤 payable(500) → 19500", "addItem(\"펜\", 3000, 1) 뒤 points() → 30");
