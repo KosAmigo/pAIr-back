@@ -10,4 +10,5 @@ import org.springframework.data.domain.Pageable;
 public interface CreditLedgerRepository extends JpaRepository<CreditLedger, Long> {
     Optional<CreditLedger> findFirstByUserIdOrderByIdDesc(Long userId);
     Page<CreditLedger> findByUserIdOrderByIdDesc(Long userId, Pageable pageable);
+    boolean existsByPurchaseIdAndReason(Long purchaseId, String reason);
 }

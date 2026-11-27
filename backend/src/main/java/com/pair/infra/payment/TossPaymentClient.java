@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
 
 @Component
 public class TossPaymentClient {
@@ -31,6 +32,15 @@ public class TossPaymentClient {
             "EXCEED_MAX_AUTH_COUNT", "RESTRICTED_TRANSFER_ACCOUNT", "INVALID_ACCOUNT_INFO_RE_REGISTER",
             "REJECT_ACCOUNT_PAYMENT", "REJECT_CARD_PAYMENT", "REJECT_CARD_COMPANY", "REJECT_TOSSPAY_INVALID_ACCOUNT",
             "INVALID_PASSWORD", "UNAPPROVED_ORDER_ID", "NOT_FOUND_PAYMENT", "NOT_FOUND_PAYMENT_SESSION");
+
+    /**
+     * 취소되지 않은 것이 확실한 결제 취소 오류. 이미 취소됨·처리 중·일시 장애·키 설정 오류는 넣지 않는다
+     * (취소됐을 수 있는 결제의 크레딧을 되돌리면 돈과 크레딧을 둘 다 돌려주게 된다).
+     */
+    private static final Set<String> CANCEL_REJECTED_CODES = Set.of(
+            "NOT_CANCELABLE_PAYMENT", "NOT_CANCELABLE_AMOUNT", "FORBIDDEN_REQUEST", "EXCEED_MAX_REFUND_DUE",
+            "REFUND_REJECTED", "EXCEED_CANCEL_LIMIT", "NOT_CANCELABLE_PAYMENT_FOR_DORMANT_USER",
+            "NOT_ALLOWED_PARTIAL_REFUND", "INVALID_REQUEST", "NOT_FOUND_PAYMENT");
 
     private final String secret;
     private final RestClient client;
@@ -72,13 +82,40 @@ public class TossPaymentClient {
         }
     }
 
+    /**
+     * 결제를 전액 취소한다(cancelAmount 를 보내지 않으면 전액). 같은 멱등 키로 다시 부르면 토스는 다시 처리하지 않고 첫 응답을 준다(15일).
+     * 취소되지 않은 것이 확실하면 PaymentRejectedException, 결과를 모르면 PaymentUnavailableException.
+     */
+    public Payment cancel(String paymentKey, String cancelReason, String idempotencyKey) {
+        requireKey();
+        try {
+            return client.post().uri("/v1/payments/{paymentKey}/cancel", paymentKey)
+                    .headers(h -> { h.setBasicAuth(secret, ""); h.set("Idempotency-Key", idempotencyKey); })
+                    .body(Map.of("cancelReason", cancelReason))
+                    .retrieve().body(Payment.class);
+        } catch (RestClientResponseException e) {
+            JsonNode error = errorBody(e);
+            if (e.getStatusCode().is4xxClientError() && CANCEL_REJECTED_CODES.contains(error.path("code").asText())) {
+                String reason = error.path("message").asText();
+                throw new PaymentRejectedException("토스에서 환불을 거절했습니다" + (reason.isBlank() ? "." : ": " + reason));
+            }
+            throw new PaymentUnavailableException("환불 결과를 확인할 수 없습니다. 잠시 후 다시 환불을 눌러 확인해 주세요.", e);
+        } catch (RestClientException e) {
+            throw new PaymentUnavailableException("환불 결과를 확인할 수 없습니다. 잠시 후 다시 환불을 눌러 확인해 주세요.", e);
+        }
+    }
+
     /** 본문이 JSON 이 아니면(프록시 오류 화면 등) 빈 값 */
     private static String errorCode(RestClientResponseException e) {
+        return errorBody(e).path("code").asText();
+    }
+
+    private static JsonNode errorBody(RestClientResponseException e) {
         try {
             JsonNode body = e.getResponseBodyAs(JsonNode.class);
-            return body == null ? "" : body.path("code").asText();
+            return body == null ? MissingNode.getInstance() : body;
         } catch (RuntimeException unreadable) {
-            return "";
+            return MissingNode.getInstance();
         }
     }
 
