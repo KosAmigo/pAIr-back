@@ -391,7 +391,7 @@ class MaterialLimitTest {
         var run = new BizPipelineService(ai, E6).start(BIZ_FORM);
         BizDraftDto d = run.create(s -> {});
 
-        assertThat(ai.order.get(ai.order.size() - 1)).isEqualTo(FillerDto.class);
+        assertThat(ai.order).contains(FillerDto.class); // 관련 적은 자료는 설계도 직후 작성 등과 동시에 돈다(순서는 정해지지 않음)
         assertThat(d.documents()).extracting(BizDraftDto.DocDraft::path).containsExactly("자료/검토 안내.pdf", "자료/운영 메모.pdf", "자료/지난 회의록.pdf");
         assertThat(d.documents().get(2).pages().size()).isGreaterThan(5);
         assertThat(d.csvFiles()).extracting(DevDraftDto.FileDraft::path).containsExactly("자료/캠페인 실적.csv", "자료/타 캠페인 집행.csv");

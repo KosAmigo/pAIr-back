@@ -21,7 +21,7 @@ final class TaskReviewService {
 
     /** 점검 목록. ids: 이 점검이 낼 수 있는 항목 번호. gate 는 실패하면 단계를 다시 돌리는 관문, 아니면 경고만 */
     enum Check {
-        LEAK("leak", true, true, Set.of("M5"), true), // 답 노출: 응시자에게 보이는 글 전부 + 숨은 결함
+        LEAK("leak-dev", true, true, Set.of("M5"), true), // 답 노출: 응시자에게 보이는 글 전부 + 숨은 결함. 프롬프트는 직군별 leak-dev.md / leak-biz.md (run 에서 고름)
         BACKING("backing", true, false, Set.of("M2"), true), // 테스트 근거(DEV): 숨은 테스트 단정 + 보이는 자료
         ANSWER_KEY("answer-key", false, true, Set.of("M2"), true), // 정답 키(BIZ): 문항·보기·인정 답 + 사례·판단 지점
         ALT("alt-solution", true, false, Set.of("M2"), true), // 다른 풀이 실행(DEV): 풀이를 쓰게 하고 숨은 테스트로 돌림
@@ -79,10 +79,31 @@ final class TaskReviewService {
 
     Findings run(Check check, Stage stage, String input) {
         // 테스트 근거: 설계도 사례가 있으면 사례별 점검 프롬프트, 없으면 단정별 점검 프롬프트(사례 없는 과제에서 오탐이 많았다)
-        String resource = check == Check.BACKING && input.contains(CASES_MARK) ? "backing-cases" : check.resource;
+        boolean biz = input.startsWith("직군: BIZ");
+        String resource = check == Check.BACKING && input.contains(CASES_MARK) ? "backing-cases"
+                : check == Check.LEAK && biz ? "leak-biz" // 답 노출은 직군별 프롬프트(BIZ 만 바꿀 때 DEV 가 흔들리지 않게)
+                : check.resource;
         ReviewResultDto r = calls.call(stage, check.name(), TaskPromptService.check(resource) + OUTPUT, input, ReviewResultDto.class);
-        List<Violation> kept = nz(r.violations()).stream().filter(v -> v != null && v.item() != null && (isQ(v) || check.ids.contains(v.item().strip().toUpperCase()))).toList();
+        List<Violation> kept = nz(r.violations()).stream().filter(v -> v != null && v.item() != null && (isQ(v) || check.ids.contains(v.item().strip().toUpperCase())))
+                .filter(v -> !(check == Check.LEAK && biz && recordedDefinition(v))).toList(); // g9: 검수 모델이 허용 규칙을 어기고 회사 정의 기록을 걸어 BIZ 8/10이 떨어짐
         return new Findings(check, kept, nz(r.violations()).size() - kept.size());
+    }
+
+    private static final java.util.regex.Pattern RECORD_TONE = java.util.regex.Pattern.compile("(적혀|기재|기록|작성되|답변했|남아|표시되|명시되)[가-힣 ]{0,12}[.。]?\s*$");
+    private static final java.util.regex.Pattern INSTRUCTION = java.util.regex.Pattern.compile(
+            "해야|하세요|해 주|해주|할 것|말 것|빼서|나눠|곱해|더해|먼저|한 뒤|한 다음|하지 않|확인해|대조해|계산한다|구한다|가정할|기준으로 구");
+
+    /**
+     * BIZ 답 노출(M5) 위반이 자료(문서·CSV) 속 회사 정의 기록 한 문장이면 true(좋은_과제_기준 3장: 회사 정의를 기록 말투로 한 번 쓰는 건 된다).
+     * 기록 말투로 끝나고 지시·계산 절차 말이 없고 한 문장 길이이며 자료 위치일 때만 본다. 설명·요구사항·문항·후속 질문 위치는 그대로 둔다
+     */
+    static boolean recordedDefinition(Violation v) {
+        String loc = v.location() == null ? "" : v.location();
+        String q = v.quote() == null ? "" : v.quote().strip();
+        boolean material = (loc.contains("자료/") || loc.contains("문서") || loc.toLowerCase().contains("csv") || loc.toLowerCase().contains(".pdf") || loc.toLowerCase().contains(".md"))
+                && !loc.contains("설명") && !loc.contains("요구사항") && !loc.contains("문항") && !loc.contains("후속");
+        if (!material || q.isEmpty() || q.length() > 200) return false;
+        return RECORD_TONE.matcher(q).find() && !INSTRUCTION.matcher(q).find();
     }
 
     /** 설계도를 만든 직후 부르는 싼 점검: 응시자 글에 그대로 들어갈 문장이 규칙·절차를 말하거나 판단 지점을 한 선택으로 못 박는지. 고쳐야 할 점을 글로 돌려준다 */
@@ -169,11 +190,13 @@ final class TaskReviewService {
 
     static String bizInput(Check check, TaskGenRequest form, BlueprintDto bp, BizDraftDto d) {
         if (!check.biz) return null;
+        d = FillerService.withoutFillers(d, bp); // 관련 적은 자료는 FILLER 관문이 따로 본다(입력 약 1/3 로)
         StringBuilder sb = new StringBuilder("직군: BIZ, 제한 시간: ").append(form.minutes()).append("분\n");
         switch (check) {
             case LEAK -> {
                 sb.append("[숨은 결함(출제자만 아는 정보)]\n").append(flaws(bp));
                 if (bp != null && bp.conclusion() != null) sb.append("정답 결론: ").append(bp.conclusion().correct()).append(" / 함정에 빠진 결론: ").append(bp.conclusion().wrong()).append('\n');
+                sb.append(intendedFacts(bp)); // g16 03: 설계도가 근거로 넣은 사실 문장(함정 근거)을 점검이 답 노출로 걸었다
                 sb.append(visibleBiz(d, true)).append(answers(d));
             }
             case ANSWER_KEY -> {
@@ -230,6 +253,22 @@ final class TaskReviewService {
         if (bp == null) return "";
         StringBuilder sb = new StringBuilder();
         for (var f : bp.flaws()) sb.append("- ").append(f.what()).append(" (위치: ").append(f.where()).append(")\n");
+        return sb.toString();
+    }
+
+    /**
+     * 답 노출 점검용(BIZ): 설계도가 결함 근거·판단 근거로 자료에 일부러 넣은 사실 문장. 이 문장이 자료에 그대로 있는 것은 위반이 아니다
+     * (설계도 단계의 조기 점검이 이미 규칙·절차 말투인지 봤다). 이 문장에 계산 절차나 응시자 지시가 더 붙은 경우만 위반이다
+     */
+    static String intendedFacts(BlueprintDto bp) {
+        if (bp == null) return "";
+        java.util.LinkedHashSet<String> texts = new java.util.LinkedHashSet<>();
+        for (var f : nz(bp.facts())) if (f != null && f.text() != null && !f.text().isBlank()) texts.add(f.text().strip());
+        for (var f : nz(bp.flaws())) if (f != null && f.evidence() != null && !f.evidence().isBlank()) texts.add(f.evidence().strip());
+        for (var j : nz(bp.judgments())) for (var o : nz(j.options())) if (o != null && o.fact() != null && !o.fact().isBlank()) texts.add(o.fact().strip());
+        if (texts.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("[자료에 의도적으로 넣은 근거 문장(이 문장 그대로는 위반이 아님. 계산 절차·응시자 지시·정답 문장이 더 붙었을 때만 위반)]\n");
+        texts.forEach(t -> sb.append("- ").append(t).append('\n'));
         return sb.toString();
     }
 

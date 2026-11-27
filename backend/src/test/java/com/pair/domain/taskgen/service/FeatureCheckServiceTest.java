@@ -128,7 +128,7 @@ class FeatureCheckServiceTest {
         assertThat(TaskPromptService.WRITING_DEV).contains("\"기존:\" methods already exist").contains("generic frame").contains("no hint where to look");
         assertThat(TaskPromptService.WRITING_BIZ_BRIEF).contains("generic frame").contains("no hint where to look");
         assertThat(TaskPromptService.code("깊이")).contains("must exist in the starter code as a stub");
-        assertThat(TaskPromptService.check("leak")).contains("결함이 있는 곳을 콕 집어 확인하라고 한다").contains("후속 질문과 문항 문구 포함");
+        assertThat(TaskPromptService.check("leak-dev")).contains("결함이 있는 곳을 콕 집어 확인하라고 한다").contains("후속 질문과 문항 문구 포함");
         // 후속 질문은 답 노출 점검 입력에 들어 있다(DEV·BIZ)
         DevDraftDto dev = TaskGenFixtures.edit(TaskGenFixtures.good(), x -> x.taskFollowUp("후속 질문입니다 비고란을 함께 확인하세요"));
         assertThat(TaskReviewService.devInput(TaskReviewService.Check.LEAK, TaskGenFixtures.form(), TaskPipelineServiceTest.devBlueprint(), dev)).contains("[후속 질문]").contains("비고란을 함께 확인하세요");
