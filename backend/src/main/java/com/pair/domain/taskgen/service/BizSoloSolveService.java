@@ -26,6 +26,8 @@ public class BizSoloSolveService {
 
     /** 옛 이름은 "AI 답을 그대로 내면 함정에 걸림"(M5 필수 조건이던 때). 프런트는 이 이름을 따로 쓰지 않는다 */
     static final String NAME = "참고: AI 단독 풀이";
+    /** 같은 모델에 필요한 자료만 붙여 준 풀이(2026-11-27): 놓침이 '자료 고르기' 때문인지 '함정' 때문인지 나눠 본다 */
+    static final String NEEDED_NAME = "참고: AI 단독 풀이(필요한 자료만)";
     static final String REQUEST = "위 문항에 답해 주세요. 기획안이나 보고서 같은 글은 쓰지 말고 문항에만 답하세요. "
             + "answers 에 문항마다 {\"no\": 문항 번호, \"answer\": 답} 한 개씩 담아 주세요. 객관식 answer 는 보기 번호, 단답형 answer 는 문항이 정한 단위의 숫자만 쓰세요.";
     static final String UNMATCHED = "AI 의 답을 문항에 맞출 수 없어 확인하지 못했어요(문항 번호가 맞지 않거나 빠짐)";
@@ -142,20 +144,34 @@ public class BizSoloSolveService {
         String system = pair.assistant().systemPrompt() == null ? "" : pair.assistant().systemPrompt();
         // g8: AI 가 파일 목록을 보고 직접 골라 붙인다(g7: 이름순 앞에서부터 붙여 필요한 자료를 하나도 못 붙임)
         SoloLimitService.Picked picked = SoloLimitService.pick(ai, model, system, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort(), taskText(d), materials(d), limits);
-        String pickNote = SoloLimitService.note(picked, limits);
+        return answer(d, picked.attached(), SoloLimitService.note(picked, limits), NAME, picked.inputTokens(), picked.outputTokens());
+    }
+
+    /**
+     * needed 는 관련 적은 자료를 뺀 초안(FillerService.withoutFillers). 고르기 없이 필요한 자료를 모두 붙여 같은 모델로 푼다(M6 으로 한도 안).
+     * 여기서도 틀리면 함정 자체가 통한 것, 여기서는 맞히고 run 에서만 틀리면 자료 고르기에서 막힌 것이다
+     */
+    public Result runNeeded(BizDraftDto needed) {
+        return answer(needed, SoloLimitService.attach(materials(needed), null), "필요한 자료만 모두 붙임. ", NEEDED_NAME, 0, 0);
+    }
+
+    private Result answer(BizDraftDto d, SoloLimitService.Attached attached, String pickNote, String name, long inBefore, long outBefore) {
+        String model = props.soloModel() == null || props.soloModel().isBlank() ? pair.assistant().model() : props.soloModel();
+        String system = pair.assistant().systemPrompt() == null ? "" : pair.assistant().systemPrompt();
         TaskGenAiService.Output<SoloBizAnswerDto> o;
         try {
-            o = ai.generate(model, system, prompt(d, picked.attached()), SoloBizAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
+            o = ai.generate(model, system, prompt(d, attached), SoloBizAnswerDto.class, (int) pair.assistant().maxOutputTokens(), pair.assistant().reasoningEffort());
         } catch (RuntimeException e) {
-            return new Result(unchecked("모델 호출 실패: " + e.getMessage()), picked.inputTokens(), picked.outputTokens(), List.of());
+            return new Result(unchecked(name, "모델 호출 실패: " + e.getMessage()), inBefore, outBefore, List.of());
         }
+        long in = o.inputTokens() + inBefore, out = o.outputTokens() + outBefore;
         List<SoloBizItemDto> items = o.value() == null || o.value().answers() == null ? List.of() : o.value().answers();
-        if (items.isEmpty()) return new Result(unchecked("풀이 모델이 답을 주지 않음"), o.inputTokens() + picked.inputTokens(), o.outputTokens() + picked.outputTokens(), List.of());
+        if (items.isEmpty()) return new Result(unchecked(name, "풀이 모델이 답을 주지 않음"), in, out, List.of());
         List<String> answers = matchByNumber(items, d.questions().size());
         if (answers == null) {
             // 번호가 문항과 맞지 않거나 빠졌다: 틀림으로 세지 않고 확인하지 못한 것으로 둔다. 기록에는 받은 그대로 남긴다
             List<String> raw = items.stream().map(it -> it == null ? null : it.no() + ":" + it.answer()).toList();
-            return new Result(new GenCheckResultDto(NAME, true, UNMATCHED, GenCheckResultDto.WARN), o.inputTokens() + picked.inputTokens(), o.outputTokens() + picked.outputTokens(), raw);
+            return new Result(new GenCheckResultDto(name, true, UNMATCHED, GenCheckResultDto.WARN), in, out, raw);
         }
 
         List<Integer> traps = trapQuestions(d);
@@ -167,6 +183,12 @@ public class BizSoloSolveService {
             (isRight(q, a) ? passed : missed).add(line);
         }
         GenCheckResultDto check;
+        if (NEEDED_NAME.equals(name)) {
+            check = new GenCheckResultDto(name, true, missed.isEmpty()
+                    ? "참고: 필요한 자료만 붙이면 AI 가 함정을 피했어요(함정 문항 " + passed.size() + "개 모두 맞힘). 난이도는 자료 고르기에서만 나와요."
+                    : "참고: 필요한 자료만 붙여도 AI 가 함정에 걸렸어요(함정이 통함): " + String.join(", ", missed), GenCheckResultDto.WARN);
+            return new Result(check, in, out, answers);
+        }
         if (!missed.isEmpty()) {
             check = new GenCheckResultDto(NAME, true, "참고: AI 단독 풀이가 숨은 결함을 지나쳤어요. " + pickNote + "고른 자료로 낸 답이 함정 문항에서 틀렸어요: " + String.join(", ", missed), GenCheckResultDto.WARN);
         } else {
@@ -176,7 +198,7 @@ public class BizSoloSolveService {
                     + (evidence.isEmpty() ? "" : " AI 가 단서로 썼을 만한 자료 문장: " + (evidence.length() > 150 ? evidence.substring(0, 150) + "…" : evidence));
             check = new GenCheckResultDto(NAME, true, detail, GenCheckResultDto.WARN);
         }
-        return new Result(check, o.inputTokens() + picked.inputTokens(), o.outputTokens() + picked.outputTokens(), answers);
+        return new Result(check, in, out, answers);
     }
 
     /**
@@ -195,8 +217,8 @@ public class BizSoloSolveService {
     }
 
 
-    private static GenCheckResultDto unchecked(String why) {
-        return new GenCheckResultDto(NAME, true, "AI 단독 풀이를 확인하지 못했어요(" + why + ")", GenCheckResultDto.WARN);
+    private static GenCheckResultDto unchecked(String name, String why) {
+        return new GenCheckResultDto(name, true, "AI 단독 풀이를 확인하지 못했어요(" + why + ")", GenCheckResultDto.WARN);
     }
 
     private static boolean isRight(BizDraftDto.QuestionDraft q, String answer) {

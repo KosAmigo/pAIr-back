@@ -306,4 +306,24 @@ class BizSoloSolveServiceTest {
         assertThat(ai.users).isEmpty();
         assertThat(extra.checks().get(0).detail()).startsWith("건너뜀");
     }
+
+    @Test
+    @DisplayName("필요한 자료만 붙인 풀이: 고르기 질문 없이 한 번 호출하고, 함정 문항을 틀리면 '함정이 통함'")
+    void neededOnlyTrapWorked() {
+        ai.script.add(answers("1", "2", "23560", "2000"));
+        var r = service().runNeeded(BizFixtures.good("biz-solo"));
+        assertThat(ai.users).hasSize(1);
+        assertThat(r.check().name()).isEqualTo(BizSoloSolveService.NEEDED_NAME);
+        assertThat(r.check().ok()).isTrue();
+        assertThat(r.check().level()).isEqualTo(GenCheckResultDto.WARN);
+        assertThat(r.check().detail()).contains("함정이 통함", "Q3(AI 답 23560, 정답 21080)");
+    }
+
+    @Test
+    @DisplayName("필요한 자료만 붙인 풀이: 함정 문항을 모두 맞히면 '피했어요'")
+    void neededOnlyAvoided() {
+        ai.script.add(answers("1", "2", "21080", "2000"));
+        var r = service().runNeeded(BizFixtures.good("biz-solo"));
+        assertThat(r.check().detail()).contains("피했어요", "자료 고르기");
+    }
 }

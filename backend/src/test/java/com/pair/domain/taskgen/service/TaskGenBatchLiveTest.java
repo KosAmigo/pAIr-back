@@ -187,6 +187,7 @@ class TaskGenBatchLiveTest {
         }
         md.append(String.format(java.util.Locale.ROOT, "\n비용 합계 $%.3f (각 줄의 attempts=시도 수, cost=토큰×가격)\n", sum));
         md.append(soloLine(lines)).append('\n');
+        md.append(neededLine(lines)).append('\n');
         md.append(timingLine()).append('\n');
         md.append("\n총 ").append(sec).append("초 (작업별 시간은 각 줄의 '초', 시작 후 완료까지)\n");
         Files.writeString(OUT.resolve("summary.md"), md.toString(), StandardCharsets.UTF_8);
@@ -231,6 +232,27 @@ class TaskGenBatchLiveTest {
                 ran == 0 ? "-" : Math.round(missed * 100.0 / ran) + "%", invalid, notRun);
     }
 
+    /** 필요한 자료만 붙인 단독 풀이: trap(함정이 통함) / avoided(피함) / -(안 돎) */
+    static String neededSolo(List<GenCheckResultDto> checks) {
+        if (checks == null) return "-";
+        for (var c : checks) {
+            if (!BizSoloSolveService.NEEDED_NAME.equals(c.name()) || c.detail() == null) continue;
+            return c.detail().contains("함정이 통함") ? "trap" : c.detail().contains("피했어요") ? "avoided" : "-";
+        }
+        return "-";
+    }
+
+    /** 필요한 자료만 붙인 풀이에서 함정이 통한 비율 */
+    static String neededLine(String[] lines) {
+        int trap = 0, avoided = 0;
+        for (String l : lines) {
+            if (l == null) continue;
+            if (l.contains("| needed=trap")) trap++;
+            else if (l.contains("| needed=avoided")) avoided++;
+        }
+        return String.format(java.util.Locale.ROOT, "필요한 자료만 붙인 AI 단독 풀이에서 함정이 통함 %d/%d (참고: 자료 고르기와 상관없는 함정 난이도)", trap, trap + avoided);
+    }
+
     /** 한 과제를 만든다. 한 과제가 실패해도 예외를 밖으로 내보내지 않고 summary 한 줄로 남긴다 */
     private String runOne(int i, TaskGenRequest form) {
         String nn = String.format("%02d", i + 1);
@@ -268,7 +290,7 @@ class TaskGenBatchLiveTest {
             System.out.println("[batch " + nn + "] 완료 code=" + code + " passed=" + st.passed() + " " + sec + "초");
             return "- " + nn + " | " + form.track() + " | " + form.minutes() + "분 | " + form.usage() + " | " + code
                     + " | passed=" + st.passed() + " | attempts=" + attempts + " | " + sec + "초 | tokens(in/out)=" + tokens
-                    + " | cost=" + cost + " | solo=" + solo + " | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
+                    + " | cost=" + cost + " | solo=" + solo + " | needed=" + neededSolo(st.checks()) + " | fail=" + names(st.checks(), false) + " | warn=" + names(st.checks(), true) + "\n";
         } catch (Throwable e) {
             long sec = Math.round((System.nanoTime() - t) / 1e9);
             e.printStackTrace();
