@@ -72,7 +72,8 @@ final class MaterialGateService {
             return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "필요한 묶음 " + size + "자가 맥락 한도 " + limits.contextChars() + "자의 70%(" + max
                     + "자)를 넘습니다. 필요한 묶음 파일을 줄이거나 더 작은 파일로 나눠 고르세요(공개 테스트는 세지 않음). 파일: " + sizes(materials, bundle(needed)));
         }
-        return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, true, "필요한 묶음 " + size + "자 ≤ " + max + "자(한도 " + limits.contextChars() + "자의 70%)");
+        // 통과해도 파일 목록을 남긴다: 판정(검수)이 어느 파일이 묶음인지 몰라 추측하다 틀렸다(2026-11-27 g15 04·05·06)
+        return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, true, "필요한 묶음 " + size + "자 ≤ " + max + "자(한도 " + limits.contextChars() + "자의 70%). 파일: " + sizes(materials, bundle(needed)));
     }
 
     /**

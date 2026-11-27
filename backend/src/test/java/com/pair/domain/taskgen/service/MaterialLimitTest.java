@@ -125,6 +125,7 @@ class MaterialLimitTest {
 
         Map<String, String> ok = Map.of("src/a.java", "x".repeat(400), "src/b.java", "x".repeat(300));
         assertThat(MaterialGateService.needed(b, ok, limit).ok()).isTrue(); // 700 = 70%
+        assertThat(MaterialGateService.needed(b, ok, limit).detail()).contains("파일: ").contains("src/a.java 400자").contains("src/b.java 300자"); // 통과해도 판정이 쓸 파일 목록(g15)
         Map<String, String> big = Map.of("src/a.java", "x".repeat(400), "src/b.java", "x".repeat(301));
         GenCheckResultDto fail = MaterialGateService.needed(b, big, limit);
         assertThat(fail.ok()).isFalse();

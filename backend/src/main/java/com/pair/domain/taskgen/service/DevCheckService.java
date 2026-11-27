@@ -108,7 +108,7 @@ final class DevCheckService {
                     RunResult r = runs.solved();
                     return r.allPassed() ? ok("테스트 " + r.passed() + "개 모두 통과") : fail(DevRunService.problem(r));
                 }),
-                check(WRONG_FIXES, d -> {
+                checkOwnLevel(WRONG_FIXES, d -> { // 공개 테스트도 깨는 약한 오답은 경고(warn)로 돌려준다
                     if (!runs.formatOk()) return skipped();
                     String p = DevRunService.wrongFixProblem(d);
                     if (p != null) return fail(p);
@@ -286,6 +286,7 @@ final class DevCheckService {
         List<String> hiddenClasses = new ArrayList<>();
         for (var f : d.hiddenTests()) hiddenClasses.add(f.path().substring(f.path().lastIndexOf('/') + 1).replaceAll("\\.java$", ""));
         List<String> bad = new ArrayList<>();
+        List<String> weak = new ArrayList<>();
         for (var w : runs) {
             var r = w.result();
             String label = "오답 " + w.number() + " (" + shortText(w.fix().reason()) + ")";
@@ -295,9 +296,15 @@ final class DevCheckService {
                 bad.add(label + " 이 숨은 테스트를 모두 통과했습니다. 이 오답을 떨어뜨리는 숨은 테스트를 더하세요");
             } else if (r.tests().stream().noneMatch(t -> !t.passed() && hiddenClasses.stream().anyMatch(c -> t.name().contains(c)))) {
                 bad.add(label + " 이 공개 테스트에서만 실패합니다. 공개 테스트는 통과하고 숨은 테스트에서만 실패하는 오답이어야 합니다");
+            } else {
+                // 숨은 테스트에서 떨어지지만 공개 테스트도 깨면 응시자가 바로 알아채는 약한 오답이다(g13 02 판정). 새 검사라 경고로만 알린다
+                List<String> publicFails = r.tests().stream().filter(t -> !t.passed() && hiddenClasses.stream().noneMatch(c -> t.name().contains(c))).map(CodeRunner.TestCase::name).toList();
+                if (!publicFails.isEmpty()) weak.add(label + " 이 공개 테스트도 깹니다(" + String.join(", ", publicFails) + "). 공개 테스트는 통과하는 오답이어야 결함을 가리는 그럴듯한 풀이가 됩니다");
             }
         }
-        return bad.isEmpty() ? ok("오답 " + runs.size() + "개 모두 숨은 테스트에서 실패합니다.") : fail(String.join(" / ", bad));
+        if (!bad.isEmpty()) return fail(String.join(" / ", bad));
+        if (!weak.isEmpty()) return warnResult(String.join(" / ", weak));
+        return ok("오답 " + runs.size() + "개 모두 숨은 테스트에서 실패합니다.");
     }
 
     /** 정답과 시작 코드가 바뀐 줄 수(추가+삭제)가 제한 시간별 최소치보다 적으면 경고 */
