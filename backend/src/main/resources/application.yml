@@ -125,6 +125,19 @@ pair:
       code-lifetime: 10m
       resend-interval: 60s
       max-attempts: 5
+    # 로그인 실패 횟수 제한. 넘으면 window 가 지날 때까지 429
+    login-limit:
+      window: 10m
+      per-email-and-ip: 5   # 한 곳에서 한 계정
+      per-email: 20         # 여러 IP 에서 한 계정
+      per-ip: 50            # 한 곳에서 여러 계정 (학원·회사처럼 IP 를 같이 쓰는 곳을 고려)
+      trusted-proxy-hops: ${PAIR_TRUSTED_PROXY_HOPS:1} # 앞단 프록시 수. nginx 앞에 HTTPS 프록시를 더 두면 2
+  # 로그인 없이 부를 수 있는 API 의 IP별 요청 수 제한. 넘으면 429 (학원·회사처럼 IP 를 같이 쓰는 곳을 고려)
+  ip-limit:
+    window: 1h
+    mail: 40     # 인증 메일 요청
+    signup: 60   # 가입, 초대 가입
+    inquiry: 10  # 기업 도입 문의
   company:
     login-url: ${PAIR_COMPANY_LOGIN_URL:https://localhost:5173/login}
     invite-url: ${PAIR_COMPANY_INVITE_URL:https://localhost:5173/company-invite}
@@ -279,6 +292,10 @@ pair:
   # (docker compose --profile redis up -d). workers, max-attempts, retry-delay, stale-after 는 ScoringQueueProperties 참고
   scoring-queue:
     enabled: ${PAIR_SCORING_QUEUE_ENABLED:false}
+
+  # 다시 채점: 응시 하나를 24시간에 채점할 수 있는 횟수(첫 채점과 채점 큐의 자동 재시도 포함). 넘으면 429
+  rescore:
+    max-per-day: 10
 
   # 모델 가격 ($/1M 토큰, 입력/출력). 채점 툴의 예상 비용 계산용
   pricing:
