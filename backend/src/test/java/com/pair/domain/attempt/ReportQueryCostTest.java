@@ -119,6 +119,14 @@ class ReportQueryCostTest extends BearerIntegrationTest {
         List<String> listed = com.jayway.jsonpath.JsonPath.read(body, "$[*].id");
         assertThat(listed).containsExactlyInAnyOrderElementsOf(shown).doesNotContainAnyElementsOf(hidden);
         assertThat(list).as("풀이 중 응시 12개의 목록 쿼리 수").isLessThanOrEqualTo(10L);
+
+        // 과제 창의 이어서 풀기는 빈 응시도 받는다. 빈 응시에만 empty 가 붙는다
+        String all = mvc.perform(get("/api/attempts").param("includeEmpty", "true").header("Authorization", "Bearer " + signup.token()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        List<String> allIds = com.jayway.jsonpath.JsonPath.read(all, "$[*].id");
+        List<String> emptyIds = com.jayway.jsonpath.JsonPath.read(all, "$[?(@.empty == true)].id");
+        assertThat(allIds).hasSize(shown.size() + hidden.size()).containsAll(shown).containsAll(hidden);
+        assertThat(emptyIds).containsExactlyInAnyOrderElementsOf(hidden);
     }
 
     @Test

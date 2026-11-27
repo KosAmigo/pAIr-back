@@ -161,6 +161,27 @@ final class TaskWritingService {
         return sb.toString();
     }
 
+    static final String FEATURE_LINES_CHECK = "요구사항에 만들 기능 설명이 있음";
+    private static final Pattern FEATURE_LINE = Pattern.compile("^\\s*만들 기능\\s*:");
+
+    /**
+     * 추가 메서드마다 요구사항에 "만들 기능: `시그니처` — …" 줄이 있는지(2026-11-27: 예시만 있으면 숫자 뜻을 알 수 없었다).
+     * 새 검사라 경고로만 알린다(다시 만들지 않는다)
+     */
+    static GenCheckResultDto featureLinesCheck(BlueprintDto bp, List<String> requirements) {
+        List<String> missing = new ArrayList<>();
+        List<String> lines = requirements == null ? List.of() : requirements.stream().flatMap(r -> java.util.Arrays.stream(r.split("\n"))).toList();
+        for (String api : bp.api() == null ? List.<String>of() : bp.api()) {
+            if (api == null || !api.strip().startsWith("추가:")) continue;
+            var m = Pattern.compile("([A-Za-z_]\\w*)\\s*\\(").matcher(api);
+            if (!m.find()) continue;
+            Pattern call = Pattern.compile("(?<![\\w])" + Pattern.quote(m.group(1)) + "\\s*\\(");
+            if (lines.stream().noneMatch(l -> FEATURE_LINE.matcher(l).find() && call.matcher(l).find())) missing.add(m.group(1));
+        }
+        return missing.isEmpty() ? new GenCheckResultDto(FEATURE_LINES_CHECK, true, "추가 메서드마다 만들 기능 줄이 있습니다")
+                : new GenCheckResultDto(FEATURE_LINES_CHECK, false, "요구사항에 '만들 기능:' 줄이 없는 추가 메서드: " + missing, GenCheckResultDto.WARN);
+    }
+
     private static String rule(String check) {
         if (check.equals(TaskPipelineService.M6_NEEDED_CHECK)) return "notes 가 너무 길다. 제목 한 줄과 주어진 기록만 한 줄씩 쓰고, 배경 문단·요약·덧붙인 기록은 빼서 지난번의 절반 정도로 짧게 쓴다.";
         if (check.equals(TaskPipelineService.BASIS_CHECK)) return "사실 목록의 문장을 하나도 빼지 말고 그대로 넣는다(사례의 근거 문장도 사실 목록에 있다).";

@@ -88,9 +88,12 @@ public class AttemptController {
         return Map.of("attemptId", a.id());
     }
 
-    /** 내 기록: 내 자가진단 응시 목록 (DB attempts, 최근 순). 채점이 끝난 응시는 항목 점수를 함께 준다. */
+    /**
+     * 내 기록: 내 자가진단 응시 목록 (DB attempts, 최근 순). 채점이 끝난 응시는 항목 점수를 함께 준다.
+     * 빈 응시는 includeEmpty=true 일 때만 empty=true 를 붙여 준다 (과제 창의 이어서 풀기용).
+     */
     @GetMapping("/attempts")
-    public List<Map<String, Object>> list(CurrentUser user) {
+    public List<Map<String, Object>> list(CurrentUser user, @RequestParam(defaultValue = "false") boolean includeEmpty) {
         List<Attempt> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), Attempt.Mode.SELF);
         Map<Long, String> codes = catalog.codes(rows.stream().map(Attempt::getTaskId).distinct().toList());
         List<Map<String, Object>> out = new java.util.ArrayList<>();
@@ -104,7 +107,8 @@ public class AttemptController {
                 .filter(r -> r.getStatus() == AttemptStateDto.Status.SOLVING).map(r -> String.valueOf(r.getId())).toList());
         for (Attempt r : rows) {
             String id = String.valueOf(r.getId());
-            if (r.getStatus() == AttemptStateDto.Status.SOLVING && !active.contains(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
+            boolean empty = r.getStatus() == AttemptStateDto.Status.SOLVING && !active.contains(id);
+            if (empty && !includeEmpty) continue; // 들어갔다 아무것도 안 하고 나간 기록은 복기·대시보드에 보여 주지 않는다
             TaskDefDto task = definitions.computeIfAbsent(codes.get(r.getTaskId()), catalog::definition);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", id);
@@ -113,6 +117,7 @@ public class AttemptController {
             m.put("taskType", task.type());
             m.put("startedAt", r.getStartedAt());
             m.put("status", r.getStatus());
+            if (empty) m.put("empty", true);
             if (r.getStatus() == AttemptStateDto.Status.DONE) {
                 JsonNode rep = scores.get(id);
                 if (rep != null) {
