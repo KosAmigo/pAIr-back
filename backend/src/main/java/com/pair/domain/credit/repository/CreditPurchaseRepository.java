@@ -17,6 +17,9 @@ public interface CreditPurchaseRepository extends JpaRepository<CreditPurchase, 
     @Query("select p from CreditPurchase p where p.orderId = :orderId and p.userId = :userId")
     Optional<CreditPurchase> lockOwned(@Param("orderId") String orderId, @Param("userId") Long userId);
     Page<CreditPurchase> findByUserIdOrderByIdDesc(Long userId, Pageable pageable);
+    /** 자동 재확인: 이 시각보다 먼저 환불을 시작해 아직 REFUNDING 인 구매 */
+    java.util.List<CreditPurchase> findByStatusAndRefundStartedAtBeforeOrderByIdAsc(
+            CreditPurchase.Status status, Instant startedBefore, Pageable pageable);
 
     @Modifying
     @Query("update CreditPurchase p set p.status = com.pair.domain.credit.entity.CreditPurchase.Status.CANCELED "

@@ -59,6 +59,22 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
         return ledger.findByUserIdOrderByIdDesc(user, org.springframework.data.domain.PageRequest.of(0, 50)).getContent().stream()
                 .filter(l -> l.getReason().equals(reason)).count();
     }
+    /** 환불을 시작한 시각을 테스트마다 다른 옛 시각으로 둔다(공유 H2 의 다른 테스트 REFUNDING 행과 섞이지 않게) */
+    private java.time.Instant refundStartedLongAgo(String order, int day) {
+        java.time.Instant at = java.time.Instant.parse("2001-01-01T00:00:00Z").plus(java.time.Duration.ofDays(day));
+        jdbc.update("update credit_purchases set refund_started_at = ? where order_id = ?", java.sql.Timestamp.from(at), order);
+        return at;
+    }
+    /** paid() 후 토스 결과를 몰라 REFUNDING 으로 남은 환불 하나 */
+    private String stuckRefund(long user) {
+        String id = paid(user);
+        String key = "payment-" + id;
+        when(toss.cancel(eq(key), anyString(), anyString())).thenThrow(new PaymentUnavailableException("환불 결과를 확인할 수 없습니다."));
+        when(toss.find(key)).thenReturn(done(key));
+        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(PaymentUnavailableException.class);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.REFUNDING);
+        return id;
+    }
     private void paidHoursAgo(String order, long hours) {
         jdbc.update("update credit_purchases set paid_at = ? where order_id = ?",
                 java.sql.Timestamp.from(java.time.Instant.now().minus(java.time.Duration.ofHours(hours))), order);
@@ -365,5 +381,46 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
         when(toss.cancel(anyString(), anyString(), anyString())).thenReturn(canceled("payment-other-order"));
         assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(PaymentUnavailableException.class);
         assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.REFUNDING);
+    }
+
+    @Test
+    void autoRecheckFinishesStaleRefundWithoutUserAction() {
+        long user = user();
+        String id = stuckRefund(user);
+        java.time.Instant at = refundStartedLongAgo(id, 10);
+        when(toss.cancel(eq("payment-" + id), anyString(), anyString())).thenAnswer(call -> canceled(call.getArgument(0)));
+        assertThat(purchases.recheckStaleRefunds(at.plusSeconds(1), 20)).isEqualTo(1);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.REFUNDED);
+        assertThat(credits.balance(user)).isEqualTo(200);
+        assertThat(reasons(user, "PURCHASE_REFUND")).isEqualTo(1);
+    }
+
+    @Test
+    void autoRecheckRestoresCreditsWhenTossRejects() {
+        long user = user();
+        String id = stuckRefund(user);
+        java.time.Instant at = refundStartedLongAgo(id, 20);
+        when(toss.cancel(eq("payment-" + id), anyString(), anyString()))
+                .thenThrow(new PaymentRejectedException("토스에서 환불을 거절했습니다: 취소할 수 없는 결제입니다."));
+        assertThat(purchases.recheckStaleRefunds(at.plusSeconds(1), 20)).isEqualTo(1);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.PAID);
+        assertThat(credits.balance(user)).isEqualTo(1200);
+        assertThat(reasons(user, "PURCHASE_REFUND_UNDO")).isEqualTo(1);
+    }
+
+    @Test
+    void autoRecheckLeavesUnknownAndRecentRefundsForLater() {
+        long user = user();
+        String unknown = stuckRefund(user);
+        java.time.Instant at = refundStartedLongAgo(unknown, 30);
+        String recent = stuckRefund(user);
+        refundStartedLongAgo(recent, 31);
+        clearInvocations(toss);
+        // 아직도 결과를 모르면 REFUNDING 그대로(크레딧도 빠진 채), 기준 시각 뒤에 시작한 환불은 건드리지 않는다
+        assertThat(purchases.recheckStaleRefunds(at.plusSeconds(1), 20)).isZero();
+        assertThat(status(user, unknown)).isEqualTo(CreditPurchase.Status.REFUNDING);
+        assertThat(status(user, recent)).isEqualTo(CreditPurchase.Status.REFUNDING);
+        verify(toss, times(1)).cancel(anyString(), anyString(), anyString());
+        verify(toss, never()).cancel(eq("payment-" + recent), anyString(), anyString());
     }
 }
