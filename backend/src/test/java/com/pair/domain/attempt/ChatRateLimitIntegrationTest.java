@@ -53,13 +53,20 @@ class ChatRateLimitIntegrationTest extends BearerIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"hello\"}"));
     }
 
+    /** 브라우저(api.ts chatStream)처럼 Accept: text/event-stream 만 보낸다 */
+    private org.springframework.test.web.servlet.ResultActions chatStream(String id, AuthResponse user) throws Exception {
+        return mvc.perform(post("/api/attempts/{id}/chat/stream", id).header("Authorization", "Bearer " + user.token())
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"message\":\"hello\"}"));
+    }
+
     @Test
     void eleventhChatInAMinuteIsRefusedBeforeTheStreamOpens() throws Exception {
         var user = signup();
         String id = attempts.startSelf(TestTasks.SELF_DEV, user.user().id()).id();
         for (int i = 0; i < 10; i++) chat("/api/attempts/{id}/chat", id, user).andExpect(status().isOk());
 
-        var refused = chat("/api/attempts/{id}/chat/stream", id, user)
+        var refused = chatStream(id, user)
                 .andExpect(status().isTooManyRequests())
                 .andExpect(request().asyncNotStarted())
                 .andExpect(header().string("Retry-After", Matchers.matchesPattern("[1-9][0-9]?")))
@@ -74,5 +81,20 @@ class ChatRateLimitIntegrationTest extends BearerIntegrationTest {
         var other = signup();
         String otherId = attempts.startSelf(TestTasks.SELF_DEV, other.user().id()).id();
         chat("/api/attempts/{id}/chat", otherId, other).andExpect(status().isOk());
+    }
+
+    /** 스트림 주소의 다른 오류도 브라우저 Accept(text/event-stream)에서 본문 없는 500 이 아니라 JSON 안내로 나간다 */
+    @Test
+    void streamErrorIsJsonEvenWhenOnlyEventStreamIsAccepted() throws Exception {
+        var user = signup();
+        String id = attempts.startSelf(TestTasks.SELF_DEV, user.user().id()).id();
+
+        var refused = mvc.perform(post("/api/attempts/{id}/chat/stream", id).header("Authorization", "Bearer " + user.token())
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"message\":\" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("메시지가 비어 있습니다."))
+                .andReturn();
+        assertThat(refused.getResponse().getContentType()).startsWith(MediaType.APPLICATION_JSON_VALUE);
     }
 }
