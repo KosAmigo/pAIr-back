@@ -341,8 +341,8 @@ class TaskReviewLoopTest {
     void kindsOfFailures() {
         var leak = new GenCheckResultDto(TaskPipelineService.LEAK_A_GATE, false, "M5 [description] 원인 → 지운다");
         var key = new GenCheckResultDto(TaskPipelineService.KEY_GATE, false, "M2 [Q1] 정답 키");
-        var han = new GenCheckResultDto(TaskPipelineService.HAN_CHECK, false, "한자 [작성] [..] / [정답] [..]");
-        var hanText = new GenCheckResultDto(TaskPipelineService.HAN_CHECK, false, "한자 [작성] [..]");
+        var han = TaskWritingService.hanCheck(new java.util.LinkedHashMap<>(java.util.Map.of("[작성]", "結論은 이렇다")) {{ put("[정답]", "結論은 이렇다"); }});
+        var hanText = TaskWritingService.hanCheck(java.util.Map.of("[작성]", "結論은 이렇다"));
         var dup = new GenCheckResultDto(TaskPipelineService.DUPLICATE_CHECK, false, "같은 문장");
 
         assertThat(StageRouteService.kinds(List.of(leak, dup), BizPipelineService::owners)).containsExactly("text");
@@ -715,6 +715,7 @@ class TaskReviewLoopTest {
         assertThat(results.get(names.indexOf(BizCheckService.FORMAT)).ok()).isFalse();
         assertThat(results.get(names.indexOf(BizCheckService.FORMAT)).detail()).contains("정답 보기가 1개");
         assertThat(results).noneMatch(r -> r.detail() != null && r.detail().contains("형식이 맞지 않아 확인하지 않았습니다"));
-        assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.FORMAT, false, "객관식은 정답 보기가 1개여야 합니다"))).contains(Stage.QUESTIONS);
+        assertThat(results.get(names.indexOf(BizCheckService.FORMAT)).stages()).containsExactly("QUESTIONS", "ANSWER");
+        assertThat(BizPipelineService.owners(results.get(names.indexOf(BizCheckService.FORMAT)))).contains(Stage.QUESTIONS);
     }
 }

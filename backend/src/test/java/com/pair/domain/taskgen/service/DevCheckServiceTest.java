@@ -98,6 +98,9 @@ class DevCheckServiceTest {
         assertThat(r.ok()).isFalse();
         assertThat(r.level()).isEqualTo(GenCheckResultDto.FAIL);
         assertThat(r.detail()).contains("가리킵니다");
+        assertThat(r.stages()).containsExactly("BLUEPRINT"); // 설계도가 쓴 문장 탓
+        assertThat(DevPipelineService.owners(r, List.of())).containsExactly(TaskPipelineService.Stage.BLUEPRINT);
+        assertThat(result(edit(good, b -> b.judgmentPoints(List.of(none))), DevCheckService.JUDGMENT, null).stages()).containsExactly("WRITING"); // 그 밖의 근거 문제는 작성
     }
 
     @Test

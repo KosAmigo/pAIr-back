@@ -43,7 +43,7 @@ final class FeatureCheckService {
         }
         if (bad.isEmpty()) return new GenCheckResultDto(NAME, true, "추가·구현하라는 메서드가 시작 코드에 구현돼 있지 않습니다.");
         return new GenCheckResultDto(NAME, false, (codeFault ? CODE_STAGE : WRITING_STAGE) + " " + String.join(" / ", bad)
-                + (codeFault ? ". 설계도에서 '추가:' 로 적은 메서드는 시작 코드에 시그니처 그대로 두고 본문은 throw new UnsupportedOperationException(\"TODO\"); 한 줄 틀로만 둔다." : ". 이미 있는 메서드는 추가하라고 쓰지 않는다."));
+                + (codeFault ? ". 설계도에서 '추가:' 로 적은 메서드는 시작 코드에 시그니처 그대로 두고 본문은 throw new UnsupportedOperationException(\"TODO\"); 한 줄 틀로만 둔다." : ". 이미 있는 메서드는 추가하라고 쓰지 않는다.")).withStages(codeFault ? "CODE" : "WRITING");
     }
 
     /** 문장마다 "name(...) … 추가/구현" 꼴인 메서드 이름들. "기존 name" 은 이미 있다는 말이라 뺀다 */

@@ -58,6 +58,8 @@ class FeatureCheckServiceTest {
         var writingFault = FeatureCheckService.check(bp("기존: Schedule.countDue(int)"), ask, code(IMPLEMENTED));
         var codeFault = FeatureCheckService.check(bp("추가: Schedule.countDue(int)"), ask, code(IMPLEMENTED));
 
+        assertThat(writingFault.stages()).containsExactly("WRITING");
+        assertThat(codeFault.stages()).containsExactly("CODE");
         assertThat(DevPipelineService.owners(writingFault, List.of())).containsExactly(Stage.WRITING);
         assertThat(DevPipelineService.owners(codeFault, List.of())).containsExactly(Stage.CODE);
         assertThat(codeFault.detail()).startsWith(FeatureCheckService.CODE_STAGE);

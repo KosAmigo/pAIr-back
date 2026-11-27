@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.taskgen.dto.BlueprintDto;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -126,9 +127,17 @@ class TaskPromptExampleTest {
         assertThat(DevBlueprintService.exampleBasisCases(dev)).noneMatch(p -> p.contains("pointsFollowSettlementRecord"));
     }
 
+    /** 예시 설계도에서 필요한 자료 묶음만 바꾼 설계도 */
+    private BlueprintDto neededOf(java.util.Collection<String> files) throws Exception {
+        BlueprintDto d = parse(TaskPromptService.DEV_EXAMPLE, false);
+        return new BlueprintDto(d.title(), d.summary(), d.code(), d.category(), d.competencies(), d.scenario(), d.api(), d.facts(), d.examples(),
+                d.flaws(), d.judgments(), d.trapKeywords(), d.conclusion(), d.tables(), d.figures(), d.docs(), d.questionPlan(), d.cases(),
+                List.copyOf(files), d.fillers());
+    }
+
     @Test
     @DisplayName("g14 묶음 크기: 코드 단계 src 범위는 작성 단계가 쓴 NOTES.md 길이를 빼서 잡고, 묶음이 크면 설계도가 아니라 코드(NOTES 가 크면 작성도)를 다시 쓴다")
-    void bundleBudgetUsesActualNotes() {
+    void bundleBudgetUsesActualNotes() throws Exception {
         // 20분: 맥락 8000자, 상한 5600자, 하한 3200자
         assertThat(TaskPromptService.srcRange(20, 1000)).containsExactly(2200, 4300);
         assertThat(TaskPromptService.srcRange(20, 2500)).containsExactly(1500, 2800);
@@ -136,14 +145,17 @@ class TaskPromptExampleTest {
         assertThat(TaskPromptService.code("x", true, 20, 2500)).contains("1500–2800 characters");
         assertThat(TaskPromptService.code("x", true, 20)).contains("2200–4300 characters"); // NOTES 를 모르면 1000자로 가정(예전과 같음)
 
-        String bigNotes = "필요한 묶음 6800자가 맥락 한도 8000자의 70%(5600자)를 넘습니다. 필요한 묶음 파일을 줄이거나 더 작은 파일로 나눠 고르세요(공개 테스트는 세지 않음). 파일: src/receipt/ReceptionLedger.java 2369자, src/receipt/ReceptionDatePolicy.java 1902자, NOTES.md 2529자";
-        String bigCode = "필요한 묶음 6200자가 맥락 한도 8000자의 70%(5600자)를 넘습니다. 파일: src/a/A.java 3800자, src/a/B.java 1500자, NOTES.md 900자";
-        var fail = new com.pair.domain.taskgen.dto.GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, bigNotes);
-        assertThat(DevPipelineService.notesTooLarge(bigNotes)).isTrue();
-        assertThat(DevPipelineService.notesTooLarge(bigCode)).isFalse();
+        // 실제 필요한 묶음 검사가 단계를 정한다(글을 다시 읽지 않는다). 20분: 상한 5600자, NOTES.md 한도 2240자(40%)
+        var limits = AiLimitsDto.forMinutes(20);
+        var bigNotesFiles = java.util.Map.of("src/receipt/ReceptionLedger.java", "x".repeat(2369), "src/receipt/ReceptionDatePolicy.java", "x".repeat(1902), "NOTES.md", "x".repeat(2529));
+        var bigCodeFiles = java.util.Map.of("src/a/A.java", "x".repeat(3800), "src/a/B.java", "x".repeat(1500), "NOTES.md", "x".repeat(900));
+        var fail = MaterialGateService.needed(neededOf(bigNotesFiles.keySet()), bigNotesFiles, limits);
+        var failCode = MaterialGateService.needed(neededOf(bigCodeFiles.keySet()), bigCodeFiles, limits);
+        assertThat(fail.ok()).isFalse();
+        assertThat(fail.stages()).containsExactly("WRITING", "CODE");
+        assertThat(failCode.stages()).containsExactly("CODE");
         assertThat(DevPipelineService.owners(fail, List.of(), List.of())).containsExactlyInAnyOrder(TaskPipelineService.Stage.WRITING, TaskPipelineService.Stage.CODE);
-        assertThat(DevPipelineService.owners(new com.pair.domain.taskgen.dto.GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, bigCode), List.of(), List.of()))
-                .containsExactly(TaskPipelineService.Stage.CODE);
+        assertThat(DevPipelineService.owners(failCode, List.of(), List.of())).containsExactly(TaskPipelineService.Stage.CODE);
         assertThat(TaskWritingService.writerFeedback(List.of(fail), "")).contains("notes 가 너무 길다").doesNotContain("5600"); // 작성 단계에 글자 수 같은 생성기 정보는 안 준다
         assertThat(TaskPromptService.WRITING_DEV).contains("Keep it compact");
     }

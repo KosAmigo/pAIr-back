@@ -92,7 +92,7 @@ public final class BizCheckService {
     private static List<GenCheckService<BizDraftDto>> allChecks(PdfService pdf, TaskGenSolverService solver, String solverModel, BizDraftDto draft, int minutes, TaskGenRequest form) {
         Ctx ctx = new Ctx(pdf, draft, minutes);
         return List.of(
-                check(FORMAT, d -> ctx.problem != null ? fail(ctx.problem) : ctx.soft != null ? fail(ctx.soft) : ok("필수 항목과 경로가 모두 맞습니다.")),
+                check(FORMAT, d -> ctx.problem != null ? formatFail(ctx.problem) : ctx.soft != null ? formatFail(ctx.soft) : ok("필수 항목과 경로가 모두 맞습니다.")),
                 check(CSV, d -> {
                     if (ctx.problem != null) return skipped();
                     for (var e : ctx.tables.all().entrySet()) {
@@ -309,6 +309,7 @@ public final class BizCheckService {
         }
         String all = squash(corpus);
         List<String> bad = new ArrayList<>();
+        boolean cellSame = false; // 정답이 칸 값 그대로인 문제가 있는가(설계도의 정의 탓)
         for (int i = 0; i < d.questions().size(); i++) {
             var q = d.questions().get(i);
             boolean isTrap = trap.contains(i + 1) || (q.type() == BizDraftDto.Type.SHORT && q.commonWrongAnswers() != null && !q.commonWrongAnswers().isEmpty());
@@ -318,6 +319,7 @@ public final class BizCheckService {
                         .replaceAll("round\\(|,\\s*\\d+\\)|[()\\s]", "");
                 if (expr.equals("V")) bad.add("Q" + (i + 1) + " 는 자료 칸 하나를 그대로 읽는 문항입니다");
                 else if (!q.accepted().isEmpty() && singleCellValue(BizTableService.num(q.accepted().get(0)), tables)) {
+                    cellSame = true;
                     bad.add("Q" + (i + 1) + " 의 정답이 " + CELL_SAME); // 계산식이 있어도 값이 칸 하나와 같으면 함정이 사라진 것(설계도의 정의가 답을 정함)
                 }
             } else {
@@ -338,7 +340,7 @@ public final class BizCheckService {
             }
         }
         return bad.isEmpty() ? ok("함정 문항이 자료 대조를 요구하고 같은 계산이 반복되지 않습니다.")
-                : fail(String.join(" / ", bad) + ". 함정 문항은 서로 다른 자료 둘 이상을 대조해야 답이 나오게, 문항마다 다른 계산을 묻게 고치세요.");
+                : fail(String.join(" / ", bad) + ". 함정 문항은 서로 다른 자료 둘 이상을 대조해야 답이 나오게, 문항마다 다른 계산을 묻게 고치세요.").withStages(cellSame ? "BLUEPRINT" : "ANSWER");
     }
 
     /** 함정에 빠진 결론이 정답 결론과 같으면 fail(다시 생성), 결론 필드가 없으면 warn */
@@ -405,6 +407,16 @@ public final class BizCheckService {
     }
 
     // ── 형식 규칙 ─────────────────────────────
+
+    /** 형식 실패에 다시 돌릴 단계를 붙인다: 설명·문서 글 → 작성, 문항·보기 → 문항 글+정답 쪽, 정답 쪽 항목 → 정답 쪽. 어디에도 안 맞으면 비움(설계도부터) */
+    static GenCheckResultDto formatFail(String problem) {
+        String d = problem == null ? "" : problem;
+        GenCheckResultDto r = fail(d);
+        if (d.contains("설명(description)") || d.contains("요구사항(requirements)") || d.contains("문서") || d.contains("PDF") || d.contains("쪽") || d.contains("후속")) return r.withStages("WRITING");
+        if (d.contains("객관식") || d.contains("보기") || d.contains("문항")) return r.withStages("QUESTIONS", "ANSWER");
+        if (d.contains("체크리스트") || d.contains("단답형") || d.contains("계산식")) return r.withStages("ANSWER");
+        return r;
+    }
 
     /** 형식에 맞으면 null. 경로 규칙은 파일 이름·경로 조작도 막는다 */
     static String formatProblem(BizDraftDto d, PdfService pdf) {
@@ -607,7 +619,7 @@ public final class BizCheckService {
             @Override
             public GenCheckResultDto run(BizDraftDto d) {
                 GenCheckResultDto r = body.apply(d);
-                return new GenCheckResultDto(name, r.ok(), r.detail(), r.level());
+                return new GenCheckResultDto(name, r.ok(), r.detail(), r.level(), r.stages());
             }
         };
     }

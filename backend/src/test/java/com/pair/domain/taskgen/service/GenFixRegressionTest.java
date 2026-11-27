@@ -128,7 +128,8 @@ class GenFixRegressionTest {
         var r = BizCheckService.trapQuestions(edited, "", new BizTableService(d.csvFiles()));
         assertThat(r.ok()).isFalse();
         assertThat(r.detail()).contains("Q3").contains(BizCheckService.CELL_SAME);
-        assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.TRAP_QUESTION, false, r.detail()))).containsExactly(Stage.BLUEPRINT);
+        assertThat(r.stages()).containsExactly("BLUEPRINT"); // 단계는 검사가 직접 담는다
+        assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.TRAP_QUESTION, false, r.detail(), r.level(), r.stages()))).containsExactly(Stage.BLUEPRINT);
         // 칸과 다른 값이면 통과하고, 기존의 다른 실패(칸 하나 읽기)는 그대로 정답 쪽
         assertThat(BizCheckService.trapQuestions(d, "", new BizTableService(d.csvFiles())).ok()).isTrue();
         assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.TRAP_QUESTION, false, "Q2 는 자료 칸 하나를 그대로 읽는 문항입니다"))).containsExactly(Stage.ANSWER);

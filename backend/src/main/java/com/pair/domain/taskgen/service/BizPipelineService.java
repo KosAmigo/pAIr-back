@@ -45,40 +45,25 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         return new BizRun(form, new StageCallService(ai, props, false), props.materialGate());
     }
 
-    /** 검사 이름 → 다시 돌릴 단계. 모르면 빈 집합 */
+    /** 다시 돌릴 단계: 관문 → 결과에 담긴 단계 → 검사 이름 표. 모르면 빈 집합 */
     static Set<Stage> owners(GenCheckResultDto c) {
         Set<Stage> gate = StageRouteService.gateOwners(c, true);
         if (gate != null) return gate;
-        String n = c.name(), d = c.detail() == null ? "" : c.detail();
+        Set<Stage> given = StageRouteService.given(c); // 검사를 만든 쪽이 결과에 담은 단계
+        if (given != null) return given;
+        String n = c.name();
         if (n.equals(TaskPipelineService.BLUEPRINT_SENTENCE_CHECK)) return EnumSet.of(Stage.BLUEPRINT);
         if (n.equals(TaskPipelineService.M6_TOTAL_CHECK)) return EnumSet.of(Stage.FILLER); // 자료 전체가 모자람: 관련 적은 자료를 다시(M6)
-        if (n.equals(TaskPipelineService.M6_NEEDED_CHECK)) return EnumSet.of(Stage.BLUEPRINT); // 필요한 묶음이 큼: 설계도를 다시(M6)
         if (n.equals(BizCheckService.SOLVE)) return EnumSet.of(Stage.WRITING); // 함정 값이 아닌 답이 나왔다 = 자료만으로 정답이 안 정해짐
-        if (n.equals(BizCheckService.TRAP_QUESTION) && d.contains(BizCheckService.CELL_SAME)) return EnumSet.of(Stage.BLUEPRINT); // 정답이 칸 값 그대로: 정의가 함정을 없앤 것
         if (n.equals(BizCheckService.CALC) || n.equals(BizCheckService.SOURCES) || n.equals(BizCheckService.WRONG_ANSWERS)
                 || n.equals(BizCheckService.HIDDEN_FLAW) || n.equals(BizCheckService.TRAP_QUESTION)) return EnumSet.of(Stage.ANSWER);
         if (n.equals(TaskPipelineService.MENTION_CHECK) || n.equals(TaskPipelineService.FILLER_CHECK) || n.equals(TaskPipelineService.GEN_META_CHECK)) return EnumSet.of(Stage.WRITING);
-        if (n.equals(TaskPipelineService.FLAW_POINTER_CHECK)) return d.contains("[문항]") && !d.contains("[요청 글]") ? EnumSet.of(Stage.QUESTIONS) : d.contains("[문항]") ? EnumSet.of(Stage.WRITING, Stage.QUESTIONS) : EnumSet.of(Stage.WRITING);
-        if (n.equals(BizCheckService.JUDGMENT) && d.contains("가리킵니다")) return EnumSet.of(Stage.BLUEPRINT); // 선택지 근거 사실이 자료가 있다고만 말함: 설계도가 쓴 문장
+        if (n.equals(TaskPipelineService.FLAW_POINTER_CHECK)) return EnumSet.of(Stage.WRITING);
         if (n.equals(BizCheckService.FOLLOW_UP) || n.equals(TaskPipelineService.DUPLICATE_CHECK) || n.equals(TaskPipelineService.META_CHECK)) return EnumSet.of(Stage.WRITING);
-        if (n.equals(TaskPipelineService.HAN_CHECK)) {
-            Set<Stage> s = EnumSet.noneOf(Stage.class);
-            if (d.contains("[설계도]")) s.add(Stage.BLUEPRINT);
-            if (d.contains("[작성]")) s.add(Stage.WRITING);
-            if (d.contains("[문항]")) s.add(Stage.QUESTIONS);
-            if (d.contains("[정답]")) s.add(Stage.ANSWER);
-            if (d.contains("[관련 적은 자료]")) s.add(Stage.FILLER);
-            return s;
-        }
         if (n.equals(BizCheckService.TRAP) || n.equals(BizCheckService.LEAK) || n.equals(BizCheckService.JUDGMENT) || n.equals(TaskPipelineService.FACTS_CHECK)
                 || n.equals(TaskPipelineService.BASIS_CHECK) || n.equals(BizNumbersService.NAME)) return EnumSet.of(Stage.WRITING);
         if (n.equals(BizQuestionService.CHECK) || n.equals(TaskPipelineService.CHOICE_CHECK)) return EnumSet.of(Stage.QUESTIONS);
         if (n.equals(TaskPipelineService.SOURCE_PATH_CHECK)) return EnumSet.of(Stage.ANSWER);
-        if (n.equals(BizCheckService.FORMAT)) {
-            if (d.contains("설명(description)") || d.contains("요구사항(requirements)") || d.contains("문서") || d.contains("PDF") || d.contains("쪽") || d.contains("후속")) return EnumSet.of(Stage.WRITING);
-            if (d.contains("객관식") || d.contains("보기") || d.contains("문항")) return EnumSet.of(Stage.QUESTIONS, Stage.ANSWER);
-            if (d.contains("체크리스트") || d.contains("단답형") || d.contains("계산식")) return EnumSet.of(Stage.ANSWER);
-        }
         return EnumSet.noneOf(Stage.class); // CSV, 결론(CONCLUSION), 설계도 문제, 모르는 검사: 설계도부터
     }
 
@@ -375,7 +360,8 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
                     : new GenCheckResultDto(SOURCE_PATH_CHECK, false, String.join(" / ", badSources)));
             if (e6) { // E6·M6: 필요한 묶음은 한도의 70% 이하, 자료 전체는 한도의 2배 이상
                 var mats = materials(draft);
-                out.add(MaterialGateService.needed(bp, mats, limits));
+                var needed = MaterialGateService.needed(bp, mats, limits);
+                out.add(needed.ok() ? needed : needed.withStages("BLUEPRINT")); // 필요한 묶음이 큼·모자람: 언제나 설계도를 다시(M6)
                 out.add(MaterialGateService.neededMin(bp, mats, limits));
                 out.add(MaterialGateService.evidence(bp));
                 out.add(MaterialGateService.confusing(bp));
