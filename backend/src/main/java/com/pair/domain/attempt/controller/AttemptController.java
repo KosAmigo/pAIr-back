@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -60,14 +61,16 @@ public class AttemptController {
     private final com.pair.domain.attempt.service.ReplayCompareService replayCompare;
     private final ChatAttachmentService chatAttachments;
     private final RescoreService rescores;
+    private final com.pair.domain.attempt.service.AttemptRegistryService registry;
 
     public AttemptController(TaskDefRepository tasks, AttemptService attempts, AttemptStateRepository store, com.pair.global.config.PairProperties props,
             AttemptRepository records, TaskCatalogService catalog, com.pair.domain.attempt.service.CheckpointService checkpoints,
             com.pair.domain.attempt.service.RollbackService rollbacks, com.pair.domain.attempt.service.ReplayTreeService replayTree,
             com.pair.domain.question.service.QuestionService questions, com.pair.domain.attempt.service.ReplayCompareService replayCompare,
             ChatAttachmentService chatAttachments,
-            RescoreService rescores) {
+            RescoreService rescores, com.pair.domain.attempt.service.AttemptRegistryService registry) {
         this.rescores = rescores;
+        this.registry = registry;
         this.tasks = tasks;
         this.attempts = attempts;
         this.store = store;
@@ -94,7 +97,8 @@ public class AttemptController {
      */
     @GetMapping("/attempts")
     public List<Map<String, Object>> list(CurrentUser user, @RequestParam(defaultValue = "false") boolean includeEmpty) {
-        List<Attempt> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), Attempt.Mode.SELF);
+        List<Attempt> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), Attempt.Mode.SELF)
+                .stream().filter(r -> !r.isDeleted()).toList();
         Map<Long, String> codes = catalog.codes(rows.stream().map(Attempt::getTaskId).distinct().toList());
         List<Map<String, Object>> out = new java.util.ArrayList<>();
         // 같은 과제를 여러 번 푼 응시가 많아서 과제 정의는 한 번만 만든다 (응시마다 DB 에서 다시 읽지 않는다)
@@ -133,6 +137,13 @@ public class AttemptController {
             out.add(m);
         }
         return out;
+    }
+
+    /** 복기에서 제출하지 않은 풀이 지우기 */
+    @DeleteMapping("/attempts/{id}")
+    public Map<String, Object> delete(@PathVariable String id) {
+        registry.delete(id);
+        return Map.of("deleted", true);
     }
 
     @GetMapping("/attempts/{id}")
