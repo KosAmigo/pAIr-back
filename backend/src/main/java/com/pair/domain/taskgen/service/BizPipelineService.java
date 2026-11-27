@@ -209,8 +209,8 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         /** E6·M6 단계 4': 결함을 모르는 싼 모델이 관련 적은 문서·CSV 를 쓴다. 자료 전체가 맥락 한도의 2.3배가 되도록 파일당 분량을 알려 준다 */
         private FillerDto fill(String feedback, int neededChars) {
             if (bp.fillers().isEmpty()) return new FillerDto(List.of());
-            int per = MaterialGateService.perFillerChars(bp, neededChars, limits);
-            FillerDto raw = FillerService.merge(calls.callParallel(Stage.FILLER, TaskPromptService.filler(true), FillerService.inputs(bp, per, feedback), FillerDto.class)); // 파일마다 동시에
+            var chars = MaterialGateService.bizFillerChars(bp, neededChars, limits); // 헷갈리는 자료는 필요한 파일과 비슷한 크기(크기로 고르지 못하게)
+            FillerDto raw = FillerService.merge(calls.callParallel(Stage.FILLER, TaskPromptService.filler(true), FillerService.inputs(bp, chars, feedback), FillerDto.class)); // 파일마다 동시에
             return FillerService.sanitized(raw, bp);
         }
 

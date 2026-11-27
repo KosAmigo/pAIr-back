@@ -177,6 +177,30 @@ final class MaterialGateService {
         return Math.max(800, (int) Math.ceil(others / (double) count / 100.0) * 100);
     }
 
+    /**
+     * BIZ 관련 적은 자료 파일별 글자 수(2026-11-27 g16~g18): 크기만 보고 필요한 파일을 고르지 못하게, 헷갈리는 자료는 필요한 파일 하나의 평균 분량으로 쓰고
+     * 나머지 관련 적은 자료가 자료 전체 목표(한도 2.3배)까지 남는 분량을 나눠 갖는다. 헷갈리는 자료만 있으면 모두 같은 분량(perFillerChars)
+     */
+    static Map<String, Integer> bizFillerChars(BlueprintDto bp, int neededChars, AiLimitsDto limits) {
+        Map<String, Integer> out = new java.util.LinkedHashMap<>();
+        if (bp.fillers() == null || bp.fillers().isEmpty()) return out;
+        List<BlueprintDto.Filler> confusing = bp.fillers().stream().filter(BlueprintDto.Filler::confusingFlag).toList();
+        List<BlueprintDto.Filler> plain = bp.fillers().stream().filter(f -> !f.confusingFlag()).toList();
+        int even = perFillerChars(bp, neededChars, limits);
+        if (confusing.isEmpty() || plain.isEmpty()) {
+            bp.fillers().forEach(f -> out.put(f.path(), even));
+            return out;
+        }
+        int neededCount = Math.max(1, bp.neededFiles() == null ? 1 : bp.neededFiles().size());
+        int like = Math.max(800, (int) Math.round(neededChars / (double) neededCount / 100.0) * 100); // 필요한 파일 하나의 평균
+        like = Math.min(like, even); // 고르게 나눈 분량보다 크게 만들지는 않는다
+        int target = (int) Math.ceil(limits.contextChars() * TOTAL_TARGET_RATIO);
+        int rest = Math.max(0, target - neededChars - like * confusing.size());
+        int each = Math.max(800, (int) Math.ceil(rest / (double) plain.size() / 100.0) * 100);
+        for (var f : bp.fillers()) out.put(f.path(), f.confusingFlag() ? like : each);
+        return out;
+    }
+
     private static String sizes(Map<String, String> materials, List<String> paths) {
         StringBuilder sb = new StringBuilder();
         for (String p : paths) {
