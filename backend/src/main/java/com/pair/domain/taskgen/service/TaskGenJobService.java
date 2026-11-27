@@ -45,18 +45,19 @@ public class TaskGenJobService {
     static final Duration STALE_AFTER = Duration.ofMinutes(2);
     static final Duration RECENT_FINISHED = Duration.ofHours(24);
     private static final Set<String> ACTIVE = Set.of(TaskGenJob.QUEUED, TaskGenJob.RUNNING);
-    private static final Set<Integer> DEADLINE_HOURS = Set.of(1, 3, 6);
+    private static final Set<Integer> DEADLINE_HOURS = Set.of(3, 6, 12, 24); // 2026-11-27 사용자 결정(1시간은 대부분 바로 호출로 넘어가 뺌)
 
     public enum State { QUEUED, RUNNING, DONE, FAILED, CANCELED }
 
     /**
      * 작업 응답(GET /api/admin/task-gen/{jobId}, jobs 목록의 한 줄). DONE 이어도 passed 가 false 면 확인에 실패한 채 검수 전으로 저장된 것.
-     * queuePosition 은 QUEUED 일 때만(내 env 의 대기 순번, 1부터). topic·track·minutes 는 폼에서 꺼낸 값.
+     * queuePosition 은 QUEUED 일 때만(내 env 의 대기 순번, 1부터). topic·track·minutes·trap·usage 는 폼에서 꺼낸 값.
      * waitingBatch: 배치 작업이 모델 호출을 배치에 맡기고 결과를 기다리는 중이면 true(프런트의 '배치 대기 중'). deadlineAt 은 배치 마감 시각
      */
     public record JobStatus(String jobId, State status, String step, String taskCode, Boolean passed,
             List<GenCheckResultDto> checks, String error, String mode, Instant deadlineAt, Integer queuePosition,
-            String batchId, String topic, String track, Integer minutes, Double costUsd, Instant createdAt, Boolean waitingBatch) {}
+            String batchId, String topic, String track, Integer minutes, Double costUsd, Instant createdAt, Boolean waitingBatch,
+            String trap, String usage) {}
 
     /** 자동 생성으로 한 번에 넣은 작업들 */
     public record Batch(String batchId, List<String> jobIds) {}
@@ -112,7 +113,7 @@ public class TaskGenJobService {
         return start(form, adminId, TaskGenJob.NOW, null, null);
     }
 
-    /** mode 는 NOW/BATCH(BATCH 는 모델 호출을 배치 창구에 맡긴다). BATCH 면 deadlineHours(1/3/6, 기본 3)로 마감 시각을 정한다 */
+    /** mode 는 NOW/BATCH(BATCH 는 모델 호출을 배치 창구에 맡긴다). BATCH 면 deadlineHours(3/6/12/24, 기본 3)로 마감 시각을 정한다 */
     public String start(TaskGenRequest form, long adminId, String mode, Integer deadlineHours, String batchId) {
         storageGuard.requireSafe(form.track()); // AI 를 부르기 전에 막는다
         String m = checkedMode(mode);
@@ -120,7 +121,7 @@ public class TaskGenJobService {
         Instant deadline = null;
         if (TaskGenJob.BATCH.equals(m)) {
             int h = deadlineHours == null ? 3 : deadlineHours;
-            if (!DEADLINE_HOURS.contains(h)) throw new IllegalArgumentException("batchDeadlineHours 는 1, 3, 6 중 하나여야 합니다.");
+            if (!DEADLINE_HOURS.contains(h)) throw new IllegalArgumentException("batchDeadlineHours 는 3, 6, 12, 24 중 하나여야 합니다.");
             deadline = now.plus(Duration.ofHours(h));
         }
         String id = UUID.randomUUID().toString();
@@ -236,7 +237,8 @@ public class TaskGenJobService {
         TaskGenRequest form = readForm(j.getForm());
         return new JobStatus(j.getId(), State.valueOf(j.getStatus()), j.getStep(), j.getTaskCode(), j.getPassed(), readChecks(j.getChecks()), j.getError(),
                 j.getMode(), j.getDeadlineAt(), position, j.getBatchId(), form == null ? null : form.topic(), form == null ? null : form.track(),
-                form == null ? null : form.minutes(), j.getCostUsd(), j.getCreatedAt(), waitingBatch(j));
+                form == null ? null : form.minutes(), j.getCostUsd(), j.getCreatedAt(), waitingBatch(j),
+                form == null ? null : form.trap(), form == null ? null : form.usage());
     }
 
     /** 실행 중인 배치 작업이 배치에 맡긴 호출의 결과를 기다리는 중인가(task_gen_calls 에 PENDING 이 있음) */

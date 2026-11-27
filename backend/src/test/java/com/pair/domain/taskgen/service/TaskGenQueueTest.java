@@ -81,7 +81,7 @@ class TaskGenQueueTest extends ExamIntegrationTest {
             return outcome("w-" + UUID.randomUUID().toString().substring(0, 8));
         });
         TaskGenJobService s = service(dev, uniqueEnv(), 5, true);
-        String batch = s.start(form("batch"), 1L, "BATCH", 1, null);
+        String batch = s.start(form("batch"), 1L, "BATCH", 3, null);
         String now = s.start(form("now"), 1L);
         s.tick();
         await(() -> s.status(batch).status() == State.RUNNING && s.status(now).status() == State.RUNNING);

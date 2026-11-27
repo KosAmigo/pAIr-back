@@ -3,11 +3,13 @@ package com.pair.domain.taskgen.controller;
 import com.pair.domain.taskgen.dto.AutoTopicDto;
 import com.pair.domain.taskgen.dto.TaskGenAutoRequest;
 import com.pair.domain.taskgen.dto.TaskGenAutoResponse;
+import com.pair.domain.taskgen.dto.TaskGenContentResponse;
 import com.pair.domain.taskgen.dto.TaskGenPreviewRequest;
 import com.pair.domain.taskgen.dto.TaskGenStartRequest;
 import com.pair.domain.taskgen.dto.TaskGenStartResponse;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.domain.taskgen.service.TaskAutoService;
+import com.pair.domain.taskgen.service.TaskGenContentService;
 import com.pair.domain.taskgen.service.TaskGenJobService;
 import com.pair.domain.taskgen.service.TaskSuggestionService;
 import java.util.List;
@@ -34,8 +36,10 @@ public class TaskGenController {
     private final GeneratedTaskRepository writer;
     private final TaskSuggestionService suggestions;
     private final TaskAutoService auto;
+    private final TaskGenContentService content;
 
-    public TaskGenController(TaskGenJobService jobs, GeneratedTaskRepository writer, TaskSuggestionService suggestions, TaskAutoService auto) {
+    public TaskGenController(TaskGenJobService jobs, GeneratedTaskRepository writer, TaskSuggestionService suggestions, TaskAutoService auto, TaskGenContentService content) {
+        this.content = content;
         this.auto = auto;
         this.suggestions = suggestions;
         this.jobs = jobs;
@@ -93,6 +97,13 @@ public class TaskGenController {
     public TaskGenJobService.JobStatus status(CurrentUser user, @PathVariable String jobId) {
         requireAdmin(user);
         return jobs.status(jobId);
+    }
+
+    /** 만드는 중인 과제의 중간 결과 요약(설계도·글·코드 파일 목록 등). 없는 작업이면 404 */
+    @GetMapping("/task-gen/{jobId}/content")
+    public TaskGenContentResponse content(CurrentUser user, @PathVariable String jobId) {
+        requireAdmin(user);
+        return content.content(jobId);
     }
 
     /** 과제 콘솔이 보여 줄 확인 결과(_gen/report.json). 없으면 404 */

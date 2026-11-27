@@ -54,7 +54,7 @@ class TaskGenQueueApiTest extends ExamIntegrationTest {
     @Test
     @DisplayName("POST /task-gen: 202 {jobId}, 대기 상태로 저장되고 mode·deadlineAt·queuePosition·topic·track·minutes 가 응답에 들어 있다")
     void startAndStatus() throws Exception {
-        String form = "{\"track\":\"DEV\",\"topic\":\"쿠폰 할인 계산\",\"trap\":\"쿠폰 중복 적용\",\"mode\":\"BATCH\",\"batchDeadlineHours\":1}";
+        String form = "{\"track\":\"DEV\",\"topic\":\"쿠폰 할인 계산\",\"trap\":\"쿠폰 중복 적용\",\"mode\":\"BATCH\",\"batchDeadlineHours\":12}";
         String id = body(post("/api/admin/task-gen").contentType(MediaType.APPLICATION_JSON).content(form), 202).get("jobId").asText();
         String id2 = body(post("/api/admin/task-gen").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"track\":\"DEV\",\"topic\":\"둘째\",\"trap\":\"함정\"}"), 202).get("jobId").asText();
