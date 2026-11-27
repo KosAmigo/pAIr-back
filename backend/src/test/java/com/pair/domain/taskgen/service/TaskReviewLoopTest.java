@@ -583,7 +583,7 @@ class TaskReviewLoopTest {
     @DisplayName("점검 프롬프트는 resources/taskgen/review/ 파일에서 읽고, 고치는 단계의 프롬프트는 없다")
     void promptsComeFromResources() {
         for (var c : TaskReviewService.Check.values()) assertThat(TaskPromptService.check(c.resource)).isNotBlank();
-        assertThat(TaskPromptService.check("leak")).contains("M5").contains("NOTES").contains("문항·보기").doesNotContain("M2").doesNotContain("C1");
+        assertThat(TaskPromptService.check("leak-dev")).contains("M5").contains("NOTES").contains("문항·보기").doesNotContain("M2").doesNotContain("C1");
         assertThat(TaskPromptService.check("backing-cases")).contains("기대 결과를 직접 정하는가").doesNotContain("M5");
         assertThat(TaskPromptService.check("backing")).contains("null").doesNotContain("M5");
         assertThat(TaskPromptService.check("answer-key")).contains("판단 지점을 객관식으로 물음").contains("계산 검증은 코드가 합니다");

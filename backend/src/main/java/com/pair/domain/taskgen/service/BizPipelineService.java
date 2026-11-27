@@ -165,6 +165,15 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
                 onStep.accept(STEP_BLUEPRINT);
                 bp = blueprint(plan == null ? "" : StageRouteService.feedback(plan.all()));
             }
+            // 관련 적은 자료는 설계도만 있으면 쓸 수 있다: 작성·문항·정답 쪽과 동시에 돌려 가장 느린 단계(g9 모델 시간의 절반)를 겹친다.
+            // 필요한 묶음 글자 수는 아직 모르므로 한도의 55%(관문 40~70% 한가운데)로 어림해 파일 분량을 정한다. 어림이 맞으면 자료 전체는 한도의 2.15~2.45배라 관문(2배)을 넘는다
+            java.util.concurrent.CompletableFuture<FillerDto> fillerJob = null;
+            if (e6 && st.contains(Stage.FILLER)) {
+                onStep.accept(STEP_FILLER);
+                String fillerFeedback = restart ? "" : StageRouteService.feedback(plan.byStage().get(Stage.FILLER));
+                int guess = (int) Math.round(limits.contextChars() * MaterialGateService.NEEDED_TARGET_RATIO);
+                fillerJob = java.util.concurrent.CompletableFuture.supplyAsync(() -> fill(fillerFeedback, guess), r -> Thread.ofVirtual().start(r));
+            }
             if (st.contains(Stage.WRITING)) {
                 onStep.accept(STEP_WRITING);
                 writing = write(restart ? "" : TaskWritingService.writerFeedback(plan.byStage().get(Stage.WRITING), visibleText()));
@@ -183,9 +192,13 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
                 onStep.accept(STEP_ANSWER);
                 answer = answer(restart ? "" : StageRouteService.feedback(plan.byStage().get(Stage.ANSWER)));
             }
-            if (e6 && st.contains(Stage.FILLER)) {
-                onStep.accept(STEP_FILLER);
-                filler = fill(restart ? "" : StageRouteService.feedback(plan.byStage().get(Stage.FILLER)));
+            if (fillerJob != null) {
+                try {
+                    filler = fillerJob.join();
+                } catch (java.util.concurrent.CompletionException e) {
+                    if (e.getCause() instanceof RuntimeException re) throw re;
+                    throw e;
+                }
             }
             List<BizDraftDto.QuestionDraft> assembled = BizQuestionService.assemble(bp, questions, answer);
             BizDraftDto draft = TaskAssemblyService.biz(form, bp, writing, assembled, answer, filler);
@@ -194,11 +207,10 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         }
 
         /** E6·M6 단계 4': 결함을 모르는 싼 모델이 관련 적은 문서·CSV 를 쓴다. 자료 전체가 맥락 한도의 2.3배가 되도록 파일당 분량을 알려 준다 */
-        private FillerDto fill(String feedback) {
+        private FillerDto fill(String feedback, int neededChars) {
             if (bp.fillers().isEmpty()) return new FillerDto(List.of());
-            int neededChars = MaterialGateService.bundleChars(materials(TaskAssemblyService.biz(form, bp, writing, List.of(), answer, null)), bp.neededFiles());
-            int per = MaterialGateService.perFillerChars(bp, neededChars, limits);
-            FillerDto raw = FillerService.merge(calls.callParallel(Stage.FILLER, TaskPromptService.filler(true), FillerService.inputs(bp, per, feedback), FillerDto.class)); // 파일마다 동시에
+            var chars = MaterialGateService.bizFillerChars(bp, neededChars, limits); // 헷갈리는 자료는 필요한 파일과 비슷한 크기(크기로 고르지 못하게)
+            FillerDto raw = FillerService.merge(calls.callParallel(Stage.FILLER, TaskPromptService.filler(true), FillerService.inputs(bp, chars, feedback), FillerDto.class)); // 파일마다 동시에
             return FillerService.sanitized(raw, bp);
         }
 

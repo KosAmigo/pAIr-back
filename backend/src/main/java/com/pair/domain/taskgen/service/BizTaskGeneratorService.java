@@ -113,6 +113,18 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
         return out;
     }
 
+    /** 다른 회사 모델이 풀기: 코드 검사·관문을 모두 통과한 시도에서만, 관련 적은 자료를 뺀 필요한 자료로 푼다(g16: 비용 30%, 실패할 시도에서도 돌았음) */
+    @Override
+    protected List<GenCheckResultDto> lastChecks(TaskGenRequest form, BizDraftDto draft, BlueprintDto bp) {
+        BizDraftDto needed = FillerService.withoutFillers(draft, bp);
+        GenCheckService<BizDraftDto> c = BizCheckService.solveOnly(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), needed, form.minutes(), form);
+        try {
+            return List.of(c.run(needed));
+        } catch (RuntimeException e) {
+            return List.of(new GenCheckResultDto(c.name(), false, "검사 중 오류: " + e.getMessage(), c.level()));
+        }
+    }
+
     @Override
     protected Extra afterChecks(TaskGenRequest form, BizDraftDto draft, List<GenCheckResultDto> results) {
         return soloExtra(draft, results, AiLimitsDto.forMinutes(form.minutes()));
@@ -163,7 +175,7 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
 
     @Override
     protected List<GenCheckService<BizDraftDto>> checks(TaskGenRequest form, BizDraftDto draft) {
-        return BizCheckService.forDraft(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), draft, form.minutes(), form);
+        return BizCheckService.forDraft(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), draft, form.minutes(), form, false); // 풀이는 lastChecks 에서
     }
 
     /** 풀이 검사 호출의 토큰을 report 에 남기도록 감싼다 */
