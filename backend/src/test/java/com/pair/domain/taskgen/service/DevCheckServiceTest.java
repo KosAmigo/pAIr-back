@@ -395,5 +395,13 @@ class DevCheckServiceTest {
         var r = DevCheckService.forDraft(local, publicOnly).stream().map(c -> c.run(publicOnly)).filter(x -> x.name().equals(DevCheckService.WRONG_FIXES)).findFirst().orElseThrow();
         assertThat(r.ok()).isFalse();
         assertThat(r.detail()).contains("오답 2").contains("공개 테스트에서만");
+
+        // 숨은 테스트에서도 떨어지지만 공개 테스트까지 깨는 오답은 약한 오답: 다시 만들지는 않고 경고만(g13 02 판정, 새 검사라 경고로 시작)
+        DevDraftDto weak = edit(d, b -> b.wrongFixes(List.of(d.wrongFixes().get(0),
+                new DevDraftDto.WrongFix("모두 틀림", List.of(f("src/calc/Calc.java", "package calc;\npublic class Calc { public static int abs(int n) { return n < 0 ? 0 : n + 1; } }\n"))))));
+        var w = DevCheckService.forDraft(local, weak).stream().map(c -> c.run(weak)).filter(x -> x.name().equals(DevCheckService.WRONG_FIXES)).findFirst().orElseThrow();
+        assertThat(w.detail()).contains("오답 2").contains("공개 테스트도 깹니다").contains("positive");
+        assertThat(w.ok()).isFalse();
+        assertThat(w.needsRegeneration()).isFalse();
     }
 }
