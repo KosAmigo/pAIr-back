@@ -70,7 +70,7 @@ public class ReplayTreeService {
             Map<Long, Checkpoint> cps = checkpoints.findByAttemptIdIn(level).stream()
                     .collect(Collectors.toMap(Checkpoint::getId, Function.identity()));
             if (cps.isEmpty()) break;
-            List<Attempt> children = records.findByForkedFromCheckpointIdIn(cps.keySet());
+            List<Attempt> children = records.findByForkedFromCheckpointIdIn(cps.keySet()).stream().filter(c -> !c.isDeleted()).toList();
             for (Attempt c : children) {
                 found.add(c);
                 forkedFrom.put(c.getId(), cps.get(c.getForkedFromCheckpointId()));

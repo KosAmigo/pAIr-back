@@ -93,6 +93,10 @@ public class Attempt {
     @Column(name = "followup_answers")
     private String followupAnswers;
 
+    /** 응시자가 지운 시각. 먼저 읽어 둔 엔티티를 저장해도 지워지지 않게 AttemptRepository.softDelete 만 쓴다 */
+    @Column(name = "deleted_at", updatable = false)
+    private Instant deletedAt;
+
     private Attempt(Mode mode, Long userId, Long participantId, Long taskId, String assistantModel, Instant startedAt) {
         this.mode = mode;
         this.userId = userId;
@@ -137,6 +141,10 @@ public class Attempt {
         if (status != AttemptStateDto.Status.SOLVING && this.submittedAt == null) return;
         if (status != AttemptStateDto.Status.SOLVING && status != AttemptStateDto.Status.FOLLOWUP && this.followupsDoneAt == null) return;
         this.status = status;
+    }
+
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 
     public boolean isSubmitted() {

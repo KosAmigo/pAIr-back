@@ -90,7 +90,7 @@ public class AttemptOwnerInterceptor implements HandlerInterceptor {
 
     private Attempt find(String id) {
         try {
-            return records.findById(Long.parseLong(id)).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + id));
+            return records.findById(Long.parseLong(id)).filter(r -> !r.isDeleted()).orElseThrow(() -> new NoSuchElementException("없는 응시입니다: " + id));
         } catch (NumberFormatException e) {
             throw new NoSuchElementException("없는 응시입니다: " + id);
         }
