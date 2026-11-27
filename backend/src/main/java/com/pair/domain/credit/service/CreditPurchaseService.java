@@ -26,6 +26,7 @@ import com.pair.global.error.ConflictException;
 
 @Service
 public class CreditPurchaseService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CreditPurchaseService.class);
     /** 결제 승인 후 환불할 수 있는 기간 (7일을 시각으로 센다) */
     public static final Duration REFUND_WINDOW = Duration.ofHours(168);
     private static final String REFUND_REASON = "고객 요청 환불";
@@ -189,6 +190,27 @@ public class CreditPurchaseService {
             p.refunded();
             return PurchaseResponse.from(p);
         });
+    }
+
+    /**
+     * 자동 재확인: startedBefore 보다 먼저 시작해 아직 REFUNDING 인 환불을 최대 limit 건 이어서 처리한다(refund 와 같은 길).
+     * 취소가 확인되면 REFUNDED, 토스가 거절하면 크레딧을 되돌리고 PAID, 그래도 모르면 다음 차례에 다시 본다. 끝낸 건수를 돌려준다.
+     */
+    public int recheckStaleRefunds(Instant startedBefore, int limit) {
+        int finished = 0;
+        for (CreditPurchase p : purchases.findByStatusAndRefundStartedAtBeforeOrderByIdAsc(
+                CreditPurchase.Status.REFUNDING, startedBefore, PageRequest.of(0, limit))) {
+            try {
+                refund(p.getUserId(), p.getOrderId());
+                finished++;
+            } catch (PaymentRejectedException e) {
+                log.warn("환불 자동 재확인: 토스가 취소를 거절해 크레딧을 되돌렸습니다. purchaseId={} {}", p.getId(), e.getMessage());
+                finished++;
+            } catch (RuntimeException e) {
+                log.warn("환불 자동 재확인: 아직 결과를 모릅니다. 다음 차례에 다시 봅니다. purchaseId={} {}", p.getId(), e.getMessage());
+            }
+        }
+        return finished;
     }
 
     private void undoRefund(Long userId, RefundDto info) {
