@@ -151,6 +151,27 @@ public class BizSoloSolveService {
      * needed 는 관련 적은 자료를 뺀 초안(FillerService.withoutFillers). 고르기 없이 필요한 자료를 모두 붙여 같은 모델로 푼다(M6 으로 한도 안).
      * 여기서도 틀리면 함정 자체가 통한 것, 여기서는 맞히고 run 에서만 틀리면 자료 고르기에서 막힌 것이다
      */
+    /** 필요한 자료를 다 붙였는데도 "자료 부족"이라고 답한 문항이 있으면 실패(자료만으로 정답이 안 정해짐 → WRITING) */
+    static final String NO_DATA_NAME = "필요한 자료만으로 답이 정해짐";
+    private static final java.util.regex.Pattern NO_DATA = java.util.regex.Pattern.compile(
+            "자료\\s*(가|이)?\\s*(부족|없)|정보\\s*(가|이)?\\s*(부족|없)|(제시|나와\\s*있지|주어지지)\\s*않|(계산|판단|알|확인|산출)\\S*\\s*수\\s*없");
+
+    /**
+     * 필요한 자료만 붙인 풀이의 답 중 "자료 부족"류 답의 문항을 실패로 낸다. 없으면 null(검사 결과를 더하지 않음).
+     * 2026-11-28 g25: 정답 키가 자료에 없는 '변경안'을 전제로 계산했는데 일관성 경고로만 남고 통과했다. 이 풀이는 그 문항에만 "자료 부족"이라고 답했다
+     */
+    static GenCheckResultDto noData(List<String> answers) {
+        if (answers == null) return null;
+        List<String> bad = new ArrayList<>();
+        for (int i = 0; i < answers.size(); i++) {
+            String a = answers.get(i);
+            if (a != null && NO_DATA.matcher(a).find()) bad.add("Q" + (i + 1) + "(AI 답 " + (a.length() > 60 ? a.substring(0, 60) + "…" : a) + ")");
+        }
+        return bad.isEmpty() ? null : new GenCheckResultDto(NO_DATA_NAME, false,
+                "필요한 자료를 모두 붙였는데도 AI 가 자료가 없어 답할 수 없다고 한 문항: " + String.join(", ", bad)
+                        + ". 문항이 전제로 하는 값·안(변경안, 계획 등)을 자료(문서·CSV)에 사실로 넣으세요.");
+    }
+
     public Result runNeeded(BizDraftDto needed) {
         return answer(needed, SoloLimitService.attach(materials(needed), null), "필요한 자료만 모두 붙임. ", NEEDED_NAME, 0, 0);
     }

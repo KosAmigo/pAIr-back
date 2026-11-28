@@ -326,4 +326,16 @@ class BizSoloSolveServiceTest {
         var r = service().runNeeded(BizFixtures.good("biz-solo"));
         assertThat(r.check().detail()).contains("피했어요", "자료 고르기");
     }
+
+    @org.junit.jupiter.api.Test
+    void 필요한_자료만_붙여도_자료_부족이라고_답한_문항은_실패로_낸다() {
+        var r = BizSoloSolveService.noData(java.util.Arrays.asList("3", "10.3", "변경안 내용이 제시되지 않아 계산할 수 없습니다.", null));
+        org.assertj.core.api.Assertions.assertThat(r).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(r.ok()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(r.name()).isEqualTo(BizSoloSolveService.NO_DATA_NAME);
+        org.assertj.core.api.Assertions.assertThat(r.detail()).contains("Q3").doesNotContain("Q1").doesNotContain("Q2");
+        org.assertj.core.api.Assertions.assertThat(BizSoloSolveService.noData(java.util.List.of("자료 부족"))).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(BizSoloSolveService.noData(java.util.List.of("2", "12.5", "600"))).isNull();
+        org.assertj.core.api.Assertions.assertThat(BizSoloSolveService.noData(null)).isNull();
+    }
 }

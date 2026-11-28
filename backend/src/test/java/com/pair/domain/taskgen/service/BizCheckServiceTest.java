@@ -36,10 +36,10 @@ class BizCheckServiceTest {
     }
 
     @Test
-    @DisplayName("정상 Draft 는 검사 13개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
+    @DisplayName("정상 Draft 는 검사 14개를 모두 통과하고, 풀이 모델에는 선택한 모델 이름과 문서 글이 간다")
     void allPass() {
         var results = run(BizFixtures.good("c"));
-        assertThat(results).hasSize(13).allMatch(GenCheckResultDto::ok, results.toString());
+        assertThat(results).hasSize(14).allMatch(GenCheckResultDto::ok, results.toString());
         assertThat(solver.lastModel).isEqualTo("claude-sonnet-5-5");
         assertThat(solver.lastPrompt).contains("자료/설문 요약.pdf (2쪽)").contains("34%가 라이트").contains("1) 34%").contains("월,요금제,가입자 수");
         assertThat(solver.calls.get()).isEqualTo(1);
@@ -141,6 +141,22 @@ class BizCheckServiceTest {
     }
 
     @Test
+    @DisplayName("계산식에 자료·문항에 없는 숫자를 직접 쓰면 '계산식 숫자가 자료에 있음' 만 실패한다(g25 변경안 3000)")
+    void calcNumberNotInMaterials() {
+        BizDraftDto d = BizFixtures.good("c");
+        solver.reply = "{\"answers\": [\"1\", \"2\", \"21080\", \"2000\"]}";
+        var hidden = BizFixtures.shortQ("q", "21080", "round(v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") * 0.34 + 7777 - 7777)", CSV + "|", DOC1 + "|2");
+        assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 2, hidden))))).containsExactly(BizCheckService.CALC_NUMBERS);
+        assertThat(BizCheckService.calcNumbers(edit(d, b -> b.questions(replaceQuestion(d, 2, hidden))), BizFixtures.EVIDENCE).detail()).contains("Q3(7777)");
+        // 문항 문구에 적힌 값은 찾을 수 있다
+        var stated = BizFixtures.shortQ("q 7777", "21080", "round(v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") * 0.34 + 7777 - 7777)", CSV + "|", DOC1 + "|2");
+        assertThat(BizCheckService.calcNumbers(edit(d, b -> b.questions(replaceQuestion(d, 2, stated))), BizFixtures.EVIDENCE).ok()).isTrue();
+        // 퍼센트 표기(0.34 ↔ 34)와 round 자릿수는 숫자로 세지 않는다
+        var pct = BizFixtures.shortQ("q", "21080", "round(v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") * 0.34, 0)", CSV + "|", DOC1 + "|2");
+        assertThat(BizCheckService.calcNumbers(edit(d, b -> b.questions(replaceQuestion(d, 2, pct))), "할인율 34%").ok()).isTrue();
+    }
+
+    @Test
     @DisplayName("계산식 결과가 인정 답안과 다르거나 식이 허용 밖이면 '단답형 검산' 만 실패한다")
     void calcWrong() {
         BizDraftDto d = BizFixtures.good("c");
@@ -149,7 +165,7 @@ class BizCheckServiceTest {
         assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 2, off))))).containsExactly(BizCheckService.CALC);
         solver.reply = "{\"answers\": [\"1\", \"2\", \"21080\", \"2000\"]}";
         var bad = BizFixtures.shortQ("q", "21080", "sqrt(4)", CSV + "|", DOC1 + "|2");
-        assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 2, bad))))).containsExactly(BizCheckService.CALC);
+        assertThat(failed(edit(d, b -> b.questions(replaceQuestion(d, 2, bad))))).contains(BizCheckService.CALC);
         // 0.5% 이내 차이는 같은 값으로 본다
         var near = BizFixtures.shortQ("q", "21100", "round(v(\"자료/매출.csv\", \"월=2026-10;요금제=베이직\", \"가입자 수\") * 0.34)", CSV + "|", DOC1 + "|2");
         solver.reply = "{\"answers\": [\"1\", \"2\", \"21080\", \"2000\"]}";
@@ -163,11 +179,11 @@ class BizCheckServiceTest {
         solver.reply = "{\"answers\": [\"2\", \"2\", \"21080\", \"2000\"]}";
         var r = run(d);
         assertThat(r.stream().filter(x -> !x.ok()).map(GenCheckResultDto::name)).containsExactly(BizCheckService.SOLVE);
-        assertThat(r.get(6).detail()).contains("Q1");
+        assertThat(r.get(7).detail()).contains("Q1");
         solver.reply = "답을 모르겠습니다";
         assertThat(failed(d)).containsExactly(BizCheckService.SOLVE);
         solver.error = new AiUnavailableException("Claude 요청 한도 (429)");
-        assertThat(run(d).get(6).detail()).contains("429");
+        assertThat(run(d).get(7).detail()).contains("429");
     }
 
     @Test
