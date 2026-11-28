@@ -33,9 +33,21 @@ public interface TaskGenJobRepository extends JpaRepository<TaskGenJob, String> 
     /** 최근 끝난 작업(예상 비용 계산용, TaskGenCostService) */
     List<TaskGenJob> findTop200ByStatusAndCostUsdNotNullOrderByFinishedAtDesc(String status);
 
-    /** 내 env 의 대기·실행 중인 작업과 since 이후에 끝난 작업 */
-    @Query("select j from TaskGenJob j where j.env = :env and (j.status in :active or j.finishedAt >= :since) order by j.createdAt asc")
+    /** 내 env 의 대기·실행 중인 작업과, since 이후에 끝났는데 아직 확인하지 않은 작업 */
+    @Query("select j from TaskGenJob j where j.env = :env and (j.status in :active or (j.finishedAt >= :since and j.seenAt is null)) order by j.createdAt asc")
     List<TaskGenJob> findActive(@Param("env") String env, @Param("active") Collection<String> active, @Param("since") Instant since);
+
+    /** 끝난 작업 하나를 확인으로. 이미 확인했거나 아직 안 끝났으면 0행(멱등) */
+    @Transactional
+    @Modifying
+    @Query("update TaskGenJob j set j.seenAt = :now where j.id = :id and j.status in :ended and j.seenAt is null")
+    int markSeen(@Param("id") String id, @Param("ended") Collection<String> ended, @Param("now") Instant now);
+
+    /** 내 env 의 끝난 작업을 모두 확인으로. 바꾼 행 수 */
+    @Transactional
+    @Modifying
+    @Query("update TaskGenJob j set j.seenAt = :now where j.env = :env and j.status in :ended and j.seenAt is null")
+    int markAllSeen(@Param("env") String env, @Param("ended") Collection<String> ended, @Param("now") Instant now);
 
     /** 대기 → 실행. 1행이면 내가 집은 것 */
     @Transactional

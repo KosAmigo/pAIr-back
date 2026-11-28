@@ -114,13 +114,54 @@ class TaskGenQueueApiTest extends ExamIntegrationTest {
     }
 
     @Test
+    @DisplayName("확인(seen): 끝난 작업은 확인하면 목록에서 빠지고(멱등), 단일 조회는 그대로. 안 끝난 작업은 409, 없으면 404. 모두 확인은 끝난 것만")
+    void seen() throws Exception {
+        String auto3 = """
+                {"track":"DEV","minutes":40,"usage":"SELF","mode":"NOW",
+                 "topics":[{"situation":"환불 기간","trap":"당일 포함","trapType":"R1 경계 포함 여부","competencies":["control"]},
+                           {"situation":"정산 마감","trap":"마감 시각","trapType":"R2 업무 기준 시간대·마감","competencies":["usage"]},
+                           {"situation":"포인트 적립","trap":"반올림","trapType":"R3 회사 반올림·절사 규칙","competencies":["usage"]}]}
+                """;
+        JsonNode r = body(post("/api/admin/task-gen/auto").contentType(MediaType.APPLICATION_JSON).content(auto3), 202);
+        String a = r.get("jobIds").get(0).asText(), b = r.get("jobIds").get(1).asText(), c = r.get("jobIds").get(2).asText();
+        body(post("/api/admin/task-gen/" + a + "/cancel"), 200);
+        body(post("/api/admin/task-gen/" + b + "/cancel"), 200);
+
+        // 끝났는데 확인 안 한 작업은 목록에 남고, finishedAt 이 있고 seenAt 은 비어 있다
+        JsonNode list = body(get("/api/admin/task-gen/jobs"), 200);
+        assertThat(list).hasSize(3);
+        JsonNode endedA = body(get("/api/admin/task-gen/" + a), 200);
+        assertThat(endedA.get("finishedAt").isNull()).isFalse();
+        assertThat(endedA.get("seenAt").isNull()).isTrue();
+
+        JsonNode seenA = body(post("/api/admin/task-gen/" + a + "/seen"), 200);
+        assertThat(seenA.get("seenAt").isNull()).isFalse();
+        String firstSeenAt = seenA.get("seenAt").asText();
+        assertThat(body(post("/api/admin/task-gen/" + a + "/seen"), 200).get("seenAt").asText()).isEqualTo(firstSeenAt); // 멱등: 처음 시각 그대로
+        assertThat(body(get("/api/admin/task-gen/jobs"), 200).findValuesAsText("jobId")).containsExactlyInAnyOrder(b, c);
+        assertThat(body(get("/api/admin/task-gen/" + a), 200).get("status").asText()).isEqualTo("CANCELED"); // 주소로 직접 들어오면 그대로 보인다
+
+        body(post("/api/admin/task-gen/" + c + "/seen"), 409); // 아직 대기 중
+        body(post("/api/admin/task-gen/none/seen"), 404);
+
+        // 모두 확인: 끝난 b 만 바뀌고 대기 중 c 는 남는다
+        assertThat(body(post("/api/admin/task-gen/seen-all"), 200).get("seen").asInt()).isEqualTo(1);
+        assertThat(body(get("/api/admin/task-gen/jobs"), 200).findValuesAsText("jobId")).containsExactly(c);
+        assertThat(body(post("/api/admin/task-gen/seen-all"), 200).get("seen").asInt()).isZero();
+        // 묶음 조회(batchId)는 확인 여부와 상관없이 전부
+        assertThat(body(get("/api/admin/task-gen/jobs").param("batchId", r.get("batchId").asText()), 200)).hasSize(3);
+    }
+
+    @Test
     @DisplayName("관리자만: 일반 사용자는 모든 새 API 가 403, 입력이 잘못되면 400")
     void authAndValidation() throws Exception {
         for (var b : new MockHttpServletRequestBuilder[] {
                 post("/api/admin/task-gen/auto").contentType(MediaType.APPLICATION_JSON).content(TOPICS),
                 post("/api/admin/task-gen/auto/preview").contentType(MediaType.APPLICATION_JSON).content("{\"track\":\"DEV\",\"count\":3}"),
                 get("/api/admin/task-gen/jobs").param("active", "true"),
-                post("/api/admin/task-gen/x/cancel")}) {
+                post("/api/admin/task-gen/x/cancel"),
+                post("/api/admin/task-gen/x/seen"),
+                post("/api/admin/task-gen/seen-all")}) {
             mvc.perform(as(b, "USER")).andExpect(status().isForbidden());
         }
         body(post("/api/admin/task-gen/auto/preview").contentType(MediaType.APPLICATION_JSON).content("{\"track\":\"DEV\",\"count\":99}"), 400);

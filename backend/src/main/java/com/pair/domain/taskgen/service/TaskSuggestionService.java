@@ -145,7 +145,7 @@ public class TaskSuggestionService {
     }
 
     /**
-     * 자동 생성용: 서로 다른 주제 count 개(1~10)를 싼 모델 1번으로 받고, 모자라면 모자란 칸만 1번 더 받는다.
+     * 자동 생성용: 서로 다른 주제 count 개(1~20)를 싼 모델로 받고(한 호출에 10개까지, 넘으면 나눠 부른다), 모자라면 모자란 칸만 1번 더 받는다.
      * 함정 유형은 코드가 먼저 정해(types, 칸마다 하나) 모델에게 알려 주고, 응답의 유형은 그 값으로 덮어쓴다.
      * 기존 과제와 겹치거나(제목·요약), 서로 겹치거나, exclude 와 겹치거나, 빈 칸이 있는 후보는 코드가 거른다.
      * 그래도 모자라면 받은 만큼만 돌려준다(하나도 없으면 AiUnavailableException)
@@ -167,29 +167,38 @@ public class TaskSuggestionService {
             List<Integer> open = new ArrayList<>();
             for (int i = 0; i < count; i++) if (slots.get(i) == null) open.add(i);
             if (open.isEmpty()) break;
-            List<TrapTypeService.TrapType> want = open.stream().map(types::get).toList();
-            String system = systemMany(req.track(), want);
-            String user = userMany(req, minutes, seen, want);
-            List<Suggestion> got;
-            try {
-                got = callMany(system, user, open.size());
-            } catch (AiUnavailableException e) {
-                if (round == 0) throw e;
-                break; // 두 번째 호출이 실패하면 받은 것만 쓴다
+            boolean failed = false;
+            // 한 호출에 PER_CALL 개까지: 20개를 한 번에 받으면 출력이 길어 잘리거나 느려진다. 앞 묶음 결과는 seen 에 넣어 다음 묶음이 피한다
+            for (int from = 0; from < open.size(); from += PER_CALL) {
+                List<Integer> part = open.subList(from, Math.min(open.size(), from + PER_CALL));
+                List<TrapTypeService.TrapType> want = part.stream().map(types::get).toList();
+                String system = systemMany(req.track(), want);
+                String user = userMany(req, minutes, seen, want);
+                List<Suggestion> got;
+                try {
+                    got = callMany(system, user, part.size());
+                } catch (AiUnavailableException e) {
+                    if (round == 0 && from == 0) throw e;
+                    failed = true;
+                    break; // 첫 호출 뒤에 실패하면 받은 것만 쓴다
+                }
+                for (int k = 0; k < Math.min(part.size(), got.size()); k++) {
+                    Suggestion s = got.get(k);
+                    if (s == null || overlapsAny(s.situation(), seen)) continue;
+                    slots.set(part.get(k), new AutoTopicDto(s.situation(), s.trap(), types.get(part.get(k)).label(), s.competencies()));
+                    seen.add(s.situation());
+                }
             }
-            for (int k = 0; k < Math.min(open.size(), got.size()); k++) {
-                Suggestion s = got.get(k);
-                if (s == null || overlapsAny(s.situation(), seen)) continue;
-                slots.set(open.get(k), new AutoTopicDto(s.situation(), s.trap(), types.get(open.get(k)).label(), s.competencies()));
-                seen.add(s.situation());
-            }
+            if (failed) break;
         }
         List<AutoTopicDto> out = slots.stream().filter(java.util.Objects::nonNull).toList();
         if (out.isEmpty()) throw new AiUnavailableException("AI 가 쓸 만한 주제를 만들지 못했습니다. 잠시 후 다시 시도하세요.");
         return out;
     }
 
-    static final int MAX_MANY = 10;
+    static final int MAX_MANY = 20;
+    /** 주제 호출 한 번에 받는 최대 개수. 출력 토큰은 개수 × 450 (10개 = 4500) */
+    static final int PER_CALL = 10;
 
     private String systemMany(String track, List<TrapTypeService.TrapType> want) {
         StringBuilder sb = new StringBuilder("""
