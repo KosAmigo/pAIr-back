@@ -4,26 +4,22 @@ import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
-import org.springframework.mail.MailPreparationException;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
+import com.pair.infra.mail.MailClient;
 import com.pair.infra.mail.MailLayout;
 import com.pair.domain.auth.entity.AuthAccount;
 import com.pair.infra.mail.MailDeliveryException;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 
 @Component
 public class CompanyAccountMailService {
 
-    private final JavaMailSender mail;
+    private final MailClient mail;
     private final String mailFrom;
     private final String loginUrl;
 
-    public CompanyAccountMailService(JavaMailSender mail,
+    public CompanyAccountMailService(MailClient mail,
             @Value("${pair.auth.email-from:no-reply@pair.test}") String mailFrom,
             @Value("${pair.company.login-url:https://localhost:5173/login}") String loginUrl) {
         this.mail = mail;
@@ -76,18 +72,9 @@ public class CompanyAccountMailService {
 
     private void send(String to, String subject, String text, String html) {
         try {
-            MimeMessage mime = mail.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
-            helper.setFrom(mailFrom);
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(text, html);
-            helper.addInline(MailLayout.LOGO_CID, MailLayout.LOGO, "image/png");
-            mail.send(mime);
+            mail.send(mailFrom, to, subject, text, html);
         } catch (MailException e) {
             throw new MailDeliveryException(e);
-        } catch (MessagingException e) {
-            throw new MailPreparationException(e);
         }
     }
 }
