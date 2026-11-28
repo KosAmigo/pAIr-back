@@ -20,4 +20,7 @@ public interface CompanyRepository extends JpaRepository<Company, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from Company c where c.id = :id")
     Optional<Company> lockById(@Param("id") Long id);
+
+    /** 관리자 통계: 삭제하지 않은 회사 수 */
+    long countByDeletedAtIsNull();
 }

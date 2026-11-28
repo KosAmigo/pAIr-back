@@ -96,4 +96,8 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
             from ExamParticipant p where p.session.id in :sessionIds group by p.session.id
             """)
     List<SessionCounts> countBySessionIds(@Param("sessionIds") Collection<Long> sessionIds);
+
+    /** 관리자 통계: 기간 안에 시작하는(취소하지 않은) 회차의 대상자 수 */
+    @org.springframework.data.jpa.repository.Query("select count(p) from ExamParticipant p where p.session.canceledAt is null and p.session.startsAt >= :from and p.session.startsAt < :to")
+    long countInSessionsStartingBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
 }

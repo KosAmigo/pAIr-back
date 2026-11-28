@@ -25,4 +25,19 @@ public interface TaskGenCallRepository extends JpaRepository<TaskGenCall, String
     @Modifying
     @Query("update TaskGenCall c set c.providerBatchId = :batchId where c.id in :ids and c.status = 'PENDING'")
     int attachBatch(@Param("ids") Collection<String> ids, @Param("batchId") String batchId);
+
+    /** 관리자 통계: 과제 생성 모델 호출 합계 */
+    interface TokenSum {
+        long getCalls();
+        long getInputTokens();
+        long getOutputTokens();
+        long getCachedTokens();
+    }
+
+    @org.springframework.data.jpa.repository.Query("""
+            select count(c) as calls, coalesce(sum(c.inputTokens), 0) as inputTokens,
+                   coalesce(sum(c.outputTokens), 0) as outputTokens, coalesce(sum(c.cachedInputTokens), 0) as cachedTokens
+            from TaskGenCall c where c.createdAt >= :from and c.createdAt < :to
+            """)
+    TokenSum sumBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
 }
