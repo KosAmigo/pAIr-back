@@ -16,7 +16,8 @@ import java.util.regex.Pattern;
  * DEV 요구사항의 예시 줄을 설계도에서 코드로 만든다(기준 Q7, 2026-11-28). 작성 모델은 예시를 쓰지 않는다.
  * 줄 모양은 pAIr-front 가 표(매개변수 | 결과)로 그리는 약속이라 바꾸면 화면도 같이 바꾼다:
  * "예시 공통: …"(과제당 0~1줄), "예시 준비: {method,text}"(함수별 0~1줄), "예시: {method,args,expected}"(한 줄 JSON).
- * 예시 줄은 그 함수의 "만들 기능" 줄과 매개변수 줄 뒤에 모으고, 만들 기능 줄이 없는 함수(기존 메서드)의 예시는 맨 뒤에 둔다
+ * 화면에는 "추가:" 메서드(새로 만들 함수)의 예시만 낸다. "기존:" 메서드 예시는 설계도에 남아 공개 테스트·사례 근거로만 쓴다(Q7 2026-11-28 개정).
+ * 예시 줄은 그 함수의 "만들 기능" 줄과 매개변수 줄 뒤에 모으고, 만들 기능 줄이 없으면 맨 뒤에 둔다
  */
 final class ExampleLineService {
 
@@ -26,16 +27,43 @@ final class ExampleLineService {
     static final String SHAPE_CHECK = "예시가 짧은 표 모양임";
     static final int MAX_VALUE_CHARS = 30;
     static final int MAX_LIST_ITEMS = 3;
-    static final int MAX_PER_METHOD = 3;
-    static final int MAX_TOTAL = 6;
+    static final int MAX_PER_METHOD = 2;
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    /** 표시값 속 이름·코드 낱말(글자로 시작, 2자 이상). true/false/null 은 뺀다 */
+    private static final Pattern WORD = Pattern.compile("(?<![\\p{L}\\p{N}])(?!(?:true|false|null)(?![\\p{L}\\p{N}]))\\p{L}[\\p{L}\\p{N}_-]+");
+    /** 시각 표시값의 시간대 오프셋(10:00+09:00, 10:00Z) */
+    private static final Pattern OFFSET = Pattern.compile("\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:[+-]\\d{2}:?\\d{2}|Z)(?!\\w)");
     private static final Pattern FEATURE_LINE = Pattern.compile("^\\s*만들 기능\\s*:");
     /** 작성 모델이 쓴 예 줄: "예:"·"예시" 로 시작하거나 화살표가 있는 줄 */
     private static final Pattern WRITER_EXAMPLE = Pattern.compile("^\\s*(?:[-*]\\s*)?(?:예시|예\\s*\\d*\\s*[:)])|→");
     private static final Pattern API_METHOD = Pattern.compile("([A-Z]\\w*)\\.([A-Za-z_]\\w*)\\s*\\(");
 
     private ExampleLineService() {}
+
+    /** api 의 "Class.method" 들. added 면 "추가:" 만, 아니면 전부 */
+    static Set<String> apiMethods(BlueprintDto bp, boolean added) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String a : nz(bp.api())) {
+            if (a == null || (added && !a.strip().startsWith("추가"))) continue;
+            var m = API_METHOD.matcher(a);
+            if (m.find()) out.add(m.group(1) + "." + m.group(2));
+        }
+        return out;
+    }
+
+    /** 화면(요구사항)에 내는 예인가: method 가 "추가:" 메서드(클래스 없이 이름만 써도 인정). 표 칸 없는 옛 예는 예전처럼 낸다 */
+    static boolean shown(BlueprintDto bp, BlueprintDto.Example e) {
+        if (e == null) return false;
+        if (blank(e.method())) return true;
+        String m = e.method().strip();
+        return apiMethods(bp, true).stream().anyMatch(a -> a.equals(m) || a.endsWith("." + m));
+    }
+
+    /** 화면에 내는 예만 */
+    static List<BlueprintDto.Example> shownExamples(BlueprintDto bp) {
+        return nz(bp.examples()).stream().filter(e -> shown(bp, e)).toList();
+    }
 
     /** 사례 근거가 예 문장(입력 → 기대 출력)이면 그 예, 아니면 null (TaskReviewService.basisKind 와 같은 판정) */
     static BlueprintDto.Example basisExample(BlueprintDto bp, BlueprintDto.Case c) {
@@ -134,8 +162,8 @@ final class ExampleLineService {
         Map<String, List<String>> blocks = new LinkedHashMap<>();
         Map<String, BlueprintDto.ExampleSetup> setups = new LinkedHashMap<>();
         for (var s : nz(bp.exampleSetups())) if (s != null && !blank(s.method()) && !blank(s.text())) setups.putIfAbsent(s.method().strip(), s);
-        for (var e : nz(bp.examples())) {
-            if (e == null || (blank(e.input()) && blank(e.method()))) continue;
+        for (var e : shownExamples(bp)) {
+            if (blank(e.input()) && blank(e.method())) continue;
             String key = blank(e.method()) ? "" : e.method().strip();
             List<String> block = blocks.computeIfAbsent(key, k -> {
                 List<String> b = new ArrayList<>();
@@ -166,39 +194,39 @@ final class ExampleLineService {
     }
 
     /**
-     * 예시가 Q7 의 짧은 표 모양인지(경고만, 검증 전이라 실패로 두지 않는다): 표시값 하나가 30자 넘음, 목록 4개 이상,
-     * 함수당 4개 이상·전체 7개 이상, 예시 method 가 api 에 없음
+     * 화면에 내는 예시가 Q7 의 짧은 표 모양인지(경고만, 검증 전이라 실패로 두지 않는다): 추가 함수당 3개 이상, 표시값 하나가 30자 넘음,
+     * 목록 4개 이상, 표시값에 시간대 오프셋(+09:00, Z), 예시 method 가 api 에 없음
      */
     static GenCheckResultDto shapeCheck(BlueprintDto bp) {
         List<String> hits = new ArrayList<>();
-        Set<String> apiMethods = new LinkedHashSet<>();
-        for (String a : nz(bp.api())) {
-            if (a == null) continue;
-            var m = API_METHOD.matcher(a);
-            if (m.find()) apiMethods.add(m.group(1) + "." + m.group(2));
-        }
+        Set<String> apiMethods = apiMethods(bp, false);
         Map<String, Integer> perMethod = new LinkedHashMap<>();
-        int total = 0;
         for (var e : nz(bp.examples())) {
             if (e == null) continue;
-            total++;
             String method = blank(e.method()) ? "" : e.method().strip();
-            perMethod.merge(method, 1, Integer::sum);
             if (method.isEmpty()) hits.add("표 칸(method) 없는 예: " + clip(e.input()));
-            else if (!apiMethods.contains(method)) hits.add("api 에 없는 예시 method " + method);
+            else if (apiMethods.stream().noneMatch(a -> a.equals(method) || a.endsWith("." + method))) hits.add("api 에 없는 예시 method " + method);
+            if (!shown(bp, e)) continue; // 기존 메서드 예시는 화면에 안 나오니 모양을 보지 않는다
+            perMethod.merge(method, 1, Integer::sum);
             List<String> values = new ArrayList<>();
             for (var a : nz(e.args())) if (a != null && a.size() > 1) values.add(str(a.get(1)));
+            String input = GenTextService.norm(e.input());
+            for (String v : values) { // 표시값의 이름·코드가 실제 호출(input)에 없으면 화면 값과 숨은 테스트가 어긋난다(g25 03: 표시 "바다", 호출 feeFor("바일"))
+                var w = WORD.matcher(v);
+                while (w.find()) if (!input.contains(GenTextService.norm(w.group()))) hits.add(method + " 표시값 '" + w.group() + "' 이 입력 호출에 없음");
+            }
             values.add(str(e.expected()));
             for (String v : values) {
                 if (v.length() > MAX_VALUE_CHARS) hits.add(method + " 표시값 " + v.length() + "자: " + clip(v));
                 int items = listItems(v);
                 if (items > MAX_LIST_ITEMS) hits.add(method + " 목록 " + items + "개: " + clip(v));
+                if (OFFSET.matcher(v).find()) hits.add(method + " 표시값에 시간대 오프셋: " + clip(v));
             }
         }
         perMethod.forEach((m, n) -> {
             if (n > MAX_PER_METHOD) hits.add((m.isEmpty() ? "(method 없음)" : m) + " 예시 " + n + "개");
         });
-        if (total > MAX_TOTAL) hits.add("예시 전체 " + total + "개");
+        int total = perMethod.values().stream().mapToInt(Integer::intValue).sum();
         for (var s : nz(bp.exampleSetups())) {
             if (s != null && !blank(s.method()) && !apiMethods.contains(s.method().strip())) hits.add("api 에 없는 예시 준비 method " + s.method());
         }

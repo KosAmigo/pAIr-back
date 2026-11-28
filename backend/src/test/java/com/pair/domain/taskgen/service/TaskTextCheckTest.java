@@ -328,7 +328,7 @@ class TaskTextCheckTest {
         BlueprintDto b = TaskPipelineServiceTest.devBlueprint();
         var example = new BlueprintDto.Case("c1", "상황", "0.250", b.examples().get(0).input() + " → " + b.examples().get(0).expected());
         var fact = new BlueprintDto.Case("c2", "상황", "0.30", "7월 3일 접수 로그: 다른 입력의 기록");
-        assertThat(TaskReviewService.basisKind(b, example)).startsWith("예(요구사항 줄: ");
+        assertThat(TaskReviewService.basisKind(b, example)).startsWith("예(");
         assertThat(TaskReviewService.basisKind(b, fact)).isEqualTo("사실");
         assertThat(TaskPromptService.check("backing-cases")).contains("근거 종류가 \"사실\"").contains("끌어낼 수 있으면 충분").contains("stage");
         assertThat(TaskPromptService.blueprint(false, 40, "깊이")).contains("a fact from which the expected result can be derived").contains("the flaw would leak");

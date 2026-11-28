@@ -33,7 +33,7 @@ class ExampleLineServiceTest {
     }
 
     @Test
-    @DisplayName("Q7: 작성 모델이 쓴 예 줄은 빼고, 예시를 함수별로 만들 기능·매개변수 줄 뒤에 모은다(공통 줄은 첫 예시 묶음 앞, 기존 메서드 예시는 맨 뒤)")
+    @DisplayName("Q7: 작성 모델이 쓴 예 줄은 빼고, 예시를 함수별로 만들 기능·매개변수 줄 뒤에 모은다(공통 줄은 첫 예시 묶음 앞). 기존 메서드 예시는 내지 않는다")
     void placesExamplesUnderFeature() {
         var setup = new BlueprintDto.ExampleSetup("PassRegistry.availableCodes", "등록된 이용권: POOL-A 2026-06-30 만료, GYM-B 2026-06-01 만료");
         BlueprintDto b = bp(List.of(EXISTING, EX1, EX2), List.of(setup), "모든 날짜는 한국 날짜");
@@ -47,8 +47,7 @@ class ExampleLineServiceTest {
                 "예시 공통: 모든 날짜는 한국 날짜",
                 ExampleLineService.setupLine(setup),
                 ExampleLineService.line(EX1),
-                ExampleLineService.line(EX2),
-                ExampleLineService.line(EXISTING));
+                ExampleLineService.line(EX2));
         assertThat(TaskWritingService.featureLinesCheck(b, out).ok()).isTrue();
     }
 
@@ -69,7 +68,7 @@ class ExampleLineServiceTest {
     }
 
     @Test
-    @DisplayName("Q7 경고: 표시값 30자 초과, 목록 4개 이상, 함수당 4개·전체 7개 이상, api 에 없는 method 를 알린다(실패가 아니라 경고)")
+    @DisplayName("Q7 경고: 추가 함수당 3개 이상, 표시값 30자 초과, 목록 4개 이상, 시간대 오프셋, api 에 없는 method 를 알린다(실패가 아니라 경고). 기존 메서드 예는 모양을 안 본다")
     void shapeWarnings() {
         assertThat(ExampleLineService.shapeCheck(bp(List.of(EX1, EX2, EXISTING), List.of(), "")).ok()).isTrue();
 
@@ -79,10 +78,29 @@ class ExampleLineServiceTest {
         GenCheckResultDto r = ExampleLineService.shapeCheck(bp(List.of(longValue, longList, EX1, EX2, unknown), List.of(), ""));
         assertThat(r.ok()).isFalse();
         assertThat(r.needsRegeneration()).isFalse();
-        assertThat(r.detail()).contains("표시값 37자").contains("목록 4개").contains("PassRegistry.availableCodes 예시 4개").contains("api 에 없는 예시 method PassRegistry.countAvailable");
+        assertThat(r.detail()).contains("표시값 37자").contains("목록 4개").contains("PassRegistry.availableCodes 예시 4개").contains("api 에 없는 예시 method PassRegistry.countAvailable")
+                .contains("시간대 오프셋");
 
-        List<BlueprintDto.Example> seven = List.of(EX1, EX2, EX1, EXISTING, EXISTING, EXISTING, EX2);
-        assertThat(ExampleLineService.shapeCheck(bp(seven, List.of(), "")).detail()).contains("예시 전체 7개");
+        var offset = new BlueprintDto.Example(IN1, "1", "PassRegistry.availableCodes", List.of(List.of("visitDate", "2026-06-10T16:00Z")));
+        assertThat(ExampleLineService.shapeCheck(bp(List.of(offset), List.of(), "")).detail()).contains("시간대 오프셋");
+        var renamed = new BlueprintDto.Example("새 Batch에 load(\"바일;10000\") 뒤 feeFor(\"바일\")", "300", "PassRegistry.availableCodes", List.of(List.of("visitDate", "바다")));
+        assertThat(ExampleLineService.shapeCheck(bp(List.of(renamed), List.of(), "")).detail()).contains("표시값 '바다' 이 입력 호출에 없음");
+        var existingLong =new BlueprintDto.Example("x", "[\"A\", \"B\", \"C\", \"D\"]", "PassRegistry.size", List.of());
+        assertThat(ExampleLineService.shapeCheck(bp(List.of(EX1, existingLong, existingLong, existingLong), List.of(), "")).ok()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Q7 개정: 기존 메서드 예는 화면에 안 나오니 사례 근거로 쓰면 설계도를 다시 받고, 근거 검사도 실패한다")
+    void existingExampleIsNotBasis() {
+        var c = new BlueprintDto.Case("sizeAfterRegister", "register 뒤 size()", "1", EXISTING.input() + " → 1");
+        BlueprintDto b = new BlueprintDto("t", "s", "pass", "기능 구현", List.of(), "상황", List.of("기존: PassRegistry.size(): int", "추가: " + SIG), List.of(),
+                List.of(EXISTING, EX1, EX2), List.of(), List.of(), List.of(), null, List.of(), List.of(), List.of(), List.of(), List.of(c), List.of(), List.of());
+        assertThat(ExampleLineService.shown(b, EXISTING)).isFalse();
+        assertThat(DevBlueprintService.problems(b)).anyMatch(p -> p.contains("기존 메서드 예") && p.contains("사실(facts)"));
+        String req = String.join("\n", ExampleLineService.withExamples(b, List.of()));
+        assertThat(req).doesNotContain("PassRegistry.size");
+        assertThat(TaskWritingService.basisCheck(b, req).ok()).isFalse();
+        assertThat(TaskWritingService.factsCheck(b, "", req).ok()).isTrue();
     }
 
     @Test

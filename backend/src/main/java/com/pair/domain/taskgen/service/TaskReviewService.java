@@ -118,7 +118,8 @@ final class TaskReviewService {
         sb.append("[예(입력은 숨은 테스트용 호출이고, 요구사항에는 | 뒤의 표 줄로 들어감)]\n");
         if (bp.exampleNote() != null && !bp.exampleNote().isBlank()) sb.append("- ").append(ExampleLineService.NOTE).append(' ').append(bp.exampleNote()).append('\n');
         nz(bp.exampleSetups()).forEach(s -> sb.append("- ").append(ExampleLineService.setupLine(s)).append('\n'));
-        bp.examples().forEach(e -> sb.append("- ").append(e.input()).append(" → ").append(e.expected()).append(" | ").append(ExampleLineService.line(e)).append('\n'));
+        bp.examples().forEach(e -> sb.append("- ").append(e.input()).append(" → ").append(e.expected()).append(" | ")
+                .append(ExampleLineService.shown(bp, e) ? ExampleLineService.line(e) : "(기존 메서드: 요구사항에 안 나옴, 공개 테스트만)").append('\n'));
         sb.append("[숨은 테스트·문항 사례]\n");
         bp.cases().forEach(c -> sb.append("- ").append(c.name()).append(" | ").append(c.situation()).append(" → ").append(c.expected()).append(" | 근거: ").append(c.basis()).append('\n'));
         return run(Check.BLUEPRINT, Stage.REVIEW, sb.toString()).violations().stream().filter(Violation::mustFix)
@@ -244,7 +245,8 @@ final class TaskReviewService {
     /** 사례의 근거 문장이 요구사항 예(입력 → 기대 출력)이면 "예", 아니면 "사실" */
     static String basisKind(BlueprintDto bp, BlueprintDto.Case c) {
         var e = ExampleLineService.basisExample(bp, c);
-        return e == null ? "사실" : "예(요구사항 줄: " + ExampleLineService.line(e) + ")";
+        if (e == null) return "사실";
+        return ExampleLineService.shown(bp, e) ? "예(요구사항 줄: " + ExampleLineService.line(e) + ")" : "예(기존 메서드라 요구사항에 안 나오고 공개 테스트에만 있음)";
     }
 
     private static String flaws(BlueprintDto bp) {

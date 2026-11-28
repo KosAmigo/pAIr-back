@@ -33,6 +33,12 @@ final class DevBlueprintService {
         }
         bad.addAll(addedMethodCases(b));
         bad.addAll(exampleBasisCases(b));
+        for (var c : b.cases()) { // Q7 개정: 기존 메서드 예는 화면에 안 나오니 사례 근거가 될 수 없다
+            var e = ExampleLineService.basisExample(b, c);
+            if (e != null && !ExampleLineService.shown(b, e)) {
+                bad.add("사례 " + c.name() + " 의 근거가 기존 메서드 예 '" + e.input() + " → " + e.expected() + "' 입니다. 기존 메서드 예는 요구사항에 나오지 않으니(공개 테스트에만 있음) 그 결과를 끌어낼 수 있는 기록을 사실(facts)로 두고 근거로 쓰세요");
+            }
+        }
         bad.addAll(pinnedJudgments(b));
         bad.addAll(flawHidden(b));
         bad.addAll(flawCasesInRequirements(b));

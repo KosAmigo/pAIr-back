@@ -107,7 +107,7 @@ class TaskPipelineServiceTest {
 
     static DevWritingDto devWriting() {
         return new DevWritingDto(List.of("결제 화면 코드에 결제액 조회를 추가하세요. " + F_DIGITS, F_SETTLE + " " + F_REPORT + " 어느 쪽으로 정할지 설명하세요."),
-                List.of(ExampleLineService.line(EX1), ExampleLineService.line(EX2)), "", "AI 수정이 다른 입력에서도 맞는지 어떻게 확인했나요?");
+                List.of("결제 화면에서 할인 합계를 조회한다.", ExampleLineService.line(EX1), ExampleLineService.line(EX2)), "", "AI 수정이 다른 입력에서도 맞는지 어떻게 확인했나요?");
     }
 
     static DevCodeDto devCode() {

@@ -115,7 +115,7 @@ final class TaskWritingService {
         String ex = GenTextService.norm(examplesText);
         List<String> missing = new ArrayList<>();
         for (var f : b.facts()) if (!GenTextService.containsLike(corpus, f.text())) missing.add(f.text());
-        for (var e : b.examples()) {
+        for (var e : ExampleLineService.shownExamples(b)) { // 화면에 내는 예(추가 메서드)만. 기존 메서드 예는 공개 테스트에만 있다
             String line = ExampleLineService.line(e);
             if (!ex.contains(GenTextService.norm(line))) missing.add(line);
         }
@@ -132,7 +132,9 @@ final class TaskWritingService {
         for (var c : b.cases()) {
             var example = ExampleLineService.basisExample(b, c); // 근거가 예면 요구사항에 그 예 줄(코드가 만든 표 줄)이 있으면 된다
             if (c.basis() == null || c.basis().isBlank()) missing.add(c.name() + ": 근거 문장(basis)이 없음");
-            else if (example != null) {
+            else if (example != null && !ExampleLineService.shown(b, example)) {
+                missing.add(c.name() + ": 근거가 화면에 안 나오는 기존 메서드 예입니다(" + example.input() + "). 사실로 옮겨야 합니다");
+            } else if (example != null) {
                 String line = ExampleLineService.line(example);
                 if (!GenTextService.norm(visibleText).contains(GenTextService.norm(line))) missing.add(c.name() + ": " + line);
             } else if (!GenTextService.containsLike(visibleText, c.basis())) missing.add(c.name() + ": " + c.basis());

@@ -77,6 +77,16 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         return EnumSet.noneOf(Stage.class);
     }
 
+    /**
+     * 설계도 단계만 돌린다(형식 검사·조기 점검과 그 재시도 포함, 2026-11-28: 예시 표만 싸게 확인하는 라이브 테스트용).
+     * 돌려준 Run 의 blueprint()·usage()·blueprintRetries() 로 결과를 본다. 글·코드·정답 단계는 돌지 않는다
+     */
+    Run<DevDraftDto> blueprintOnly(TaskGenRequest form) {
+        DevRun run = new DevRun(form, new StageCallService(ai, props, true), props.materialGate());
+        run.bp = run.blueprint("");
+        return run;
+    }
+
     private static final class DevRun implements Run<DevDraftDto> {
         private final TaskGenRequest form;
         private final StageCallService calls;

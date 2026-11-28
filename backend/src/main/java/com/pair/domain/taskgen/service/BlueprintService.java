@@ -42,7 +42,8 @@ final class BlueprintService {
         }
         for (var f : nz(b.flaws())) required.add(f.evidence());
         for (var c : nz(b.cases())) { // 사례의 근거는 반드시 응시자 자료에 들어간다(M2)
-            if (!biz && ExampleLineService.basisExample(b, c) != null) continue; // 근거가 예면 코드가 요구사항 예 줄로 넣는다(Q7: 설명에 Java 호출 문장을 넣지 않는다)
+            var example = biz ? null : ExampleLineService.basisExample(b, c);
+            if (example != null && ExampleLineService.shown(b, example)) continue; // 근거가 예면 코드가 요구사항 예 줄로 넣는다(Q7: 설명에 Java 호출 문장을 넣지 않는다)
             required.add(c.basis());
         }
         for (String r : required) {
