@@ -366,6 +366,27 @@ class AuthIntegrationTest extends BearerIntegrationTest {
     }
 
     @Test
+    @DisplayName("내 정보 수정: 이름만 바뀌고(앞뒤 공백 제거) 로그인은 유지된다. 빈 이름·51자·비로그인은 거부")
+    void updatesOwnNameAndKeepsSession() throws Exception {
+        JsonNode session = signupAccount("rename@example.com");
+        String token = session.path("token").asText();
+
+        mvc.perform(profileUpdate(token, "  새 이름  "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("새 이름"))
+                .andExpect(jsonPath("$.email").value("rename@example.com"));
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("새 이름"));
+
+        mvc.perform(profileUpdate(token, "   ")).andExpect(status().isBadRequest());
+        mvc.perform(profileUpdate(token, "가".repeat(51))).andExpect(status().isBadRequest());
+        mvc.perform(profileUpdate(null, "남의 이름")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.name").value("새 이름"));
+    }
+
+    @Test
     void passwordChangeRequiresCurrentPasswordAndRevokesAllDevices() throws Exception {
         String email = "password-change@example.com";
         JsonNode first = signupAccount(email);
@@ -578,6 +599,13 @@ class AuthIntegrationTest extends BearerIntegrationTest {
                         .content(json.writeValueAsString(new LoginRequest(email, password))))
                 .andExpect(status().isOk()).andReturn();
         return json.readTree(result.getResponse().getContentAsString());
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder profileUpdate(String token, String name)
+            throws Exception {
+        var request = patch("/api/auth/me").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new com.pair.domain.auth.dto.ProfileUpdateRequest(name)));
+        return token == null ? request : request.header("Authorization", "Bearer " + token);
     }
 
     private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder passwordChange(

@@ -6,6 +6,7 @@ import com.pair.domain.auth.dto.EmailVerificationResponse;
 import com.pair.domain.auth.dto.LoginRequest;
 import com.pair.domain.auth.dto.OnboardingEmailVerificationRequest;
 import com.pair.domain.auth.dto.PasswordChangeRequest;
+import com.pair.domain.auth.dto.ProfileUpdateRequest;
 import com.pair.domain.auth.dto.RefreshRequest;
 import com.pair.domain.auth.dto.SignupRequest;
 import com.pair.domain.auth.dto.UserResponse;
@@ -86,6 +87,13 @@ public class AuthController {
     public UserResponse me(@RequestHeader(name = "Authorization", required = false) String authorization) {
         return auth.findUser(bearerToken(authorization))
                 .orElseThrow(() -> new UnauthorizedException("로그인이 필요합니다."));
+    }
+
+    /** 내 정보 수정(이름). 바뀐 회원 정보를 반환한다. */
+    @PatchMapping("/me")
+    public UserResponse updateMe(@RequestHeader(name = "Authorization", required = false) String authorization,
+            @Valid @RequestBody ProfileUpdateRequest request) {
+        return auth.updateProfile(bearerToken(authorization), request);
     }
 
     /** Refresh Token을 교체하고 새로운 토큰 쌍을 반환한다. */

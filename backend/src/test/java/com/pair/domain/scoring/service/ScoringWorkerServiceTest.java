@@ -26,11 +26,24 @@ class ScoringWorkerServiceTest {
     @BeforeEach
     void setUp() {
         ScoringQueueProperties props = new ScoringQueueProperties(true, 1, 3, Duration.ofSeconds(30), Duration.ofMinutes(15), null);
-        worker = new ScoringWorkerService(queue, scoring, props);
+        worker = new ScoringWorkerService(queue, scoring, props, Duration.ofSeconds(5));
     }
 
     private static ScoringJobDto job(int attempt) {
         return new ScoringJobDto("1-0", "42", attempt);
+    }
+
+    @Test
+    @DisplayName("Redis 에서 꺼내지 못하면 지표를 0 으로, 다시 되면 1 로 둔다")
+    void queueUpFlagFollowsRedis() {
+        when(queue.take(any())).thenThrow(new IllegalStateException("redis down"));
+        org.assertj.core.api.Assertions.assertThat(worker.pollOnce()).isFalse();
+        org.assertj.core.api.Assertions.assertThat(worker.queueUp()).isZero();
+
+        org.mockito.Mockito.reset(queue);
+        when(queue.take(any())).thenReturn(java.util.Optional.empty());
+        org.assertj.core.api.Assertions.assertThat(worker.pollOnce()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(worker.queueUp()).isEqualTo(1);
     }
 
     @Test

@@ -88,6 +88,14 @@ public class ApiExceptionHandler {
         return body(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
     }
 
+    /** AI 채팅을 1분에 너무 많이 보냄(1인 또는 서비스 전체) */
+    @ExceptionHandler(com.pair.domain.attempt.exception.TooManyChatsException.class)
+    ResponseEntity<Map<String, String>> tooManyChats(com.pair.domain.attempt.exception.TooManyChatsException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(org.springframework.http.HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(Map.of("message", e.getMessage()));
+    }
+
     /** 빌드·실행을 너무 자주 누름 */
     @ExceptionHandler(com.pair.domain.attempt.exception.TooManyRunsException.class)
     ResponseEntity<Map<String, String>> tooManyRuns(RuntimeException e) {

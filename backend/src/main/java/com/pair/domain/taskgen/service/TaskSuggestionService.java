@@ -1,5 +1,6 @@
 package com.pair.domain.taskgen.service;
 
+import com.pair.domain.taskgen.dto.AutoTopicDto;
 import com.pair.domain.taskgen.exception.TooManyJobsException;
 import com.pair.global.config.TaskGenProperties;
 import java.time.Clock;
@@ -55,8 +56,9 @@ public class TaskSuggestionService {
     private static final Set<String> COMPETENCY_KEYS = RubricService.ITEMS.stream().map(RubricService.Item::key).collect(Collectors.toUnmodifiableSet());
     private static final String COMPETENCY_HELP = RubricService.ITEMS.stream().map(i -> i.key() + "(" + i.name() + ")").collect(Collectors.joining(", "));
 
-    private static final String DEV_TYPES = "동시성, 경계값, 반올림·부동소수점, 캐시 무효화, 시간대·날짜 계산, 정렬 기준 누락, null·빈 값 처리, 정수 오버플로, 예외를 삼킴, 상태 전이 누락, 중복 처리(멱등성)";
-    private static final String BIZ_TYPES = "단위 혼동, %와 %p, 상관과 인과, 기간 길이 차이, 표본 편향, 평균의 함정(가중평균), 기준 시점 불일치, 누락·중복 데이터, 세금·수수료 포함 여부, 누적과 증분 혼동";
+    /** 설계도 결함 유형 목록(resources/taskgen/flaw-types-dev.md·-biz.md, 2026-11-26 g7·g8)과 같은 이름. 일반 버그·일반 상식 함정은 뺐다 */
+    static final String DEV_TYPES = "경계 포함 여부, 업무 기준 시간대·마감, 회사 반올림·절사 규칙, 적용 순서, 포함·제외 기준, 업무 파일 형식";
+    static final String BIZ_TYPES = "누계 대 월별 값, 실적 정의, 집계 기준, 단수 처리, 심사 지표 정의, 합산 기준(가중), 경계 포함 여부, 적용 순서";
 
     private static final String SYSTEM = """
             당신은 AI 활용 역량 평가 플랫폼의 과제 기획자입니다. 응시자가 AI 어시스턴트의 답을 그대로 믿지 않고 검증하는지 보는 과제에서, 무엇을 낼지(상황과 함정) 후보를 추천합니다.
@@ -76,9 +78,11 @@ public class TaskSuggestionService {
     private static final String NO_TOPIC_RULES = "[주제 없음] 주제가 정해지지 않았습니다. topicCheck 는 null 로 두고, 3개 후보의 주제도 서로 다양하게 고릅니다.\n";
 
     private static final String DEV_RULES = "[개발 과제 조건] 순수 Java 21 + JUnit 5 로 재현되는 버그만 추천합니다. 외부 라이브러리·DB·네트워크·Spring 이 필요한 주제는 안 됩니다.\n"
+            + "함정은 자료(메모·정산 기록)에만 있는 회사 업무 규칙이 AI 의 기본 구현과 다른 곳입니다. 정수 넘침·부동소수점·null 처리·캐시 같은 일반 버그는 추천하지 않습니다.\n"
             + "함정 유형은 이 중에서 고릅니다: " + DEV_TYPES;
 
     private static final String BIZ_RULES = "[비개발 과제 조건] CSV 와 문서로 검산할 수 있는 함정만 추천합니다. 정답이 문서 여러 개를 함께 봐야 나오는 주제여야 합니다.\n"
+            + "함정은 자료에만 있는 회사 정의(실적 정의, 집계 기준, 단수 처리, 적용 순서 등)가 숫자의 상식적인 해석과 다른 곳입니다. 부가세 1.1 나누기·단위 환산 같은 일반 상식 함정은 추천하지 않습니다.\n"
             + "함정 유형은 이 중에서 고릅니다: " + BIZ_TYPES;
 
     private final TaskGenAiService ai;
@@ -138,6 +142,125 @@ public class TaskSuggestionService {
         if (merged.isEmpty()) throw new AiUnavailableException("AI 가 쓸 만한 추천을 만들지 못했습니다. 잠시 후 다시 시도하세요.");
         TopicCheck check = second.topicCheck != null ? second.topicCheck : first.topicCheck;
         return new Result(check, new ArrayList<>(merged.subList(0, Math.min(COUNT, merged.size()))));
+    }
+
+    /**
+     * 자동 생성용: 서로 다른 주제 count 개(1~10)를 싼 모델 1번으로 받고, 모자라면 모자란 칸만 1번 더 받는다.
+     * 함정 유형은 코드가 먼저 정해(types, 칸마다 하나) 모델에게 알려 주고, 응답의 유형은 그 값으로 덮어쓴다.
+     * 기존 과제와 겹치거나(제목·요약), 서로 겹치거나, exclude 와 겹치거나, 빈 칸이 있는 후보는 코드가 거른다.
+     * 그래도 모자라면 받은 만큼만 돌려준다(하나도 없으면 AiUnavailableException)
+     */
+    @Transactional(readOnly = true)
+    public List<AutoTopicDto> suggestMany(Request raw, int minutes, int count, List<TrapTypeService.TrapType> types, long adminId) {
+        Request req = validated(raw);
+        if (count < 1 || count > MAX_MANY) throw new IllegalArgumentException("count 는 1~" + MAX_MANY + " 이어야 합니다.");
+        if (types.size() != count) throw new IllegalArgumentException("함정 유형은 주제마다 하나씩 필요합니다.");
+        checkRate(adminId);
+        List<String> seen = new ArrayList<>(); // 겹침 비교 대상: 기존 과제 제목·요약, 제외 목록, 이미 고른 주제
+        for (Task t : records.findTop50ByOrderByIdDesc()) {
+            seen.add(t.getTitle());
+            if (t.getSummary() != null && !t.getSummary().isBlank()) seen.add(t.getSummary());
+        }
+        seen.addAll(req.exclude());
+        List<AutoTopicDto> slots = new ArrayList<>(java.util.Collections.nCopies(count, (AutoTopicDto) null));
+        for (int round = 0; round < 2; round++) {
+            List<Integer> open = new ArrayList<>();
+            for (int i = 0; i < count; i++) if (slots.get(i) == null) open.add(i);
+            if (open.isEmpty()) break;
+            List<TrapTypeService.TrapType> want = open.stream().map(types::get).toList();
+            String system = systemMany(req.track(), want);
+            String user = userMany(req, minutes, seen, want);
+            List<Suggestion> got;
+            try {
+                got = callMany(system, user, open.size());
+            } catch (AiUnavailableException e) {
+                if (round == 0) throw e;
+                break; // 두 번째 호출이 실패하면 받은 것만 쓴다
+            }
+            for (int k = 0; k < Math.min(open.size(), got.size()); k++) {
+                Suggestion s = got.get(k);
+                if (s == null || overlapsAny(s.situation(), seen)) continue;
+                slots.set(open.get(k), new AutoTopicDto(s.situation(), s.trap(), types.get(open.get(k)).label(), s.competencies()));
+                seen.add(s.situation());
+            }
+        }
+        List<AutoTopicDto> out = slots.stream().filter(java.util.Objects::nonNull).toList();
+        if (out.isEmpty()) throw new AiUnavailableException("AI 가 쓸 만한 주제를 만들지 못했습니다. 잠시 후 다시 시도하세요.");
+        return out;
+    }
+
+    static final int MAX_MANY = 10;
+
+    private String systemMany(String track, List<TrapTypeService.TrapType> want) {
+        StringBuilder sb = new StringBuilder("""
+                당신은 AI 활용 역량 평가 플랫폼의 과제 기획자입니다. 응시자가 AI 어시스턴트의 답을 그대로 믿지 않고 검증하는지 보는 과제를 여러 개 기획합니다. 과제마다 상황(주제)과 함정 하나를 정합니다.
+                규칙:
+                - suggestions 는 정확히 %d개이고, 순서대로 아래 지정한 함정 유형 하나씩을 씁니다(i번째 후보는 i번째 유형). 후보끼리 상황이 서로 달라야 하고, 이미 있는 과제나 제외 목록과 겹치면 안 됩니다.
+                - 함정은 AI 가 틀리기 쉬운 지점이어야 하고, 응시자가 검증해서 잡아낼 수 있어야 합니다.
+                - 실제 회사 이름은 쓰지 않고, 모든 글은 한국어로 씁니다.
+                - situation 은 어떤 상황의 과제인지 한 줄(50자 이내), trap 은 지정한 유형으로 구체적으로 어떤 오류가 숨어 있는지 한 줄(100자 이내), trapType 은 지정한 유형 이름 그대로, why 는 AI 가 왜 이걸 틀리기 쉬운지 한 줄(80자 이내)입니다.
+                - competencies 는 이 과제가 특히 보는 역량 key 1~2개입니다. 가능한 key: %s
+                """.formatted(want.size(), COMPETENCY_HELP));
+        sb.append(track.equals("DEV") ? DEV_RULES.substring(0, DEV_RULES.indexOf("함정 유형은 이 중에서")) : BIZ_RULES.substring(0, BIZ_RULES.indexOf("함정 유형은 이 중에서")));
+        sb.append("\n[지정한 함정 유형(순서대로)]\n");
+        for (int i = 0; i < want.size(); i++) sb.append(i + 1).append(". ").append(want.get(i).label()).append(" — ").append(want.get(i).description()).append('\n');
+        return sb.toString();
+    }
+
+    private static String userMany(Request req, int minutes, List<String> seen, List<TrapTypeService.TrapType> want) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("직군 구분: ").append(req.track().equals("DEV") ? "개발(DEV)" : "비개발(BIZ)").append('\n');
+        sb.append("제한 시간: ").append(minutes).append("분\n");
+        if (!seen.isEmpty()) {
+            sb.append("\n이미 있는 과제와 제외할 주제(이것들과 겹치지 않게):\n");
+            for (String e : seen.stream().limit(80).toList()) sb.append("- ").append(e).append('\n');
+        }
+        sb.append("\n위 조건으로 서로 다른 주제 ").append(want.size()).append("개를 지정한 유형 순서대로 추천해 주세요.");
+        return sb.toString();
+    }
+
+    /** 한 번 부르고 빈 칸이 있는 후보를 자리 그대로(null) 돌려준다. 순서가 곧 유형 칸이다 */
+    private List<Suggestion> callMany(String system, String user, int n) {
+        int maxTokens = Math.max(props.suggestMaxTokens(), 450 * n);
+        TaskGenAiService.Output<Result> out = ai.generate(props.suggestModel(), system, user, Result.class, maxTokens, props.suggestEffort());
+        log.info("자동 생성 주제 호출: model={} n={} 입력 토큰={} 출력 토큰={}", props.suggestModel(), n, out.inputTokens(), out.outputTokens());
+        List<Suggestion> res = new ArrayList<>();
+        if (out.value() == null || out.value().suggestions() == null) return res;
+        for (Suggestion s : out.value().suggestions()) {
+            if (s == null) {
+                res.add(null);
+                continue;
+            }
+            Suggestion c = new Suggestion(clean(s.situation()), clean(s.trap()), clean(s.trapType()), competencies(s.competencies()), clean(s.why()));
+            res.add(c.situation().isEmpty() || c.trap().isEmpty() || c.competencies().isEmpty() ? null : c);
+        }
+        return res;
+    }
+
+    private static boolean overlapsAny(String text, List<String> seen) {
+        for (String o : seen) if (overlaps(text, o)) return true;
+        return false;
+    }
+
+    /** 두 글이 같은 주제로 볼 만큼 겹치는가: 공백·기호를 뺀 글이 서로 들어 있거나, 두 글자 조각의 겹침이 0.6 이상 */
+    static boolean overlaps(String a, String b) {
+        String x = norm(a), y = norm(b);
+        if (x.length() < 2 || y.length() < 2) return false;
+        if (x.contains(y) || y.contains(x)) return true;
+        Set<String> gx = bigrams(x), gy = bigrams(y);
+        long common = gx.stream().filter(gy::contains).count();
+        double union = gx.size() + gy.size() - common;
+        return union > 0 && common / union >= 0.6;
+    }
+
+    private static String norm(String s) {
+        return s == null ? "" : s.toLowerCase().replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
+    private static Set<String> bigrams(String s) {
+        Set<String> out = new HashSet<>();
+        for (int i = 0; i + 2 <= s.length(); i++) out.add(s.substring(i, i + 2));
+        return out;
     }
 
     private record Called(TopicCheck topicCheck, List<Suggestion> suggestions) {}

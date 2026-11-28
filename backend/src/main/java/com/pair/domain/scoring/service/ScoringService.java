@@ -15,16 +15,20 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.pair.infra.ai.AiUnavailableException;
-import com.pair.infra.ai.ClaudeJudgeClient;
+import com.pair.infra.ai.ModelClient;
+import com.pair.infra.ai.ModelJudge;
 import com.pair.infra.ai.Judge;
-import com.pair.infra.ai.OpenAiJudgeClient;
 import com.pair.domain.attempt.dto.AttemptStateDto;
 import com.pair.domain.attempt.repository.AttemptStateRepository;
 import com.pair.domain.attempt.dto.ChatTurnStateDto;
@@ -71,43 +75,85 @@ public class ScoringService {
     private final ScoringResultRepository records;
     private final com.pair.domain.question.service.QuestionService questions;
     /** 채점 작업(실제 응시 채점, 채점 툴 실험 채점). 여러 건을 동시에 채점한다. */
-    private final ExecutorService executor;
+    private final ThreadPoolExecutor executor;
+    /** 서버를 끌 때 하던 채점이 끝나기를 기다리는 최대 시간 */
+    private final Duration shutdownWait;
     /** 채점 큐(Redis). pair.scoring-queue.enabled=true 일 때만 있다. */
     private final ObjectProvider<ScoringQueueService> queues;
-    /** 두 채점 모델을 동시에 부를 때 쓴다. */
-    private final ExecutorService judgePool = Executors.newFixedThreadPool(8, r -> {
-        Thread t = new Thread(r, "judge");
-        t.setDaemon(true);
-        return t;
-    });
+    /**
+     * 채점 모델 호출 풀. 채점 1건이 모델 호출을 여러 번(모델별 calls 합) 동시에 하므로 "동시 채점 수 × 채점 1건의 호출 수"만큼 둔다.
+     * 예전처럼 8개로 고정하면 동시 채점 수를 늘려도 호출이 이 풀에서 줄을 서서 처리량이 늘지 않았다(부하 테스트 2026-11-26).
+     */
+    private final ExecutorService judgePool;
 
     public ScoringService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
-                          ClaudeJudgeClient claudeJudge, OpenAiJudgeClient openAiJudge, PairProperties props,
+                          ModelClient models, PairProperties props,
                           PromptVersionStateRepository prompts, ReferenceDocService referenceDocs, ScoringResultRepository records,
                           com.pair.domain.question.service.QuestionService questions,
-                          ObjectProvider<ScoringQueueService> queues) {
+                          ObjectProvider<ScoringQueueService> queues,
+                          @Value("${pair.scoring.shutdown-wait:90s}") Duration shutdownWait) {
         this.queues = queues;
+        this.shutdownWait = shutdownWait;
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
-        this.judges = List.of(claudeJudge, openAiJudge);
+        this.judges = List.of(new ModelJudge("claude", props.judge().claude(), models), new ModelJudge("openai", props.judge().openai(), models));
         this.props = props;
         this.prompts = prompts;
         this.referenceDocs = referenceDocs;
         this.records = records;
         this.questions = questions;
         int parallel = props.grader() == null || props.grader().parallel() < 1 ? 4 : props.grader().parallel();
-        this.executor = Executors.newFixedThreadPool(parallel, r -> {
+        int judgeThreads = judgeThreads(parallel, judges);
+        this.judgePool = Executors.newFixedThreadPool(judgeThreads, r -> {
+            Thread t = new Thread(r, "judge");
+            t.setDaemon(true);
+            return t;
+        });
+        log.info("채점: 동시 {}건, 채점 모델 호출 스레드 {}개", parallel, judgeThreads);
+        this.executor = new ThreadPoolExecutor(parallel, parallel, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>(), r -> {
             Thread t = new Thread(r, "scoring");
             t.setDaemon(true);
             return t;
         });
     }
 
+    /** 동시 채점 수 × 채점 1건의 모델 호출 수(모델별 calls 합). 최소 8 */
+    static int judgeThreads(int parallel, List<Judge> judges) {
+        int perScoring = judges.stream().mapToInt(Judge::calls).sum();
+        return Math.max(8, parallel * Math.max(1, perScoring));
+    }
+
+    /**
+     * 안전한 종료: 하던 채점은 shutdownWait 까지 끝내게 두고, 아직 시작하지 않은 채점은 버린다.
+     * 버린 응시는 SCORING 으로 남아 다음 서버 시작 때 ScoringRecoveryService 가 다시 맡긴다.
+     * 채점 모델 호출 풀(judgePool)은 하던 채점이 쓰므로 채점이 끝난 뒤에 닫는다.
+     */
     @PreDestroy
     void shutdown() {
-        executor.shutdownNow();
+        int dropped = drain(executor, shutdownWait);
+        if (dropped > 0) log.info("시작하지 않은 채점 {}건은 다음 서버 시작 때 다시 맡깁니다", dropped);
         judgePool.shutdownNow();
+    }
+
+    /**
+     * 새 작업을 받지 않고, 대기 중인 작업은 버리고, 실행 중인 작업은 wait 까지 기다린다. 그래도 남으면 중단시킨다.
+     * @return 버린(시작하지 않은) 작업 수
+     */
+    static int drain(ThreadPoolExecutor pool, Duration wait) {
+        pool.shutdown();
+        int dropped = pool.getQueue().size();
+        pool.getQueue().clear();
+        try {
+            if (!pool.awaitTermination(wait.toMillis(), TimeUnit.MILLISECONDS)) {
+                log.warn("채점이 {}초 안에 끝나지 않아 중단합니다 (해당 응시는 다음 서버 시작 때 다시 채점)", wait.toSeconds());
+                pool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            pool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        return dropped;
     }
 
     /**

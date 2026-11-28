@@ -3,6 +3,7 @@ package com.pair.domain.credit.service;
 import com.pair.domain.credit.dto.ConfirmationDto;
 import com.pair.domain.credit.dto.ProductResponse;
 import com.pair.domain.credit.dto.PurchaseResponse;
+import com.pair.domain.credit.dto.RefundDto;
 import com.pair.domain.credit.entity.CreditPurchase;
 import com.pair.domain.credit.repository.CreditPurchaseRepository;
 import com.pair.infra.payment.PaymentRejectedException;
@@ -25,6 +26,10 @@ import com.pair.global.error.ConflictException;
 
 @Service
 public class CreditPurchaseService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CreditPurchaseService.class);
+    /** 결제 승인 후 환불할 수 있는 기간 (7일을 시각으로 센다) */
+    public static final Duration REFUND_WINDOW = Duration.ofHours(168);
+    private static final String REFUND_REASON = "고객 요청 환불";
     /** 토스에서 끝났고 더 승인될 수 없는 결제 상태 */
     private static final Set<String> ENDED_STATUSES = Set.of("ABORTED", "EXPIRED", "CANCELED");
     private static final List<ProductResponse> PRODUCTS = List.of(
@@ -133,14 +138,96 @@ public class CreditPurchaseService {
         return confirm(userId, orderId, info.paymentKey(), info.amount());
     }
 
-    @Transactional
+    /**
+     * 환불: 결제 승인 후 168시간 안에, 잔액이 구매한 크레딧 이상이면 전액 환불한다(부분 취소 없음).
+     * 1) 잠그고 확인한 뒤 크레딧을 빼고 REFUNDING 으로 둔다 → 2) 토스 결제 취소(멱등 키) →
+     * 3) 취소됐으면 REFUNDED. 토스가 확실히 거절하면 크레딧을 되돌리고 PAID 로 돌린다(그 구매는 다시 환불할 수 없다).
+     * 결과를 모르면 REFUNDING 으로 남기고(크레딧은 빠진 채), 다시 부르면 이어서 취소를 요청한다.
+     * 다시 요청할 때는 새 멱등 키를 쓴다: 토스는 같은 키에 첫 응답(일시 오류 포함)을 그대로 돌려주기 때문이다.
+     * 전액 취소는 한 번만 성공하므로(두 번째는 ALREADY_CANCELED_PAYMENT → 조회로 확인) 키를 바꿔도 두 번 환불되지 않는다.
+     */
     public PurchaseResponse refund(Long userId, String orderId) {
-        CreditPurchase p = owned(userId, orderId);
-        if (p.getStatus() == CreditPurchase.Status.REFUNDED) return PurchaseResponse.from(p);
-        if (p.getStatus() != CreditPurchase.Status.PAID) throw new ConflictException("환불할 수 없는 주문입니다.");
-        credits.refundPurchase(userId, p.getCredits(), p.getId());
-        p.refunded();
-        return PurchaseResponse.from(p);
+        toss.requireKey();
+        RefundDto info = transactions.execute(status -> {
+            CreditPurchase p = owned(userId, orderId);
+            if (p.getStatus() == CreditPurchase.Status.REFUNDED) return new RefundDto(orderId, p.getPaymentKey(), p.getRefundKey(), true);
+            if (p.getStatus() == CreditPurchase.Status.REFUNDING) {
+                p.retryRefund(uuid());
+                return new RefundDto(orderId, p.getPaymentKey(), p.getRefundKey(), false);
+            }
+            if (p.getStatus() != CreditPurchase.Status.PAID) throw new ConflictException("환불할 수 없는 주문입니다.");
+            if (credits.refundWasRejected(p.getId())) {
+                throw new ConflictException("토스에서 환불을 거절한 결제입니다. 문의해 주세요.");
+            }
+            if (!Instant.now().isBefore(p.getPaidAt().plus(REFUND_WINDOW))) {
+                throw new ConflictException("결제 후 7일(168시간)이 지나 환불할 수 없습니다.");
+            }
+            credits.refundPurchase(userId, p.getCredits(), p.getId());
+            p.beginRefund(uuid());
+            return new RefundDto(orderId, p.getPaymentKey(), p.getRefundKey(), false);
+        });
+        if (info.done()) return view(userId, orderId);
+        TossPaymentClient.Payment result;
+        try {
+            result = toss.cancel(info.paymentKey(), REFUND_REASON, info.key());
+        } catch (PaymentRejectedException e) {
+            undoRefund(userId, info);
+            log.warn("환불 거절: 토스가 결제 취소를 거절해 크레딧을 되돌렸습니다. orderId={} userId={} {}", orderId, userId, e.getMessage());
+            throw e;
+        } catch (PaymentUnavailableException e) {
+            // 이미 취소됨·처리 중·일시 장애: 토스에 실제 상태를 물어본다. 그래도 모르면 REFUNDING 으로 남는다
+            result = toss.find(info.paymentKey());
+            if (result == null || !"CANCELED".equals(result.status())) {
+                log.warn("환불 결과 모름: REFUNDING 으로 남깁니다(다시 확인 또는 자동 재확인). orderId={} userId={} 토스 상태={}",
+                        orderId, userId, result == null ? null : result.status());
+                throw e;
+            }
+        }
+        if (result == null || !info.paymentKey().equals(result.paymentKey()) || !orderId.equals(result.orderId())
+                || !"CANCELED".equals(result.status())) {
+            throw new PaymentUnavailableException("토스 환불 상태가 예상과 다릅니다. 잠시 후 다시 환불을 눌러 확인해 주세요.");
+        }
+        // 토스가 이 결제의 취소를 확인했으므로 키가 바뀌었어도(동시에 다시 누름) 환불 완료로 둔다
+        PurchaseResponse done = transactions.execute(status -> {
+            CreditPurchase p = owned(userId, orderId);
+            if (p.getStatus() == CreditPurchase.Status.REFUNDED) return PurchaseResponse.from(p);
+            if (p.getStatus() != CreditPurchase.Status.REFUNDING) throw new ConflictException("주문 상태가 변경되었습니다.");
+            p.refunded();
+            return PurchaseResponse.from(p);
+        });
+        log.info("환불 완료: 토스 결제 취소 확인. purchaseId={} orderId={} userId={} credits={} amountKrw={}",
+                done.purchaseId(), orderId, userId, done.credits(), done.amountKrw());
+        return done;
+    }
+
+    /**
+     * 자동 재확인: startedBefore 보다 먼저 시작해 아직 REFUNDING 인 환불을 최대 limit 건 이어서 처리한다(refund 와 같은 길).
+     * 취소가 확인되면 REFUNDED, 토스가 거절하면 크레딧을 되돌리고 PAID, 그래도 모르면 다음 차례에 다시 본다. 끝낸 건수를 돌려준다.
+     */
+    public int recheckStaleRefunds(Instant startedBefore, int limit) {
+        int finished = 0;
+        for (CreditPurchase p : purchases.findByStatusAndRefundStartedAtBeforeOrderByIdAsc(
+                CreditPurchase.Status.REFUNDING, startedBefore, PageRequest.of(0, limit))) {
+            try {
+                refund(p.getUserId(), p.getOrderId());
+                finished++;
+            } catch (PaymentRejectedException e) {
+                log.warn("환불 자동 재확인: 토스가 취소를 거절해 크레딧을 되돌렸습니다. purchaseId={} {}", p.getId(), e.getMessage());
+                finished++;
+            } catch (RuntimeException e) {
+                log.warn("환불 자동 재확인: 아직 결과를 모릅니다. 다음 차례에 다시 봅니다. purchaseId={} {}", p.getId(), e.getMessage());
+            }
+        }
+        return finished;
+    }
+
+    private void undoRefund(Long userId, RefundDto info) {
+        transactions.executeWithoutResult(status -> {
+            CreditPurchase p = owned(userId, info.orderId());
+            if (p.getStatus() != CreditPurchase.Status.REFUNDING || !info.key().equals(p.getRefundKey())) return;
+            credits.undoPurchaseRefund(userId, p.getCredits(), p.getId());
+            p.refundRejected();
+        });
     }
 
     private void markFailed(Long userId, ConfirmationDto info) {

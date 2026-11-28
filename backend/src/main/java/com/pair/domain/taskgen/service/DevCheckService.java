@@ -13,23 +13,24 @@ import java.util.regex.Pattern;
 import com.pair.infra.sandbox.CodeRunner;
 import com.pair.infra.sandbox.CodeRunner.RunResult;
 
-/** 개발 과제 검사 13개 (설계 6장 + 검수 결과로 더한 7개). 실행은 CodeRunner 인터페이스로만 한다 */
+/** 개발 과제 검사 15개 (설계 6장 + 검수 결과로 더한 7개 + E2·E3 검사 2개). 실행은 CodeRunner 인터페이스로만 한다 */
 final class DevCheckService {
 
-    // 기준 문서(pAIr-docs 설계/좋은_과제_기준.md) 번호 대응. M5 는 SoloSolveService 가 맡는다(afterChecks)
+    // 기준 문서(pAIr-docs 설계/좋은_과제_기준.md, 2026-11-24 개정) 번호 대응.
+    // 참고 지표(AI 단독 풀이)는 합격·불합격이 아니라 SoloSolveService 가 afterChecks 로 기록만 한다.
     static final String FORMAT = "형식"; // M1 전제
-    static final String NO_HINT = "버그 힌트 주석 없음"; // M4 (버그 위치 주석 금지)
-    static final String START_PASSES = "시작 코드 + 공개 테스트 통과"; // 4장 DEV (시작 코드는 컴파일되고 공개 테스트를 통과)
-    static final String HIDDEN_CATCHES = "숨은 테스트가 버그를 잡음"; // M3, 4장 DEV (숨은 테스트에서만 실패)
+    static final String NO_HINT = "버그 힌트 주석 없음"; // M5 (결함 위치 주석 금지)
+    static final String START_PASSES = "시작 코드 + 공개 테스트 통과"; // 5장 DEV, E4 (시작 코드는 컴파일되고 공개 테스트를 통과)
+    static final String HIDDEN_CATCHES = "숨은 테스트가 버그를 잡음"; // E4, M3 (숨은 테스트는 시작 코드에서 실패: 아직 고치지·만들지 않은 부분)
     static final String SOLVED_PASSES = "정답은 전부 통과"; // M1 (정답으로 풀 수 있다)
-    static final String TIME = "각 실행 30초 안"; // 4장 DEV (맞는 풀이를 시간 초과로 떨어뜨리지 않음)
-    static final String TRAP_WORDS = "함정 핵심어 노출 없음"; // M4
-    static final String WRONG_FIXES = "그럴듯한 오답을 숨은 테스트가 걸러냄"; // M3, M5 (그럴듯한 오답이 숨은 테스트에 걸림)
-    static final String AMOUNT = "분량 대비 시간"; // Q1 (5장 표)
-    static final String MATERIALS = "과제 종류별 필수 자료"; // M1 (장애 분석 과제의 재현 자료)
-    static final String FOLLOW_UP = "후속 질문이 과제에 맞음"; // M4
-    static final String ALT_SOLUTIONS = "다른 방식의 올바른 풀이도 통과"; // M2 (다른 방식의 올바른 풀이도 통과)
-    static final String NO_SOLUTION_TEXT = "요구사항·메모에 해법 문장 없음"; // M4, 4장 DEV, 2장 경계 (요구사항·메모는 줘도 되는 것만)
+    static final String TIME = "각 실행 30초 안"; // M2 (맞는 풀이를 시간 초과로 떨어뜨리지 않음)
+    static final String WRONG_FIXES = "숨은 결함을 놓친 풀이를 숨은 테스트가 걸러냄"; // M3 (옛 이름: 그럴듯한 오답을 숨은 테스트가 걸러냄)
+    static final String AMOUNT = "분량 대비 시간"; // Q1 (6장 표)
+    static final String FOLLOW_UP = "후속 질문이 과제에 맞음"; // E5, M5
+    static final String ALT_SOLUTIONS = "다른 방식의 올바른 풀이도 통과"; // M2
+    static final String JUDGMENT = "판단 지점과 근거가 자료에 있음"; // E2, M4(존재·근거 위치만 자동 확인, 적절성은 검수)
+    static final String HIDDEN_FLAW = "숨은 결함을 숨은 테스트가 잡음"; // E3, M3
+    static final String FAKE_IMPL = "추가한 메서드를 상수로 바꾸면 숨은 테스트가 실패함"; // M3: 구현을 검증하는 테스트가 있다
 
     static final long TIME_LIMIT_MS = 30_000;
 
@@ -40,7 +41,6 @@ final class DevCheckService {
     static final Map<Integer, Integer> MIN_CHANGED_LINES = Map.of(20, 2, 40, 6, 60, 12);
 
     private static final int MIN_FOLLOW_UP_TEST_NAME = 4;
-    private static final int MIN_MATERIAL_CHARS = 200;
     private static final Pattern HINT = Pattern.compile(
             "(//|/\\*|\\*).*(버그|bug|TODO|FIXME|함정|일부러|잘못된|문제가 있)", Pattern.CASE_INSENSITIVE);
 
@@ -49,11 +49,14 @@ final class DevCheckService {
      * 넓게 잡으면 오탐이 늘어 말끝 형태까지 맞춘다(경고만 하므로 약간의 오탐은 허용)
      */
     static final Pattern NOTES_HINT = Pattern.compile(
-            "해야\\s*(합니다|한다|함|해요)|하도록|도록\\s*(고[치친쳐]|수정|바[꾸꾼꿔]|변경)|고쳐야|고치면|고친다면|수정해야|수정하면|바꿔야|바꾸면|한\\s*번에\\s*확정|확정해야|일치시켜야");
+            "해야\\s*(합니다|한다|함|해요)|하도록|도록\\s*(고[치친쳐]|수정|바[꾸꾼꿔]|변경)|고쳐야|고치면|고친다면|수정해야|수정하면|바꿔야|바꾸면|한\\s*번에\\s*확정|확정해야|일치시켜야"
+                    + "|[가-힣]+(되|히|리|기)지\\s*않(는다|습니다|음)"
+                    + "|원인\\s*[:：]|(과|와)[^.\\n]{1,40}(은|는|이|가)\\s*(서로\\s*)?(다릅니다|다르다)"); // M5: "실적으로 잡히지 않는다" 꼴 규칙 문장, "원인:" 표지, "A와 B는 다르다" 차이 문장
     /** 요구사항에서 해법·계산 결합 방식을 말로 푼 것. 입력→기대 출력, 불변식만 있어야 한다 */
     static final Pattern REQ_HINT = Pattern.compile(
             "하도록|도록\\s*(고[치친쳐]|수정|바[꾸꾼꿔]|변경)|고쳐야|고치면|수정해야|바꿔야|바꾸면|곱해|곱한|곱하여|곱하고|(나눈|나누어|뺀|더한|합친)\\s*(뒤|후|값에|금액에)"
-                    + "|내림(?!차순)|올림|버림|\\d+분의\\s*\\d+|가장\\s*(큰|작은)\\s*정수|한\\s*번에\\s*확정");
+                    + "|내림(?!차순)|올림|버림|\\d+분의\\s*\\d+|가장\\s*(큰|작은)\\s*정수|한\\s*번에\\s*확정"
+                    + "|(범위|한도|상한|하한)[^.\\n]{0,20}(넘|벗어|초과)[^.\\n]{0,40}(예외|Exception|거절|오류)[^.\\n]{0,10}(발생|던진|난다)"); // M5: 결함을 피하는 결과를 규칙 문장으로 말함
     private static final int MAX_CLUES = 5;
     private static final int CLUE_CHARS = 110;
     /** 풀이가 바꾼 줄에서 문장과 겹침을 볼 때 뺄 흔한 말 */
@@ -88,7 +91,6 @@ final class DevCheckService {
                     }
                     return ok("src 주석에 힌트가 없습니다.");
                 }),
-                check(TRAP_WORDS, d -> trapWords(d, form)),
                 check(START_PASSES, d -> {
                     if (!runs.formatOk()) return skipped();
                     RunResult r = runs.start();
@@ -106,7 +108,7 @@ final class DevCheckService {
                     RunResult r = runs.solved();
                     return r.allPassed() ? ok("테스트 " + r.passed() + "개 모두 통과") : fail(DevRunService.problem(r));
                 }),
-                check(WRONG_FIXES, d -> {
+                checkOwnLevel(WRONG_FIXES, d -> { // 공개 테스트도 깨는 약한 오답은 경고(warn)로 돌려준다
                     if (!runs.formatOk()) return skipped();
                     String p = DevRunService.wrongFixProblem(d);
                     if (p != null) return fail(p);
@@ -123,14 +125,23 @@ final class DevCheckService {
                     return Math.max(Math.max(a, b), Math.max(c, w)) < TIME_LIMIT_MS ? ok(detail) : fail(detail);
                 }),
                 warn(AMOUNT, d -> amount(d, form == null ? 60 : form.minutes())),
-                check(MATERIALS, DevCheckService::materials),
                 check(FOLLOW_UP, DevCheckService::followUp),
                 // 다른 방식의 올바른 풀이가 없으면 warn(옛 형식 호환), 있는데 떨어지면 fail 이라 결과마다 등급이 다르다
                 checkOwnLevel(ALT_SOLUTIONS, d -> {
                     if (!runs.formatOk()) return skipped();
                     return altSolutions(d, runs);
                 }),
-                warn(NO_SOLUTION_TEXT, DevCheckService::solutionText));
+                checkOwnLevel(JUDGMENT, d -> GenTextService.judgmentPoints(d.judgmentPoints(), visibleCorpus(d), true)),
+                check(FAKE_IMPL, d -> {
+                    if (!runs.formatOk()) return skipped();
+                    List<String> bad = FakeImplService.problems(runner, d);
+                    return bad.isEmpty() ? ok("추가한 메서드를 상수 반환으로 바꾸면 숨은 테스트가 실패합니다(확인할 수 있는 메서드만).")
+                            : fail(String.join(" / ", bad) + ". 그 메서드의 결과가 다른(반대 값) 사례가 설계도에 있어야 합니다.");
+                }),
+                checkOwnLevel(HIDDEN_FLAW, d -> {
+                    if (!runs.formatOk()) return skipped();
+                    return hiddenFlaws(d, runs);
+                }));
     }
 
     // ── 다른 풀이, 해법 문장 ─────────────────────────────
@@ -171,22 +182,6 @@ final class DevCheckService {
 
     private static String noSpace(String s) {
         return s == null ? "" : s.replaceAll("\\s+", "");
-    }
-
-    /** 요구사항과 접수 메모(NOTES.md·INCIDENT.md)에 해법·계산식을 말로 푼 문장이 있으면 warn */
-    private static GenCheckResultDto solutionText(DevDraftDto d) {
-        List<String> found = new ArrayList<>();
-        for (String req : d.requirements() == null ? List.<String>of() : d.requirements()) {
-            for (String sentence : sentences(req)) if (REQ_HINT.matcher(sentence).find()) found.add("요구사항: " + clip(sentence, 80));
-        }
-        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
-            if (f == null || f.path() == null || f.content() == null) continue;
-            if (!f.path().equals("NOTES.md") && !f.path().equals("INCIDENT.md")) continue;
-            for (String sentence : sentences(f.content())) if (NOTES_HINT.matcher(sentence).find()) found.add(f.path() + ": " + clip(sentence, 80));
-        }
-        if (found.isEmpty()) return ok("요구사항·메모에 해법을 말하는 문장이 없습니다.");
-        return fail("해법이나 계산식을 말로 푼 문장이 있습니다(" + found.size() + "개): " + found.stream().limit(4).map(x -> "'" + x + "'").toList()
-                + ". 요구사항은 입력→기대 출력 예·불변식만, 메모는 현상과 재현 값만 적으세요.");
     }
 
     /** 글을 문장(또는 줄) 단위로 나눈다. 비어 있는 조각은 뺀다 */
@@ -232,6 +227,50 @@ final class DevCheckService {
         return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 
+    // ── E2·E3 ─────────────────────────────
+
+    /** 응시자에게 보이는 글(설명, 요구사항, src·공개 테스트 코드와 주석, 메모·로그). 숨은 테스트·정답은 뺀다 */
+    static String visibleCorpus(DevDraftDto d) {
+        StringBuilder sb = new StringBuilder(join(d.description())).append("\n").append(join(d.requirements())).append("\n");
+        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
+            if (f != null && f.content() != null) sb.append(f.content()).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * E3: 숨은 결함이 1개 이상 선언돼 있고, 결함마다 설명·대조 방법이 있으며 caughtBy 가 실제 숨은 테스트 메서드여야 하고,
+     * 그 테스트가 시작 코드나 숨은 결함을 놓친 풀이(wrongFixes) 중 하나에서 실제로 실패해야 한다(결함을 잡는다).
+     * 필드가 없으면(옛 형식, null) warn
+     */
+    private static GenCheckResultDto hiddenFlaws(DevDraftDto d, DevRunService runs) {
+        if (d.hiddenFlaws() == null) return warnResult("hiddenFlaws 가 없는 옛 형식이라 숨은 결함을 잡는 테스트를 확인하지 못했어요");
+        if (d.hiddenFlaws().isEmpty()) return fail("숨은 결함(hiddenFlaws)이 1개 이상 있어야 합니다(AI 기본 답이 놓치기 쉬운 곳).");
+        List<String> hiddenNames = GenTextService.testNames(d.hiddenTests());
+        List<String> failedNames = new ArrayList<>();
+        if (runs.startHidden().compiled()) runs.startHidden().tests().stream().filter(t -> !t.passed()).forEach(t -> failedNames.add(t.name()));
+        for (var w : runs.wrongRuns()) w.result().tests().stream().filter(t -> !t.passed()).forEach(t -> failedNames.add(t.name()));
+        List<String> bad = new ArrayList<>();
+        int i = 0;
+        for (var f : d.hiddenFlaws()) {
+            i++;
+            if (f == null || isBlankText(f.description())) { bad.add("숨은 결함 " + i + "에 설명(description)이 없습니다"); continue; }
+            if (isBlankText(f.verifyWith())) { bad.add("숨은 결함 " + i + "에 대조 방법(verifyWith)이 없습니다"); continue; }
+            String test = f.caughtBy() == null ? "" : f.caughtBy().strip().replaceAll("\\(\\)$", "");
+            String match = hiddenNames.stream().filter(n -> n.equals(test)).findFirst().orElse(null);
+            if (match == null) {
+                bad.add("숨은 결함 " + i + "을 잡는 숨은 테스트 '" + test + "' 가 숨은 테스트 파일에 없습니다(caughtBy 는 메서드 이름 그대로)");
+            } else if (failedNames.stream().noneMatch(n -> n.endsWith("." + match) || n.endsWith("." + match + "()") || n.equals(match))) {
+                bad.add("숨은 결함 " + i + "을 잡는 테스트 '" + match + "' 가 시작 코드와 숨은 결함을 놓친 풀이 어디에서도 실패하지 않아 결함을 잡지 못합니다");
+            }
+        }
+        return bad.isEmpty() ? ok("숨은 결함 " + d.hiddenFlaws().size() + "개를 잡는 숨은 테스트가 실제로 실패합니다.") : fail(String.join(" / ", bad));
+    }
+
+    private static boolean isBlankText(String s) {
+        return s == null || s.isBlank();
+    }
+
     // ── 새 검사들 ─────────────────────────────
 
     private static String join(List<String> l) {
@@ -242,43 +281,12 @@ final class DevCheckService {
         return f.path().endsWith(".java") && f.content() != null;
     }
 
-    /** 함정 핵심어가 응시자에게 보이는 곳(설명, 요구사항, 보이는 파일 경로, 보이는 코드 주석, 보이는 메모·로그)에 있으면 실패 */
-    private static GenCheckResultDto trapWords(DevDraftDto d, TaskGenRequest form) {
-        List<String> keywords = GenTextService.clean(d.trapKeywords());
-        if (keywords.size() < 2) return fail("함정 핵심어(trapKeywords)가 2~5개 있어야 합니다 (지금 " + keywords.size() + "개).");
-        List<String> words = new ArrayList<>(keywords);
-        if (form != null) {
-            for (String w : GenTextService.formWords(form.trap(), form.topic())) if (!words.contains(w)) words.add(w);
-        }
-        StringBuilder paths = new StringBuilder();
-        StringBuilder comments = new StringBuilder();
-        StringBuilder extras = new StringBuilder();
-        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
-            if (f == null || f.path() == null) continue;
-            paths.append(f.path()).append('\n');
-            if (isCode(f)) comments.append(GenTextService.comments(f.content()));
-            else if (f.content() != null) extras.append(f.content()).append('\n');
-        }
-        Map<String, List<String>> found = new LinkedHashMap<>();
-        found.put("설명", GenTextService.hits(words, join(d.description())));
-        found.put("요구사항", GenTextService.hits(words, join(d.requirements())));
-        found.put("보이는 파일 경로", GenTextService.hits(words, paths.toString()));
-        found.put("보이는 코드 주석", GenTextService.hits(words, comments.toString()));
-        // 메모·로그는 모델이 직접 정한 핵심어로만 본다(폼에서 뽑은 말은 로그에 자연스럽게 나올 수 있어 과탐이 난다)
-        found.put("메모·로그", GenTextService.hits(keywords, extras.toString()));
-        List<String> parts = new ArrayList<>();
-        found.forEach((where, hit) -> {
-            if (!hit.isEmpty()) parts.add(where + "에 " + hit.stream().map(h -> "'" + h + "'").toList());
-        });
-        return parts.isEmpty() ? ok("함정 핵심어 " + keywords.size() + "개가 응시자에게 보이는 곳에 없습니다.")
-                : fail("응시자에게 보이는 곳에 함정 핵심어가 드러납니다: " + String.join(" / ", parts) + ". 이 말을 쓰지 말고 현상만 설명하세요.");
-    }
-
     /** 오답마다 숨은 테스트가 1개 이상 실패해야 통과 */
     private static GenCheckResultDto wrongFixes(DevDraftDto d, List<DevRunService.WrongRun> runs) {
         List<String> hiddenClasses = new ArrayList<>();
         for (var f : d.hiddenTests()) hiddenClasses.add(f.path().substring(f.path().lastIndexOf('/') + 1).replaceAll("\\.java$", ""));
         List<String> bad = new ArrayList<>();
+        List<String> weak = new ArrayList<>();
         for (var w : runs) {
             var r = w.result();
             String label = "오답 " + w.number() + " (" + shortText(w.fix().reason()) + ")";
@@ -288,9 +296,15 @@ final class DevCheckService {
                 bad.add(label + " 이 숨은 테스트를 모두 통과했습니다. 이 오답을 떨어뜨리는 숨은 테스트를 더하세요");
             } else if (r.tests().stream().noneMatch(t -> !t.passed() && hiddenClasses.stream().anyMatch(c -> t.name().contains(c)))) {
                 bad.add(label + " 이 공개 테스트에서만 실패합니다. 공개 테스트는 통과하고 숨은 테스트에서만 실패하는 오답이어야 합니다");
+            } else {
+                // 숨은 테스트에서 떨어지지만 공개 테스트도 깨면 응시자가 바로 알아채는 약한 오답이다(g13 02 판정). 새 검사라 경고로만 알린다
+                List<String> publicFails = r.tests().stream().filter(t -> !t.passed() && hiddenClasses.stream().noneMatch(c -> t.name().contains(c))).map(CodeRunner.TestCase::name).toList();
+                if (!publicFails.isEmpty()) weak.add(label + " 이 공개 테스트도 깹니다(" + String.join(", ", publicFails) + "). 공개 테스트는 통과하는 오답이어야 결함을 가리는 그럴듯한 풀이가 됩니다");
             }
         }
-        return bad.isEmpty() ? ok("오답 " + runs.size() + "개 모두 숨은 테스트에서 실패합니다.") : fail(String.join(" / ", bad));
+        if (!bad.isEmpty()) return fail(String.join(" / ", bad));
+        if (!weak.isEmpty()) return warnResult(String.join(" / ", weak));
+        return ok("오답 " + runs.size() + "개 모두 숨은 테스트에서 실패합니다.");
     }
 
     /** 정답과 시작 코드가 바뀐 줄 수(추가+삭제)가 제한 시간별 최소치보다 적으면 경고 */
@@ -353,24 +367,7 @@ final class DevCheckService {
         return out;
     }
 
-    /** 장애 과제는 재현 로그나 접수 메모(공백 뺀 200자 이상)를 응시자 파일로 넣어야 한다 */
-    private static GenCheckResultDto materials(DevDraftDto d) {
-        if (d.category() == null || !d.category().contains("장애")) return ok("장애 과제가 아니라 필수 자료를 따로 확인하지 않습니다.");
-        int chars = 0;
-        int count = 0;
-        for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
-            if (f == null || f.path() == null || f.content() == null) continue;
-            if (f.path().startsWith("logs/") || f.path().equals("NOTES.md") || f.path().equals("INCIDENT.md")) {
-                count++;
-                chars += f.content().replaceAll("\\s+", "").length();
-            }
-        }
-        return chars >= MIN_MATERIAL_CHARS ? ok("재현 자료 " + count + "개, 공백 뺀 " + chars + "자")
-                : fail("장애 분석 과제인데 재현 자료가 부족합니다 (logs/ 파일이나 NOTES.md·INCIDENT.md, 공백 뺀 " + MIN_MATERIAL_CHARS
-                        + "자 이상 필요, 지금 " + chars + "자). 재현 로그나 접수 메모를 응시자 파일로 넣으세요.");
-    }
-
-    /** 3번째 후속 질문(과제 맞춤)이 있어야 하고, 함정 핵심어나 숨은 테스트 이름이 들어 있으면 안 된다 */
+    /** E5: 3번째 후속 질문(과제 맞춤)이 있어야 하고, 함정 핵심어나 숨은 테스트 이름이 들어 있으면 안 된다 */
     private static GenCheckResultDto followUp(DevDraftDto d) {
         String q = d.taskFollowUp();
         if (q == null || q.isBlank()) return fail("이 과제의 함정에 맞춘 후속 질문(taskFollowUp)이 비어 있습니다.");

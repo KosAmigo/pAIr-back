@@ -19,7 +19,8 @@ public record TaskDefDto(
         String openFile,           // 처음 열어 둘 파일
         List<Integer> d4Minutes,   // D4 환산 구간 상한(분). 예: [20,30,40,50] → 100/85/70/55, 그 이상 40
         List<String> requiredHeadings, // 비개발: 첫 유효 결과 판정에 쓰는 필수 제목
-        String editableFile) {     // 비개발: 문서 편집기로 여는 파일
+        String editableFile,       // 비개발: 문서 편집기로 여는 파일
+        AiLimitsDto aiLimits) {    // 과제별 AI 제한(E6). 없으면 null → 전역 pair.assistant.*
 
     public boolean isDev() {
         return "dev".equals(type);

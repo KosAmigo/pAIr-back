@@ -31,6 +31,7 @@ import com.pair.infra.sandbox.JavaDiagnostics;
 import com.pair.domain.task.service.TaskMaterialService;
 import com.pair.domain.scoring.service.ScoringService;
 import com.pair.domain.task.service.TaskCatalogService;
+import com.pair.domain.task.dto.AiLimitsDto;
 import com.pair.domain.task.dto.TaskDefDto;
 import com.pair.domain.task.entity.Task;
 import com.pair.domain.task.repository.TaskDefRepository;
@@ -56,13 +57,14 @@ public class AttemptService {
     private final JavaDiagnostics diagnostics;
     private final TaskMaterialService materials;
     private final RunRateLimitService runRateLimit;
+    private final ChatRateLimitService chatRateLimit;
 
     public AttemptService(AttemptStateRepository store, TaskDefRepository tasks, CodeRunner runner,
                           AssistantClient assistant, ScoringService scoring, PairProperties props,
                           TaskCatalogService catalog, AttemptRegistryService registry, CheckpointService checkpoints, CreditService credits,
                           ChatTurnRepository chatRecords, TransactionTemplate transactions,
                           ChatAttachmentService attachments, JavaDiagnostics diagnostics,
-                          TaskMaterialService materials, RunRateLimitService runRateLimit) {
+                          TaskMaterialService materials, RunRateLimitService runRateLimit, ChatRateLimitService chatRateLimit) {
         this.store = store;
         this.tasks = tasks;
         this.runner = runner;
@@ -79,6 +81,7 @@ public class AttemptService {
         this.diagnostics = diagnostics;
         this.materials = materials;
         this.runRateLimit = runRateLimit;
+        this.chatRateLimit = chatRateLimit;
     }
 
     /** 자가진단 시작: 공개한 자가진단(SELF) 과제만. 응시 행(DB)을 먼저 만들고 그 ID 로 파일을 만든다 */
@@ -145,8 +148,20 @@ public class AttemptService {
 
     /** 빌드·실행 횟수 제한. 자가진단은 회원 1명, 실전(회원 없음)은 응시 1건 단위로 센다 */
     private void checkRunRate(String id) {
+        runRateLimit.check(rateKey(id));
+    }
+
+    /**
+     * AI 채팅 분당 호출 제한(1인·서비스 전체). 스트리밍은 답을 다른 스레드에서 받으므로, 컨트롤러가 스트림을 열기 전에
+     * 이것을 불러야 넘었을 때 오류 이벤트가 아니라 429 로 돌려줄 수 있다
+     */
+    public void checkChatRate(String id) {
+        chatRateLimit.check(rateKey(id));
+    }
+
+    private String rateKey(String id) {
         Long userId = registry.find(id).map(Attempt::getUserId).orElse(null);
-        runRateLimit.check(userId != null ? "user:" + userId : "attempt:" + id);
+        return userId != null ? "user:" + userId : "attempt:" + id;
     }
 
     /** 빌드 버튼: 응시자 코드를 컴파일만 한다. */
@@ -236,11 +251,13 @@ public class AttemptService {
         Attempt record = registry.find(id).orElseThrow(() -> new java.util.NoSuchElementException("없는 응시입니다: " + id));
         // 첨부는 AI 를 부르기 전에 검증하고 글자를 읽는다. 틀리면 AI 도 크레딧도 건드리지 않는다
         Map<String, String> filesAtAsk = store.readFiles(id);
-        List<Resolved> resolved = attachments.resolve(record.getId(), filesAtAsk, refs);
+        AiLimitsDto limits = tasks.get(a.taskId()).aiLimits(); // E6: 과제별 제한, 없으면 null(전역 설정)
+        List<Resolved> resolved = attachments.resolve(record.getId(), filesAtAsk, refs, limits);
         if (record.getUserId() != null) credits.checkChat(record.getUserId(), resolved.size());
         List<ChatTurnStateDto> history = store.turns(id);
-        if (history.size() / 2 >= props.assistant().maxTurns()) {
-            throw new IllegalStateException("응시당 AI 질문 한도(" + props.assistant().maxTurns() + "회)에 도달했습니다.");
+        int maxTurns = limits == null ? props.assistant().maxTurns() : limits.turns();
+        if (history.size() / 2 >= maxTurns) {
+            throw new IllegalStateException("응시당 AI 질문 한도(" + maxTurns + "회)에 도달했습니다.");
         }
         ChatAttachmentService.Built built = attachments.build(record.getId(), history, message, resolved);
         List<Message> msgs = built.messages();
@@ -376,9 +393,16 @@ public class AttemptService {
         return next;
     }
 
+    /**
+     * 후속 질문을 마치고 채점을 시작한다. 상태 확인과 변경(FOLLOWUP → SCORING)을 DB 에서 한 번에 해서,
+     * 동시에 여러 번 불려도 하나만 답을 저장하고 채점을 맡긴다. 나머지는 IllegalStateException.
+     */
     public AttemptStateDto followUps(String id, List<String> answers) {
         AttemptStateDto a = requireStatus(id, AttemptStateDto.Status.FOLLOWUP);
         AttemptStateDto next = a.withFollowUps(answers == null ? List.of() : List.copyOf(answers), tasks.get(a.taskId()).followUps(), Instant.now());
+        if (!registry.startScoring(id, next.followupsDoneAt())) {
+            throw new IllegalStateException("이미 제출한 후속 질문입니다.");
+        }
         store.save(next);
         store.appendEvent(id, "followups", Map.of("count", next.followUpAnswers().size()));
         scoring.scoreAsync(id);

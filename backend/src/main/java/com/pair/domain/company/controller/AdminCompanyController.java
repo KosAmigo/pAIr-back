@@ -55,9 +55,9 @@ public class AdminCompanyController {
     public InquiryResponse replaceMembers(CurrentUser user, @PathVariable Long inquiryId,
             @org.springframework.web.bind.annotation.RequestParam("file") MultipartFile file) throws java.io.IOException {
         requireAdmin(user);
-        if (file == null || file.isEmpty()) throw new IllegalArgumentException("회원 명단 CSV 파일을 올려 주세요.");
+        if (file == null || file.isEmpty()) throw new IllegalArgumentException("회원 명단 파일(엑셀 또는 CSV)을 올려 주세요.");
         String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
-        if (!filename.endsWith(".csv")) throw new IllegalArgumentException("회원 명단은 CSV 파일만 올릴 수 있습니다.");
+        if (!filename.endsWith(".csv") && !filename.endsWith(".xlsx")) throw new IllegalArgumentException("회원 명단은 엑셀(.xlsx) 또는 CSV 파일만 올릴 수 있습니다.");
         return inquiries.replaceRoster(inquiryId, file.getBytes());
     }
 

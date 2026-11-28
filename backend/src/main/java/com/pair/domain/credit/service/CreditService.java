@@ -9,7 +9,12 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.pair.domain.auth.repository.AuthAccountRepository;
+import com.pair.global.security.CurrentUser;
 
+/**
+ * 크레딧 지급·차감. 관리자는 자가진단·AI 채팅·롤백을 확인용으로 무제한 쓴다(검사도 차감도 하지 않고 원장에도 남기지 않는다).
+ * 구매·환불은 관리자도 일반 규칙을 따른다.
+ */
 @Service
 public class CreditService {
     private final AuthAccountRepository accounts;
@@ -38,6 +43,12 @@ public class CreditService {
         this.rollbackCost = rollbackCost;
     }
 
+    /** 크레딧 제한이 없는 회원인지 (관리자) */
+    @Transactional(readOnly = true)
+    public boolean isUnlimited(Long userId) {
+        return accounts.findById(userId).map(a -> a.getRole() == CurrentUser.Role.ADMIN).orElse(false);
+    }
+
     @Transactional(readOnly = true)
     public int balance(Long userId) {
         return ledger.findFirstByUserIdOrderByIdDesc(userId).map(CreditLedger::getBalanceAfter).orElse(0);
@@ -54,11 +65,13 @@ public class CreditService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void checkAttempt(Long userId) {
+        if (isUnlimited(userId)) return;
         check(userId, attemptCost);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void chargeAttempt(Long userId, Long attemptId) {
+        if (isUnlimited(userId)) return;
         charge(userId, attemptCost, "ATTEMPT_START", attemptId, null);
     }
 
@@ -75,6 +88,7 @@ public class CreditService {
 
     @Transactional(readOnly = true)
     public void checkChat(Long userId, int newAttachments) {
+        if (isUnlimited(userId)) return;
         int need = chatTotal(newAttachments);
         int current = balance(userId);
         if (current < need) {
@@ -89,16 +103,19 @@ public class CreditService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void chargeChat(Long userId, Long turnId, int newAttachments) {
+        if (isUnlimited(userId)) return;
         charge(userId, chatTotal(newAttachments), "CHAT_TURN", null, turnId);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void checkRollback(Long userId) {
+        if (isUnlimited(userId)) return;
         check(userId, rollbackCost);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void chargeRollback(Long userId, Long attemptId) {
+        if (isUnlimited(userId)) return;
         charge(userId, rollbackCost, "ROLLBACK", attemptId, null);
     }
 
@@ -109,10 +126,29 @@ public class CreditService {
         ledger.save(CreditLedger.purchase(userId, amount, next, "PURCHASE", purchaseId));
     }
 
+    /** 환불할 구매분을 뺀다. 잔액이 구매한 크레딧보다 적으면 InsufficientCreditException */
     @Transactional(propagation = Propagation.MANDATORY)
     public void refundPurchase(Long userId, int amount, Long purchaseId) {
-        int current = check(userId, amount);
+        lock(userId);
+        int current = balance(userId);
+        if (current < amount) {
+            throw new InsufficientCreditException("남은 크레딧(" + current + ")이 구매한 크레딧(" + amount + ")보다 적어 환불할 수 없습니다.");
+        }
         ledger.save(CreditLedger.purchase(userId, -amount, current - amount, "PURCHASE_REFUND", purchaseId));
+    }
+
+    /** 토스가 결제 취소를 거절해 refundPurchase 로 뺐던 크레딧을 되돌린다 */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void undoPurchaseRefund(Long userId, int amount, Long purchaseId) {
+        lock(userId);
+        int next = Math.addExact(balance(userId), amount);
+        ledger.save(CreditLedger.purchase(userId, amount, next, "PURCHASE_REFUND_UNDO", purchaseId));
+    }
+
+    /** 토스가 이 구매의 환불을 거절한 적이 있는지 (되돌린 기록은 구매 1건에 한 번만 남길 수 있다) */
+    @Transactional(readOnly = true)
+    public boolean refundWasRejected(Long purchaseId) {
+        return ledger.existsByPurchaseIdAndReason(purchaseId, "PURCHASE_REFUND_UNDO");
     }
 
     private void charge(Long userId, int cost, String reason, Long attemptId, Long turnId) {

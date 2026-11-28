@@ -30,9 +30,9 @@ class TaskGenTimeTest {
     @DisplayName("개발 과제 프롬프트에 시간별 깊이가 들어간다")
     void devDepth() {
         DevTaskGeneratorService g = new DevTaskGeneratorService(null, null, null, null, null);
-        assertThat(g.system(form("DEV", 20))).contains("20분", "파일 2~3개", "버그 1개", "숨은 테스트 1~2개").doesNotContain("difficulty");
-        assertThat(g.system(form("DEV", 40))).contains("파일 3~5개");
-        assertThat(g.system(form("DEV", 60))).contains("파일 4~6개");
+        assertThat(g.system(form("DEV", 20))).contains("20분", "파일 2~3개", "기능 1개", "판단 지점 1개", "숨은 결함 1개", "숨은 테스트 1~2개").doesNotContain("difficulty");
+        assertThat(g.system(form("DEV", 40))).contains("파일 3~5개", "2단계", "판단 지점 1~2개", "숨은 결함 1~2개");
+        assertThat(g.system(form("DEV", 60))).contains("파일 4~6개", "3단계", "판단 지점 2개", "숨은 결함 2개");
         assertThat(g.user(form("DEV", 20), List.of())).contains("제한 시간: 20분", "주제: 주제", "함정: 함정").doesNotContain("직군", "난이도");
     }
 
@@ -40,9 +40,9 @@ class TaskGenTimeTest {
     @DisplayName("비개발 과제 프롬프트에 시간별 깊이가 들어간다")
     void bizDepth() {
         BizTaskGeneratorService g = new BizTaskGeneratorService(null, null, null, null, null, null);
-        assertThat(g.system(form("BIZ", 20))).contains("CSV 1개 + 문서 2개", "각 1~2쪽", "문항 3개", "객관식 2개, 단답형 1개");
+        assertThat(g.system(form("BIZ", 20))).contains("CSV 1개 + 문서 2개", "각 1~2쪽", "문항 3개", "객관식 2개, 단답형 1개", "판단 지점 1개", "함정 1개");
         assertThat(g.system(form("BIZ", 40))).contains("CSV 1~2개 + 문서 2개", "문항 4개");
-        assertThat(g.system(form("BIZ", 60))).contains("문서 2~3개");
+        assertThat(g.system(form("BIZ", 60))).contains("문서 2~3개", "판단 지점 2개", "함정 2개");
         assertThat(g.system(form("BIZ", 60))).doesNotContain("difficulty");
     }
 

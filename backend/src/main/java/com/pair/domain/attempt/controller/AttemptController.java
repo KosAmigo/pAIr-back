@@ -88,9 +88,12 @@ public class AttemptController {
         return Map.of("attemptId", a.id());
     }
 
-    /** 내 기록: 내 자가진단 응시 목록 (DB attempts, 최근 순). 채점이 끝난 응시는 항목 점수를 함께 준다. */
+    /**
+     * 내 기록: 내 자가진단 응시 목록 (DB attempts, 최근 순). 채점이 끝난 응시는 항목 점수를 함께 준다.
+     * 빈 응시는 includeEmpty=true 일 때만 empty=true 를 붙여 준다 (과제 창의 이어서 풀기용).
+     */
     @GetMapping("/attempts")
-    public List<Map<String, Object>> list(CurrentUser user) {
+    public List<Map<String, Object>> list(CurrentUser user, @RequestParam(defaultValue = "false") boolean includeEmpty) {
         List<Attempt> rows = records.findByUserIdAndModeOrderByStartedAtDesc(user.userId(), Attempt.Mode.SELF);
         Map<Long, String> codes = catalog.codes(rows.stream().map(Attempt::getTaskId).distinct().toList());
         List<Map<String, Object>> out = new java.util.ArrayList<>();
@@ -104,7 +107,8 @@ public class AttemptController {
                 .filter(r -> r.getStatus() == AttemptStateDto.Status.SOLVING).map(r -> String.valueOf(r.getId())).toList());
         for (Attempt r : rows) {
             String id = String.valueOf(r.getId());
-            if (r.getStatus() == AttemptStateDto.Status.SOLVING && !active.contains(id)) continue; // 들어갔다 아무것도 안 하고 나간 기록은 보여 주지 않는다
+            boolean empty = r.getStatus() == AttemptStateDto.Status.SOLVING && !active.contains(id);
+            if (empty && !includeEmpty) continue; // 들어갔다 아무것도 안 하고 나간 기록은 복기·대시보드에 보여 주지 않는다
             TaskDefDto task = definitions.computeIfAbsent(codes.get(r.getTaskId()), catalog::definition);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", id);
@@ -113,6 +117,7 @@ public class AttemptController {
             m.put("taskType", task.type());
             m.put("startedAt", r.getStartedAt());
             m.put("status", r.getStatus());
+            if (empty) m.put("empty", true);
             if (r.getStatus() == AttemptStateDto.Status.DONE) {
                 JsonNode rep = scores.get(id);
                 if (rep != null) {
@@ -135,7 +140,15 @@ public class AttemptController {
         AttemptStateDto a = store.load(id);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("attempt", a);
-        m.put("task", tasks.get(a.taskId()));
+        var def = tasks.get(a.taskId());
+        m.put("task", def);
+        // E6: 응시 화면이 남은 턴·첨부 한도를 보여 준다. 과제에 제한이 없으면 전역 설정
+        var lim = def.aiLimits();
+        Map<String, Object> ai = new LinkedHashMap<>();
+        ai.put("turns", lim == null ? props.assistant().maxTurns() : lim.turns());
+        ai.put("maxAttach", lim == null ? chatAttachments.defaultMaxFiles() : lim.maxAttach());
+        ai.put("contextChars", lim == null ? chatAttachments.defaultMaxChars() : lim.contextChars());
+        m.put("aiLimits", ai);
         m.put("files", store.readFiles(id).keySet());
         var edits = attempts.edits(id);
         var attached = chatAttachments.views(Long.parseLong(id));
@@ -192,6 +205,7 @@ public class AttemptController {
     public List<TurnResponse> chat(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
         AttemptStateDto a = store.load(id);
+        attempts.checkChatRate(id);
         List<ChatTurnStateDto> added = attempts.chat(id, req.message(), req.attachments(), null);
         var edits = attempts.edits(id);
         var attached = chatAttachments.views(Long.parseLong(id));
@@ -208,6 +222,7 @@ public class AttemptController {
     public org.springframework.web.servlet.mvc.method.annotation.SseEmitter chatStream(@PathVariable String id, @RequestBody ChatRequest req) {
         if (req.message() == null || req.message().isBlank()) throw new IllegalArgumentException("메시지가 비어 있습니다.");
         AttemptStateDto a = store.load(id);
+        attempts.checkChatRate(id); // 스트림을 열기 전에: 넘으면 429(오류 이벤트가 아니라)
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(6 * 60 * 1000L);
         streams.submit(() -> {
             try {

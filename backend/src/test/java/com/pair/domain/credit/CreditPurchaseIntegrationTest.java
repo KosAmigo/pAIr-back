@@ -36,11 +36,48 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
     @Autowired CreditService credits;
     @Autowired CreditLedgerRepository ledger;
     @Autowired TransactionTemplate transactions;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     @BeforeEach
     void setUp() {
         when(toss.confirm(anyString(), anyString(), anyInt(), anyString())).thenAnswer(call ->
                 new TossPaymentClient.Payment(call.getArgument(0), call.getArgument(1), call.getArgument(2), "DONE"));
+        when(toss.cancel(anyString(), anyString(), anyString())).thenAnswer(call -> canceled(call.getArgument(0)));
+    }
+
+    /** paid() 의 결제 키는 "payment-" + 주문번호 */
+    private static TossPaymentClient.Payment canceled(String paymentKey) {
+        return new TossPaymentClient.Payment(paymentKey, paymentKey.replaceFirst("^payment-", ""), 4990, "CANCELED");
+    }
+    private static TossPaymentClient.Payment done(String paymentKey) {
+        return new TossPaymentClient.Payment(paymentKey, paymentKey.replaceFirst("^payment-", ""), 4990, "DONE");
+    }
+    private CreditPurchase.Status status(long user, String order) {
+        return purchases.history(user, 0, 50).getContent().stream().filter(p -> p.orderId().equals(order)).findFirst().orElseThrow().status();
+    }
+    private long reasons(long user, String reason) {
+        return ledger.findByUserIdOrderByIdDesc(user, org.springframework.data.domain.PageRequest.of(0, 50)).getContent().stream()
+                .filter(l -> l.getReason().equals(reason)).count();
+    }
+    /** 환불을 시작한 시각을 테스트마다 다른 옛 시각으로 둔다(공유 H2 의 다른 테스트 REFUNDING 행과 섞이지 않게) */
+    private java.time.Instant refundStartedLongAgo(String order, int day) {
+        java.time.Instant at = java.time.Instant.parse("2001-01-01T00:00:00Z").plus(java.time.Duration.ofDays(day));
+        jdbc.update("update credit_purchases set refund_started_at = ? where order_id = ?", java.sql.Timestamp.from(at), order);
+        return at;
+    }
+    /** paid() 후 토스 결과를 몰라 REFUNDING 으로 남은 환불 하나 */
+    private String stuckRefund(long user) {
+        String id = paid(user);
+        String key = "payment-" + id;
+        when(toss.cancel(eq(key), anyString(), anyString())).thenThrow(new PaymentUnavailableException("환불 결과를 확인할 수 없습니다."));
+        when(toss.find(key)).thenReturn(done(key));
+        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(PaymentUnavailableException.class);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.REFUNDING);
+        return id;
+    }
+    private void paidHoursAgo(String order, long hours) {
+        jdbc.update("update credit_purchases set paid_at = ? where order_id = ?",
+                java.sql.Timestamp.from(java.time.Instant.now().minus(java.time.Duration.ofHours(hours))), order);
     }
 
     private long user() {
@@ -91,9 +128,9 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
         assertThat(purchases.refund(user, id).status()).isEqualTo(CreditPurchase.Status.REFUNDED);
         assertThat(purchases.refund(user, id).status()).isEqualTo(CreditPurchase.Status.REFUNDED);
         assertThat(credits.balance(user)).isEqualTo(200);
-        assertThat(ledger.findByUserIdOrderByIdDesc(user, org.springframework.data.domain.PageRequest.of(0, 20)))
-                .filteredOn(l -> l.getReason().equals("PURCHASE_REFUND")).hasSize(1);
-        verifyNoInteractions(toss);
+        assertThat(reasons(user, "PURCHASE_REFUND")).isEqualTo(1);
+        // 토스 결제 취소는 한 번만: 두 번째 요청은 이미 환불된 주문이라 토스를 부르지 않는다
+        verify(toss, times(1)).cancel(eq("payment-" + id), anyString(), anyString());
     }
 
     @Test
@@ -106,9 +143,10 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
             transactions.executeWithoutResult(status -> credits.chargeChat(user, turnId));
         }
         assertThat(credits.balance(user)).isEqualTo(990);
-        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(InsufficientCreditException.class);
+        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(InsufficientCreditException.class)
+                .hasMessageContaining("남은 크레딧(990)이 구매한 크레딧(1000)보다 적어");
         assertThat(purchases.history(user, 0, 20).getContent().get(0).status()).isEqualTo(CreditPurchase.Status.PAID);
-        verifyNoInteractions(toss);
+        verify(toss, never()).cancel(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -253,5 +291,136 @@ class CreditPurchaseIntegrationTest extends ExamIntegrationTest {
             assertThat(tasks.get(1).get(30, TimeUnit.SECONDS).status()).isEqualTo(CreditPurchase.Status.REFUNDED);
         }
         assertThat(credits.balance(user)).isEqualTo(200);
+    }
+
+    @Test
+    void paidOrderShowsRefundDeadlineOf168Hours() {
+        long user = user();
+        String id = paid(user);
+        var paid = purchases.history(user, 0, 20).getContent().get(0);
+        assertThat(paid.refundableUntil()).isEqualTo(paid.paidAt().plus(java.time.Duration.ofHours(168)));
+        purchases.refund(user, id);
+        assertThat(purchases.history(user, 0, 20).getContent().get(0).refundableUntil()).isNull();
+    }
+
+    @Test
+    void refundIsAllowedOnlyWithin168HoursOfPayment() {
+        long user = user();
+        String late = paid(user);
+        paidHoursAgo(late, 168);
+        assertThatThrownBy(() -> purchases.refund(user, late)).isInstanceOf(ConflictException.class)
+                .hasMessageContaining("168시간");
+        assertThat(status(user, late)).isEqualTo(CreditPurchase.Status.PAID);
+        assertThat(credits.balance(user)).isEqualTo(1200);
+        verify(toss, never()).cancel(anyString(), anyString(), anyString());
+
+        String inTime = paid(user);
+        paidHoursAgo(inTime, 167);
+        assertThat(purchases.refund(user, inTime).status()).isEqualTo(CreditPurchase.Status.REFUNDED);
+        assertThat(credits.balance(user)).isEqualTo(1200);
+    }
+
+    @Test
+    void tossRejectionRestoresCreditsAndBlocksFurtherRefund() {
+        long user = user();
+        String id = paid(user);
+        when(toss.cancel(anyString(), anyString(), anyString()))
+                .thenThrow(new PaymentRejectedException("토스에서 환불을 거절했습니다: 취소할 수 없는 결제입니다."));
+        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(PaymentRejectedException.class);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.PAID);
+        assertThat(credits.balance(user)).isEqualTo(1200);
+        assertThat(reasons(user, "PURCHASE_REFUND")).isEqualTo(1);
+        assertThat(reasons(user, "PURCHASE_REFUND_UNDO")).isEqualTo(1);
+        // 거절된 결제는 다시 환불을 요청해도 토스를 부르지 않는다(되돌림 기록은 구매 1건에 한 번)
+        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(ConflictException.class)
+                .hasMessageContaining("거절");
+        verify(toss, times(1)).cancel(anyString(), anyString(), anyString());
+        assertThat(credits.balance(user)).isEqualTo(1200);
+    }
+
+    @Test
+    void unknownCancelResultStaysRefundingAndResumesWithNewKey() {
+        long user = user();
+        String id = paid(user);
+        String key = "payment-" + id;
+        when(toss.cancel(anyString(), anyString(), anyString()))
+                .thenThrow(new PaymentUnavailableException("환불 결과를 확인할 수 없습니다."))
+                .thenAnswer(call -> canceled(call.getArgument(0)));
+        when(toss.find(key)).thenReturn(done(key));
+        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(PaymentUnavailableException.class);
+        // 결과를 모르는 동안 크레딧은 빠진 채로 둔다(그 사이 써 버리면 돈과 크레딧을 둘 다 돌려주게 된다)
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.REFUNDING);
+        assertThat(credits.balance(user)).isEqualTo(200);
+        assertThat(purchases.history(user, 0, 20).getContent().get(0).refundableUntil()).isNull();
+
+        assertThat(purchases.refund(user, id).status()).isEqualTo(CreditPurchase.Status.REFUNDED);
+        assertThat(credits.balance(user)).isEqualTo(200);
+        assertThat(reasons(user, "PURCHASE_REFUND")).isEqualTo(1);
+        var keys = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(toss, times(2)).cancel(eq(key), anyString(), keys.capture());
+        assertThat(keys.getAllValues().get(0)).isNotEqualTo(keys.getAllValues().get(1));
+    }
+
+    @Test
+    void alreadyCanceledPaymentIsConfirmedByLookup() {
+        long user = user();
+        String id = paid(user);
+        String key = "payment-" + id;
+        when(toss.cancel(anyString(), anyString(), anyString()))
+                .thenThrow(new PaymentUnavailableException("환불 결과를 확인할 수 없습니다."));
+        when(toss.find(key)).thenReturn(canceled(key));
+        assertThat(purchases.refund(user, id).status()).isEqualTo(CreditPurchase.Status.REFUNDED);
+        assertThat(credits.balance(user)).isEqualTo(200);
+        assertThat(reasons(user, "PURCHASE_REFUND_UNDO")).isZero();
+    }
+
+    @Test
+    void cancelResponseForAnotherPaymentDoesNotCompleteRefund() {
+        long user = user();
+        String id = paid(user);
+        when(toss.cancel(anyString(), anyString(), anyString())).thenReturn(canceled("payment-other-order"));
+        assertThatThrownBy(() -> purchases.refund(user, id)).isInstanceOf(PaymentUnavailableException.class);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.REFUNDING);
+    }
+
+    @Test
+    void autoRecheckFinishesStaleRefundWithoutUserAction() {
+        long user = user();
+        String id = stuckRefund(user);
+        java.time.Instant at = refundStartedLongAgo(id, 10);
+        when(toss.cancel(eq("payment-" + id), anyString(), anyString())).thenAnswer(call -> canceled(call.getArgument(0)));
+        assertThat(purchases.recheckStaleRefunds(at.plusSeconds(1), 20)).isEqualTo(1);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.REFUNDED);
+        assertThat(credits.balance(user)).isEqualTo(200);
+        assertThat(reasons(user, "PURCHASE_REFUND")).isEqualTo(1);
+    }
+
+    @Test
+    void autoRecheckRestoresCreditsWhenTossRejects() {
+        long user = user();
+        String id = stuckRefund(user);
+        java.time.Instant at = refundStartedLongAgo(id, 20);
+        when(toss.cancel(eq("payment-" + id), anyString(), anyString()))
+                .thenThrow(new PaymentRejectedException("토스에서 환불을 거절했습니다: 취소할 수 없는 결제입니다."));
+        assertThat(purchases.recheckStaleRefunds(at.plusSeconds(1), 20)).isEqualTo(1);
+        assertThat(status(user, id)).isEqualTo(CreditPurchase.Status.PAID);
+        assertThat(credits.balance(user)).isEqualTo(1200);
+        assertThat(reasons(user, "PURCHASE_REFUND_UNDO")).isEqualTo(1);
+    }
+
+    @Test
+    void autoRecheckLeavesUnknownAndRecentRefundsForLater() {
+        long user = user();
+        String unknown = stuckRefund(user);
+        java.time.Instant at = refundStartedLongAgo(unknown, 30);
+        String recent = stuckRefund(user);
+        refundStartedLongAgo(recent, 31);
+        clearInvocations(toss);
+        // 아직도 결과를 모르면 REFUNDING 그대로(크레딧도 빠진 채), 기준 시각 뒤에 시작한 환불은 건드리지 않는다
+        assertThat(purchases.recheckStaleRefunds(at.plusSeconds(1), 20)).isZero();
+        assertThat(status(user, unknown)).isEqualTo(CreditPurchase.Status.REFUNDING);
+        assertThat(status(user, recent)).isEqualTo(CreditPurchase.Status.REFUNDING);
+        verify(toss, times(1)).cancel(anyString(), anyString(), anyString());
+        verify(toss, never()).cancel(eq("payment-" + recent), anyString(), anyString());
     }
 }

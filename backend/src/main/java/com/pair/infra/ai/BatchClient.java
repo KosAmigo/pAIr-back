@@ -16,6 +16,8 @@ import org.springframework.web.client.RestClientResponseException;
 import com.pair.global.config.AiKeyProperties;
 import com.pair.global.config.PairProperties;
 
+import org.springframework.ai.converter.BeanOutputConverter;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -70,7 +72,7 @@ public class BatchClient {
 
     // ── 요청 만들기 (일반 채점과 같은 내용) ─────────────
 
-    /** Claude 채점 요청 (ClaudeJudgeClient 와 같음: 시스템 프롬프트 캐시, 구조화 출력, effort). */
+    /** Claude 채점 요청 (ModelJudge(Claude)와 같음: 시스템 프롬프트 캐시, 구조화 출력, effort). */
     public ObjectNode claudeJudgeParams(String system, String prefix, String user, String schemaJson) {
         PairProperties.Model cfg = props.judge().claude();
         ObjectNode p = json.createObjectNode();
@@ -94,7 +96,7 @@ public class BatchClient {
         return p;
     }
 
-    /** OpenAI 채점 요청 (OpenAiJudgeClient 와 같음: Chat Completions, 구조화 출력, reasoning_effort). */
+    /** OpenAI 채점 요청 (ModelJudge(OpenAI)와 같음: Chat Completions, 구조화 출력, reasoning_effort). */
     public ObjectNode openaiJudgeBody(String system, String prefix, String user, String schemaJson) {
         PairProperties.Model cfg = props.judge().openai();
         ObjectNode b = json.createObjectNode();
@@ -111,6 +113,97 @@ public class BatchClient {
         js.set("schema", parse(schemaJson));
         js.put("strict", true);
         return b;
+    }
+
+    // ── 과제 생성 요청 (ModelClient 바로 호출과 같은 내용) ─────────────
+
+    /**
+     * 구조화 출력(type 의 JSON Schema) 호출 하나의 배치 요청. ModelClient 의 바로 호출과 같은 스키마(BeanOutputConverter)·옵션을 쓴다.
+     * Anthropic 은 스키마가 작으면 엄격 모드(output_config.format), 크면 스키마를 system 안내 글로만 준다(ModelClient 와 같은 기준).
+     * 모델 이름이 claude-* 면 Anthropic, gpt-* 면 OpenAI 요청 본문을 만든다.
+     */
+    public <T> Req generateReq(String customId, String model, String system, String user, Class<T> type, int maxTokens, String effort) {
+        BeanOutputConverter<T> converter = new BeanOutputConverter<>(type);
+        String schema = converter.getJsonSchema();
+        if ("anthropic".equals(vendorOf(model))) {
+            boolean strict = schema.length() <= ModelClient.AnthropicBackend.STRICT_MAX_SCHEMA_CHARS;
+            String sys = strict ? system : (system != null && !system.isBlank() ? system + "\n\n" : "") + converter.getFormat();
+            ObjectNode p = json.createObjectNode();
+            p.put("model", model);
+            p.put("max_tokens", maxTokens);
+            if (sys != null && !sys.isBlank()) p.put("system", sys);
+            ObjectNode msg = p.putArray("messages").addObject();
+            msg.put("role", "user");
+            msg.put("content", user);
+            ObjectNode oc = p.putObject("output_config");
+            if (strict) {
+                ObjectNode format = oc.putObject("format");
+                format.put("type", "json_schema");
+                format.set("schema", parse(schema));
+            }
+            if (effort != null && !effort.isBlank() && !effort.equalsIgnoreCase("none")) oc.put("effort", effort.toLowerCase());
+            if (oc.isEmpty()) p.remove("output_config");
+            return new Req(customId, p);
+        }
+        ObjectNode b = json.createObjectNode();
+        b.put("model", model);
+        ArrayNode msgs = b.putArray("messages");
+        if (system != null && !system.isBlank()) msgs.addObject().put("role", "system").put("content", system);
+        msgs.addObject().put("role", "user").put("content", user);
+        b.put("max_completion_tokens", maxTokens);
+        if (effort != null && !effort.isBlank()) b.put("reasoning_effort", effort);
+        ObjectNode rf = b.putObject("response_format");
+        rf.put("type", "json_schema");
+        ObjectNode js = rf.putObject("json_schema");
+        js.put("name", "custom_schema");
+        js.set("schema", parse(schema));
+        js.put("strict", true);
+        return new Req(customId, b);
+    }
+
+    /** 배치로 받은 글을 type 으로 읽는다(ModelClient 와 같은 변환). 못 읽으면 AiUnavailableException */
+    public static <T> T read(Class<T> type, String text) {
+        try {
+            T v = new BeanOutputConverter<>(type).convert(text);
+            if (v == null) throw new AiUnavailableException("결과가 비어 있습니다.");
+            return v;
+        } catch (RuntimeException e) {
+            if (e instanceof AiUnavailableException a) throw a;
+            throw new AiUnavailableException("결과를 읽지 못했습니다: " + e.getMessage());
+        }
+    }
+
+    /** 모델 이름으로 고른 회사: anthropic 또는 openai (그 밖의 이름은 AiUnavailableException) */
+    public static String vendorOf(String model) {
+        return ModelClient.vendorOf(model);
+    }
+
+    // ── 회사 구분 없이 부르기(과제 생성 창구용. 테스트에서 이 메서드를 바꿔 끼운다) ─────────────
+
+    /** 한 배치(한 회사)로 보내고 배치 id 를 돌려준다. OpenAI 는 한 배치에 한 모델만 넣을 수 있어 부르는 쪽이 모델별로 나눈다 */
+    public String create(String vendor, List<Req> reqs) {
+        return "anthropic".equals(vendor) ? anthropicCreate(reqs) : openaiCreate(reqs);
+    }
+
+    public Status status(String vendor, String id) {
+        return "anthropic".equals(vendor) ? anthropicStatus(id) : openaiStatus(id);
+    }
+
+    /** 끝난 배치의 custom_id → 답. 결과에 없는 요청은 빠져 있다 */
+    public Map<String, Answer> answers(String vendor, Status st) {
+        Map<String, Answer> out = new LinkedHashMap<>();
+        if ("anthropic".equals(vendor)) {
+            if (st.resultsUrl() == null) return out;
+            anthropicResults(st.resultsUrl()).forEach((k, v) -> out.put(k, fromAnthropic(v)));
+        } else {
+            openaiResults(st).forEach((k, v) -> out.put(k, fromOpenai(v)));
+        }
+        return out;
+    }
+
+    public void cancel(String vendor, String id) {
+        if ("anthropic".equals(vendor)) anthropicCancel(id);
+        else openaiCancel(id);
     }
 
     // ── Anthropic ─────────────────────
