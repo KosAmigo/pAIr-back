@@ -25,6 +25,7 @@ public final class BizCheckService {
     static final String FORMAT = "형식"; // M1 전제(5장 형식, 문항 구성)
     static final String CSV = "CSV 형식"; // M1 전제
     static final String CALC = "단답형 검산"; // M1, E4(모든 계산을 자료의 숫자로 다시 할 수 있다)
+    static final String CALC_NUMBERS = "계산식 숫자가 자료에 있음"; // M1, E4(계산에 쓰는 값은 응시자가 자료·문항에서 찾을 수 있다)
     static final String SOURCES = "근거 문서 2개 이상"; // M1, E4, Q4
     static final String TRAP = "함정 근거가 자료에 있음"; // E3, Q3(함정의 근거가 자료에 사실로 있다)
     static final String LEAK = "정답 노출 없음"; // M5(3장 경계: 설명·요구사항에 정답 수치)
@@ -119,6 +120,10 @@ public final class BizCheckService {
                         }
                     }
                     return bad.isEmpty() ? ok("단답형 " + n + "개 모두 계산식 결과와 인정 답안이 같습니다.") : fail(String.join(" / ", bad));
+                }),
+                check(CALC_NUMBERS, d -> {
+                    if (ctx.problem != null) return skipped();
+                    return calcNumbers(d, ctx.visibleCorpus());
                 }),
                 check(SOURCES, d -> {
                     if (ctx.problem != null) return skipped();
@@ -221,6 +226,56 @@ public final class BizCheckService {
     }
 
     // ── 새 검사들 ─────────────────────────────
+
+    /** 계산식의 v(...) 조회 */
+    private static final Pattern CALC_LOOKUP = Pattern.compile("v\\(\"[^\"]*\"\\s*,\\s*\"[^\"]*\"\\s*,\\s*\"[^\"]*\"\\s*\\)");
+    /** round(식, 자릿수) 의 자릿수 */
+    private static final Pattern ROUND_DIGITS = Pattern.compile(",\\s*\\d\\s*\\)");
+    private static final Pattern CALC_LITERAL = Pattern.compile("(?<![\\w.])\\d+(?:\\.\\d+)?(?![\\w.])");
+    /** 단위 바꾸기·기간에 흔히 쓰는 수(퍼센트, 천·만 단위, 12달, 365일 등)는 자료에 없어도 된다 */
+    private static final Set<String> CALC_UNIT = Set.of("0", "1", "2", "7", "12", "24", "30", "52", "60", "100", "365", "1000", "10000", "1000000");
+
+    /**
+     * 단답형 계산식에 v(...) 조회가 아닌 숫자를 직접 쓰면 그 숫자가 응시자에게 보이는 글(설명·요구사항·자료)이나 문항 문구에 있어야 한다.
+     * 없으면 응시자는 그 값을 찾을 수 없어 정답이 정해지지 않는다(2026-11-28 g25: 정답 키가 자료에 없는 '변경안'의 값을 식에 직접 넣음.
+     * 그 값이 우연히 다른 칸 값과 같으면 여기서는 못 잡고, 필요한 자료만 붙인 풀이의 "자료 부족" 답으로 잡는다 — BizSoloSolveService.noData).
+     * 퍼센트 표기 차이(0.25 ↔ 25)는 같은 값으로 본다
+     */
+    static GenCheckResultDto calcNumbers(BizDraftDto d, String visible) {
+        List<String> bad = new ArrayList<>();
+        for (int i = 0; i < d.questions().size(); i++) {
+            var q = d.questions().get(i);
+            if (q.type() != BizDraftDto.Type.SHORT || blank(q.calc())) continue;
+            String where = (visible + "\n" + q.content()).replaceAll("(?<=\\d),(?=\\d{3})", "");
+            String expr = ROUND_DIGITS.matcher(CALC_LOOKUP.matcher(q.calc()).replaceAll("V")).replaceAll(")");
+            Set<String> missing = new LinkedHashSet<>();
+            Matcher m = CALC_LITERAL.matcher(expr);
+            while (m.find()) {
+                String lit = m.group();
+                var value = new java.math.BigDecimal(lit);
+                if (CALC_UNIT.contains(plain(value))) continue;
+                if (!appears(where, value)) missing.add(lit);
+            }
+            if (!missing.isEmpty()) bad.add("Q" + (i + 1) + "(" + String.join(", ", missing) + ")");
+        }
+        return bad.isEmpty() ? ok("단답형 계산식의 숫자가 모두 자료나 문항에 있습니다.")
+                : fail("정답 계산식에 응시자 자료·문항에 없는 숫자가 있습니다: " + String.join(", ", bad)
+                        + ". 응시자가 그 값을 찾을 수 있게 자료(문서·CSV)에 사실로 넣으세요.");
+    }
+
+    /** 글 안에 그 값(또는 100 배·100 분의 1)이 숫자로 있는가 */
+    private static boolean appears(String text, java.math.BigDecimal value) {
+        var hundred = java.math.BigDecimal.valueOf(100);
+        for (var v : List.of(value, value.multiply(hundred), value.divide(hundred))) {
+            if (Pattern.compile("(?<![\\d.])" + Pattern.quote(plain(v)) + "(?![\\d]|\\.\\d)").matcher(text).find()) return true;
+        }
+        return false;
+    }
+
+    /** 끝의 0 을 뗀 보통 표기(25.00 → 25, 0.340 → 0.34) */
+    private static String plain(java.math.BigDecimal v) {
+        return v.stripTrailingZeros().toPlainString();
+    }
 
     /** 숨은 결함이 잡힌다고 한 문항 번호들(Q2 → 2) */
     private static java.util.Set<Integer> trapQuestionNumbers(BizDraftDto d) {

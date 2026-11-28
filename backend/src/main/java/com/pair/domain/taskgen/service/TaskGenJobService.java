@@ -52,12 +52,12 @@ public class TaskGenJobService {
     /**
      * 작업 응답(GET /api/admin/task-gen/{jobId}, jobs 목록의 한 줄). DONE 이어도 passed 가 false 면 확인에 실패한 채 검수 전으로 저장된 것.
      * queuePosition 은 QUEUED 일 때만(내 env 의 대기 순번, 1부터). topic·track·minutes·trap·usage 는 폼에서 꺼낸 값.
-     * waitingBatch: 배치 작업이 모델 호출을 배치에 맡기고 결과를 기다리는 중이면 true(프런트의 '배치 대기 중'). deadlineAt 은 배치 마감 시각
+     * taskDeleted: 끝난(DONE) 작업인데 taskCode 가 비었으면 true(만든 과제를 관리자가 지움). waitingBatch: 배치 작업이 모델 호출을 배치에 맡기고 결과를 기다리는 중이면 true(프런트의 '배치 대기 중'). deadlineAt 은 배치 마감 시각
      */
     public record JobStatus(String jobId, State status, String step, String taskCode, Boolean passed,
             List<GenCheckResultDto> checks, String error, String mode, Instant deadlineAt, Integer queuePosition,
             String batchId, String topic, String track, Integer minutes, Double costUsd, Instant createdAt, Boolean waitingBatch,
-            String trap, String usage) {}
+            String trap, String usage, boolean taskDeleted) {}
 
     /** 자동 생성으로 한 번에 넣은 작업들 */
     public record Batch(String batchId, List<String> jobIds) {}
@@ -239,7 +239,8 @@ public class TaskGenJobService {
         return new JobStatus(j.getId(), State.valueOf(j.getStatus()), j.getStep(), j.getTaskCode(), j.getPassed(), readChecks(j.getChecks()), j.getError(),
                 j.getMode(), j.getDeadlineAt(), position, j.getBatchId(), form == null ? null : form.topic(), form == null ? null : form.track(),
                 form == null ? null : form.minutes(), j.getCostUsd(), j.getCreatedAt(), waitingBatch(j),
-                form == null ? null : form.trap(), form == null ? null : form.usage());
+                form == null ? null : form.trap(), form == null ? null : form.usage(),
+                TaskGenJob.DONE.equals(j.getStatus()) && j.getTaskCode() == null);
     }
 
     /** 실행 중인 배치 작업이 배치에 맡긴 호출의 결과를 기다리는 중인가(task_gen_calls 에 PENDING 이 있음) */

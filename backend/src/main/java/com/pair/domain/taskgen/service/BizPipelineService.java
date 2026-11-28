@@ -55,6 +55,7 @@ public class BizPipelineService implements TaskPipelineService<BizDraftDto> {
         if (n.equals(TaskPipelineService.BLUEPRINT_SENTENCE_CHECK)) return EnumSet.of(Stage.BLUEPRINT);
         if (n.equals(TaskPipelineService.M6_TOTAL_CHECK)) return EnumSet.of(Stage.FILLER); // 자료 전체가 모자람: 관련 적은 자료를 다시(M6)
         if (n.equals(BizCheckService.SOLVE)) return EnumSet.of(Stage.WRITING); // 함정 값이 아닌 답이 나왔다 = 자료만으로 정답이 안 정해짐
+        if (n.equals(BizCheckService.CALC_NUMBERS) || n.equals(BizSoloSolveService.NO_DATA_NAME)) return EnumSet.of(Stage.WRITING); // 계산에 쓰는 값이 자료에 없다: 자료에 사실로 넣는다
         if (n.equals(BizCheckService.CALC) || n.equals(BizCheckService.SOURCES) || n.equals(BizCheckService.WRONG_ANSWERS)
                 || n.equals(BizCheckService.HIDDEN_FLAW) || n.equals(BizCheckService.TRAP_QUESTION)) return EnumSet.of(Stage.ANSWER);
         if (n.equals(TaskPipelineService.MENTION_CHECK) || n.equals(TaskPipelineService.FILLER_CHECK) || n.equals(TaskPipelineService.GEN_META_CHECK)) return EnumSet.of(Stage.WRITING);

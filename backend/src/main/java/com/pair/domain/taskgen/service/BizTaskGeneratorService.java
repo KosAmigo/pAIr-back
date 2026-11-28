@@ -127,7 +127,9 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
         if (!solve.ok() || solo == null || !solo.enabled()) return List.of(solve);
         // 참고: 응시 화면 모델에 필요한 자료만 붙여 풀게 한다(warn, 막지 않음). 놓침이 자료 고르기 때문인지 함정 때문인지 나눠 본다
         try {
-            return List.of(solve, solo.runNeeded(needed).check());
+            BizSoloSolveService.Result r = solo.runNeeded(needed);
+            GenCheckResultDto noData = BizSoloSolveService.noData(r.answers());
+            return noData == null ? List.of(solve, r.check()) : List.of(solve, r.check(), noData);
         } catch (RuntimeException e) {
             return List.of(solve, new GenCheckResultDto(BizSoloSolveService.NEEDED_NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패: " + e.getMessage() + ")", GenCheckResultDto.WARN));
         }
