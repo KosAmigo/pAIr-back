@@ -85,8 +85,23 @@ final class TaskReviewService {
                 : check.resource;
         ReviewResultDto r = calls.call(stage, check.name(), TaskPromptService.check(resource) + OUTPUT, input, ReviewResultDto.class);
         List<Violation> kept = nz(r.violations()).stream().filter(v -> v != null && v.item() != null && (isQ(v) || check.ids.contains(v.item().strip().toUpperCase())))
-                .filter(v -> !(check == Check.LEAK && biz && recordedDefinition(v))).toList(); // g9: 검수 모델이 허용 규칙을 어기고 회사 정의 기록을 걸어 BIZ 8/10이 떨어짐
+                .filter(v -> !(check == Check.LEAK && biz && recordedDefinition(v))) // g9: 검수 모델이 허용 규칙을 어기고 회사 정의 기록을 걸어 BIZ 8/10이 떨어짐
+                .filter(v -> !(check == Check.LEAK && biz && onChoice(v))) // g24: 보기는 코드가 설계도 후보로 넣어 다시 써도 못 고친다
+                .filter(v -> !(biz && selfDenied(v))).toList(); // g24: 정답 키 검수가 "위반이 아닙니다"라고 쓰고 위반으로 냄
         return new Findings(check, kept, nz(r.violations()).size() - kept.size());
+    }
+
+    private static final java.util.regex.Pattern NOT_VIOLATION = java.util.regex.Pattern.compile("위반이?\\s*(아닙니다|아니다|아님|아니므로)");
+
+    /** BIZ 객관식 보기 위치의 위반인가. 보기는 설계도 보기 후보를 코드가 그대로 넣어(정답 보기에 정답 값이 있는 게 당연) 문항 글을 다시 써도 안 바뀐다 */
+    static boolean onChoice(Violation v) {
+        String loc = v.location() == null ? "" : v.location().toLowerCase();
+        return loc.contains("보기") || loc.startsWith("choice");
+    }
+
+    /** 검수 모델이 이유 칸에 위반이 아니라고 스스로 적은 항목 */
+    static boolean selfDenied(Violation v) {
+        return v.fix() != null && NOT_VIOLATION.matcher(v.fix()).find();
     }
 
     private static final java.util.regex.Pattern RECORD_TONE = java.util.regex.Pattern.compile("(적혀|기재|기록|작성되|답변했|남아|표시되|명시되)[가-힣 ]{0,12}[.。]?\s*$");
