@@ -111,6 +111,7 @@ public class AuthAccount {
     public String getMemberStatus() { return memberStatus; }
     public CurrentUser.Role getRole() { return role; }
     public Long getCompanyId() { return companyId; }
+    public java.time.Instant getCreatedAt() { return createdAt; }
     public boolean isActive() { return "ACTIVE".equals(memberStatus); }
     public long getTokenVersion() { return tokenVersion; }
     public boolean isEmailVerified() { return emailVerified; }

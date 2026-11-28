@@ -1,0 +1,37 @@
+{
+  "model" : "gpt-6.1-terra",
+  "attempts" : 1,
+  "inputTokens" : 100,
+  "outputTokens" : 200,
+  "passed" : true,
+  "form" : {
+    "track" : "DEV",
+    "topic" : "쿠폰 할인 계산",
+    "trap" : "쿠폰 두 장을 겹치면 할인이 중복 적용",
+    "usage" : "SELF",
+    "minutes" : 60,
+    "competencies" : [ ]
+  },
+  "checks" : [ {
+    "name" : "시험 실행 검사",
+    "ok" : true,
+    "detail" : "통과",
+    "level" : "fail"
+  } ],
+  "retryError" : null,
+  "details" : {
+    "solo" : {
+      "status" : "skipped",
+      "reason" : "단독 풀이 검사가 실행되지 않음"
+    },
+    "timing" : {
+      "modelCalls" : 1,
+      "runCount" : 0
+    }
+  },
+  "attemptLog" : [ {
+    "number" : 1,
+    "passed" : true,
+    "problems" : [ ]
+  } ]
+}

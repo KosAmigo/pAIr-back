@@ -37,7 +37,7 @@ public class PackageRulesConfig {
     private static final String BASE = "com.pair";
     private static final Set<String> TOP = Set.of("global", "infra", "domain");
     private static final Set<String> GLOBAL = Set.of("config", "error", "security");
-    private static final Set<String> INFRA = Set.of("ai", "sandbox", "storage", "payment", "mail");
+    private static final Set<String> INFRA = Set.of("ai", "sandbox", "storage", "payment", "mail", "xlsx");
     private static final Set<String> LAYERS = Set.of("controller", "service", "dto", "repository", "entity", "exception");
 
     /**

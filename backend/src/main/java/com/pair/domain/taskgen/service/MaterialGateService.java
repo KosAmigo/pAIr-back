@@ -58,19 +58,29 @@ final class MaterialGateService {
         return materials.values().stream().mapToInt(String::length).sum();
     }
 
-    /** 필요한 묶음 검사: 파일이 모두 있고 합계가 맥락 한도의 70% 이하 */
+    /** NOTES.md 가 묶음 상한의 이 비율보다 크면 작성 단계도 다시(코드만 줄이면 코드가 너무 작아진다) */
+    static final double NOTES_SHARE_MAX = 0.4;
+
+    /**
+     * 필요한 묶음 검사: 파일이 모두 있고 합계가 맥락 한도의 70% 이하.
+     * 실패하면 다시 돌릴 단계를 DEV 기준으로 담는다(BIZ 는 언제나 설계도라 부르는 쪽이 withStages 로 바꾼다).
+     */
     static GenCheckResultDto needed(BlueprintDto bp, Map<String, String> materials, AiLimitsDto limits) {
         List<String> needed = bp.neededFiles() == null ? List.of() : bp.neededFiles();
-        if (needed.isEmpty()) return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "설계도에 필요한 자료 묶음(neededFiles)이 없습니다");
+        if (needed.isEmpty()) return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "설계도에 필요한 자료 묶음(neededFiles)이 없습니다").withStages("BLUEPRINT");
         List<String> missing = needed.stream().filter(p -> !materials.containsKey(p)).toList();
         if (!missing.isEmpty()) {
-            return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "필요한 묶음 파일이 만들어지지 않았습니다: " + missing);
+            return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "필요한 묶음 파일이 만들어지지 않았습니다: " + missing)
+                    .withStages(missing.stream().anyMatch(p -> p.contains("NOTES.md")) ? "WRITING" : "CODE"); // NOTES.md 는 작성 단계가 만든다
         }
         int size = bundleChars(materials, needed);
         int max = (int) Math.floor(limits.contextChars() * NEEDED_MAX_RATIO);
         if (size > max) {
+            // 필요한 묶음이 큼(g14: 설계도부터 다시 해도 같은 크기로 또 실패). 코드를 남은 예산에 맞춰 다시 쓰고, NOTES.md 자체가 크면 작성도 다시
+            int notes = bundle(needed).stream().filter(f -> f.endsWith("NOTES.md")).findFirst().map(f -> materials.getOrDefault(f, "").length()).orElse(0);
+            String[] stages = notes > max * NOTES_SHARE_MAX ? new String[] {"WRITING", "CODE"} : new String[] {"CODE"};
             return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "필요한 묶음 " + size + "자가 맥락 한도 " + limits.contextChars() + "자의 70%(" + max
-                    + "자)를 넘습니다. 필요한 묶음 파일을 줄이거나 더 작은 파일로 나눠 고르세요(공개 테스트는 세지 않음). 파일: " + sizes(materials, bundle(needed)));
+                    + "자)를 넘습니다. 필요한 묶음 파일을 줄이거나 더 작은 파일로 나눠 고르세요(공개 테스트는 세지 않음). 파일: " + sizes(materials, bundle(needed))).withStages(stages);
         }
         // 통과해도 파일 목록을 남긴다: 판정(검수)이 어느 파일이 묶음인지 몰라 추측하다 틀렸다(2026-11-27 g15 04·05·06)
         return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, true, "필요한 묶음 " + size + "자 ≤ " + max + "자(한도 " + limits.contextChars() + "자의 70%). 파일: " + sizes(materials, bundle(needed)));

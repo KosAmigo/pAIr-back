@@ -128,7 +128,8 @@ class GenFixRegressionTest {
         var r = BizCheckService.trapQuestions(edited, "", new BizTableService(d.csvFiles()));
         assertThat(r.ok()).isFalse();
         assertThat(r.detail()).contains("Q3").contains(BizCheckService.CELL_SAME);
-        assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.TRAP_QUESTION, false, r.detail()))).containsExactly(Stage.BLUEPRINT);
+        assertThat(r.stages()).containsExactly("BLUEPRINT"); // 단계는 검사가 직접 담는다
+        assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.TRAP_QUESTION, false, r.detail(), r.level(), r.stages()))).containsExactly(Stage.BLUEPRINT);
         // 칸과 다른 값이면 통과하고, 기존의 다른 실패(칸 하나 읽기)는 그대로 정답 쪽
         assertThat(BizCheckService.trapQuestions(d, "", new BizTableService(d.csvFiles())).ok()).isTrue();
         assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.TRAP_QUESTION, false, "Q2 는 자료 칸 하나를 그대로 읽는 문항입니다"))).containsExactly(Stage.ANSWER);
@@ -179,12 +180,12 @@ class GenFixRegressionTest {
         var error = new GenCheckResultDto(SoloSolveService.NAME, true, "AI 단독 풀이를 확인하지 못했어요(모델 호출 실패: timeout)", GenCheckResultDto.WARN);
         for (var c : List.of(skipped, caught, missed, error)) assertThat(c.needsRegeneration()).isFalse();
 
-        assertThat(TaskGeneratorService.soloOutcome(List.of(skipped))).containsEntry("status", "skipped").containsEntry("reason", "다른 검사가 실패해 돌리지 않음");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(caught))).containsEntry("status", "caught").doesNotContainKey("reason");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(missed))).containsEntry("status", "missed");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(error))).containsEntry("status", "error");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(error)).get("reason").toString()).contains("모델 호출 실패: timeout");
-        assertThat(TaskGeneratorService.soloOutcome(List.of())).containsEntry("status", "skipped").containsKey("reason"); // 검사가 아예 없어도 이유를 남긴다
+        assertThat(GenReportService.soloOutcome(List.of(skipped))).containsEntry("status", "skipped").containsEntry("reason", "다른 검사가 실패해 돌리지 않음");
+        assertThat(GenReportService.soloOutcome(List.of(caught))).containsEntry("status", "caught").doesNotContainKey("reason");
+        assertThat(GenReportService.soloOutcome(List.of(missed))).containsEntry("status", "missed");
+        assertThat(GenReportService.soloOutcome(List.of(error))).containsEntry("status", "error");
+        assertThat(GenReportService.soloOutcome(List.of(error)).get("reason").toString()).contains("모델 호출 실패: timeout");
+        assertThat(GenReportService.soloOutcome(List.of())).containsEntry("status", "skipped").containsKey("reason"); // 검사가 아예 없어도 이유를 남긴다
     }
 
     @Test

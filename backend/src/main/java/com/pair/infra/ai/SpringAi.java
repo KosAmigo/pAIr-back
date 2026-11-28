@@ -63,6 +63,7 @@ final class SpringAi {
     /** 스트리밍 중 난 예외를 화면에 보여 줄 수 있는 예외로 바꾼다. */
     static AiUnavailableException unavailable(String provider, RuntimeException e) {
         String m = String.valueOf(e.getMessage());
+        if (creditExhausted(m)) return new AiUnavailableException(creditMessage(provider));
         if (m.contains("401")) return new AiUnavailableException(provider + " API 키가 올바르지 않습니다 (401).");
         if (m.contains("429")) return new AiUnavailableException(provider + " 요청 한도에 걸렸습니다 (429). 잠시 후 다시 시도하세요.");
         return new AiUnavailableException(provider + " 호출 실패: " + shorten(m));
@@ -90,8 +91,25 @@ final class SpringAi {
         }
     }
 
-    /** 다시 불러 볼 만한 오류: 일시 오류(TransientAiException), 429, 과부하(529·overloaded), 5xx */
+    /**
+     * 계정 크레딧·결제 한도가 바닥남(OpenAI 429 insufficient_quota, Anthropic 400 credit balance too low).
+     * 기다려도 풀리지 않으니 다시 부르지 않고 바로 알린다(2026-11-27 g21: 429 요청 한도로 보여 3번씩 다시 부름)
+     */
+    public static boolean creditExhausted(String message) {
+        if (message == null) return false;
+        String m = message.toLowerCase();
+        return m.contains("insufficient_quota") || m.contains("billing hard limit") || m.contains("no credits remaining")
+                || m.contains("credit balance is too low");
+    }
+
+    /** 크레딧 부족 안내(관리자 화면·작업 오류에 그대로 보인다) */
+    public static String creditMessage(String provider) {
+        return provider + " AI 크레딧이 부족합니다. 관리자가 " + provider + " 결제 설정에서 크레딧을 충전한 뒤 다시 시도하세요.";
+    }
+
+    /** 다시 불러 볼 만한 오류: 일시 오류(TransientAiException), 429, 과부하(529·overloaded), 5xx. 크레딧 부족은 빼다 */
     static boolean retryable(RuntimeException e) {
+        if (creditExhausted(String.valueOf(e.getMessage()))) return false;
         if (e instanceof TransientAiException) return true;
         if (!(e instanceof NonTransientAiException)) return false;
         String m = String.valueOf(e.getMessage());
@@ -104,6 +122,9 @@ final class SpringAi {
     }
 
     private static RuntimeException convert(String provider, RuntimeException e) {
+        if ((e instanceof NonTransientAiException || e instanceof TransientAiException) && creditExhausted(String.valueOf(e.getMessage()))) {
+            return new AiUnavailableException(creditMessage(provider));
+        }
         if (e instanceof NonTransientAiException) {
             String m = String.valueOf(e.getMessage());
             if (m.contains("401")) return new AiUnavailableException(provider + " API 키가 올바르지 않습니다 (401).");

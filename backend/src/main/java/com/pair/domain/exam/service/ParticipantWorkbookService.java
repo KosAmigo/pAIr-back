@@ -1,23 +1,17 @@
 package com.pair.domain.exam.service;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
+import com.pair.infra.xlsx.XlsxRosterService;
+import com.pair.infra.xlsx.XlsxStyleService;
 import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.DataValidation;
 import org.apache.poi.ss.usermodel.DataValidationConstraint;
 import org.apache.poi.ss.usermodel.DataValidationHelper;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
-import org.apache.poi.ss.usermodel.PrintSetup;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
-import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellRangeAddressList;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
@@ -40,7 +34,7 @@ public final class ParticipantWorkbookService {
 
     /** xlsx 는 ZIP 이라 "PK" 로 시작한다 */
     public static boolean isXlsx(byte[] bytes) {
-        return bytes.length > 2 && bytes[0] == 'P' && bytes[1] == 'K';
+        return XlsxRosterService.isXlsx(bytes);
     }
 
     public static byte[] results(SessionResultService.Result r) {
@@ -57,7 +51,7 @@ public final class ParticipantWorkbookService {
             wb.getProperties().getCoreProperties().setTitle("pAIr 응시 대상자 등록 양식");
             wb.getProperties().getCoreProperties().setCreator("pAIr");
             wb.getProperties().getExtendedProperties().getUnderlyingProperties().setCompany("pAIr");
-            return toBytes(wb);
+            return XlsxRosterService.toBytes(wb);
         } catch (IOException e) {
             throw new IllegalStateException("양식을 만들지 못했습니다.", e);
         }
@@ -67,7 +61,7 @@ public final class ParticipantWorkbookService {
         XSSFSheet sh = wb.createSheet("대상자 등록");
         sh.setDisplayGridlines(false);
         sh.setTabColor(XlsxStyleService.BRAND);
-        widths(sh, 8, 20, 38, 30);
+        XlsxRosterService.widths(sh, 8, 20, 38, 30);
 
         XSSFCellStyle title = st.style(st.font(20, true, XlsxStyleService.WHITE, false), XlsxStyleService.BRAND, HorizontalAlignment.LEFT, false, false);
         title.setIndention((short) 1);
@@ -145,7 +139,7 @@ public final class ParticipantWorkbookService {
         XSSFSheet sh = wb.createSheet("작성 안내");
         sh.setDisplayGridlines(false);
         sh.setTabColor(XlsxStyleService.MUTED);
-        widths(sh, 8, 24, 70);
+        XlsxRosterService.widths(sh, 8, 24, 70);
 
         XSSFCellStyle title = st.style(st.font(18, true, XlsxStyleService.WHITE, false), XlsxStyleService.BRAND, HorizontalAlignment.LEFT, false, false);
         title.setIndention((short) 1);
@@ -194,72 +188,19 @@ public final class ParticipantWorkbookService {
 
     /** 대상자 xlsx 읽기: 첫 시트에서 '이름', '이메일' 열이 있는 행을 찾고(안내 띠가 위에 있어도 된다) 그 아래를 읽는다. 줄 번호는 엑셀 행 번호 */
     public static List<ParticipantCsvService.CsvRow> readParticipants(byte[] bytes, int maxRows) {
-        try (Workbook wb = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
-            Sheet sheet = wb.getSheetAt(0);
-            DataFormatter fmt = new DataFormatter();
-            int headerRow = -1;
-            int nameCol = -1;
-            int emailCol = -1;
-            for (int i = 0; i <= Math.min(sheet.getLastRowNum(), HEADER_SEARCH_ROWS) && headerRow < 0; i++) {
-                Row r = sheet.getRow(i);
-                if (r == null) continue;
-                List<String> cells = new ArrayList<>();
-                for (Cell c : r) {
-                    while (cells.size() < c.getColumnIndex()) cells.add("");
-                    cells.add(fmt.formatCellValue(c));
-                }
-                int n = ParticipantCsvService.findColumn(cells, "이름", "name");
-                int e = ParticipantCsvService.findColumn(cells, "이메일", "email");
-                if (n >= 0 && e >= 0) {
-                    headerRow = i;
-                    nameCol = n;
-                    emailCol = e;
-                }
-            }
-            if (headerRow < 0) throw new IllegalArgumentException("'이름', '이메일' 열을 찾지 못했습니다. 양식을 내려받아 써 주세요.");
-
-            List<ParticipantCsvService.CsvRow> rows = new ArrayList<>();
-            for (int i = headerRow + 1; i <= sheet.getLastRowNum(); i++) {
-                Row r = sheet.getRow(i);
-                if (r == null) continue;
-                String name = fmt.formatCellValue(r.getCell(nameCol)).trim();
-                String email = fmt.formatCellValue(r.getCell(emailCol)).trim();
-                if (name.isEmpty() && email.isEmpty()) continue;
-                if (SAMPLE_EMAIL.equalsIgnoreCase(email)) continue; // 지우지 않은 예시 행
-                if (rows.size() >= maxRows) throw new IllegalArgumentException("한 번에 " + maxRows + "명까지 올릴 수 있습니다.");
-                rows.add(new ParticipantCsvService.CsvRow(i + 1, name, email));
-            }
-            return rows;
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (IOException | RuntimeException e) {
-            throw new IllegalArgumentException("엑셀 파일을 읽지 못했습니다. 양식을 내려받아 써 주세요.");
-        }
-    }
-
-    // ── 공통 ──
-
-    static void widths(Sheet sh, int... chars) {
-        for (int c = 0; c < chars.length; c++) sh.setColumnWidth(c, chars[c] * 256 + 512);
+        return XlsxRosterService.readRows(bytes, HEADER_SEARCH_ROWS,
+                cells -> {
+                    int n = ParticipantCsvService.findColumn(cells, "이름", "name");
+                    int e = ParticipantCsvService.findColumn(cells, "이메일", "email");
+                    return n >= 0 && e >= 0 ? new int[] {n, e} : null;
+                },
+                "'이름', '이메일' 열을 찾지 못했습니다. 양식을 내려받아 써 주세요.", SAMPLE_EMAIL, 1, maxRows,
+                "한 번에 " + maxRows + "명까지 올릴 수 있습니다.",
+                (row, v) -> new ParticipantCsvService.CsvRow(row, v.get(0), v.get(1)));
     }
 
     /** 인쇄: 가로 한 쪽 너비에 맞추고, 머리글·바닥글에 플랫폼 이름을 넣는다 */
-    static void footerSetup(Sheet sh, int repeatHeaderRow) {
-        PrintSetup ps = sh.getPrintSetup();
-        ps.setLandscape(true);
-        ps.setPaperSize(PrintSetup.A4_PAPERSIZE);
-        ps.setFitWidth((short) 1);
-        ps.setFitHeight((short) 0);
-        sh.setFitToPage(true);
-        sh.getHeader().setLeft("pAIr");
-        sh.getFooter().setLeft("pAIr 실전 시험 플랫폼");
-        sh.getFooter().setRight("&P / &N");
-        if (repeatHeaderRow > 0) sh.setRepeatingRows(new CellRangeAddress(repeatHeaderRow, repeatHeaderRow, -1, -1));
-    }
-
-    static byte[] toBytes(Workbook wb) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        wb.write(out);
-        return out.toByteArray();
+    private static void footerSetup(Sheet sh, int repeatHeaderRow) {
+        XlsxRosterService.printSetup(sh, repeatHeaderRow, "pAIr 실전 시험 플랫폼", "pAIr");
     }
 }
