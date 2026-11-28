@@ -102,4 +102,20 @@ public interface AttemptRepository extends JpaRepository<Attempt, Long> {
             group by a.mode
             """)
     java.util.List<ModeCount> countByModeBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
+
+    /** 관리자 회원 목록: 회원별 자가진단 응시 요약 */
+    interface UserAttemptSummary {
+        Long getUserId();
+        long getStarted();
+        long getSubmitted();
+        java.time.Instant getLastStartedAt();
+    }
+
+    @org.springframework.data.jpa.repository.Query("""
+            select a.userId as userId, count(a) as started, count(a.submittedAt) as submitted, max(a.startedAt) as lastStartedAt
+            from Attempt a
+            where a.userId in :userIds and a.deletedAt is null and a.mode = com.pair.domain.attempt.entity.Attempt.Mode.SELF
+            group by a.userId
+            """)
+    java.util.List<UserAttemptSummary> summarizeSelfByUsers(@org.springframework.data.repository.query.Param("userIds") java.util.Collection<Long> userIds);
 }

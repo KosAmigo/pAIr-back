@@ -33,8 +33,16 @@ public record AdminStatsResponse(LocalDate from, LocalDate to, Members members, 
      * @param scored 채점 리포트가 나온 응시 수
      * @param averageScore 채점 총점(0~100점) 평균, 소수 첫째 자리. 채점된 응시가 없으면 null
      * @param bands 점수 구간별 응시 수 (0-39, 40-59, 60-79, 80-100)
+     * @param tasks 과제별 채점 수와 평균 점수 (채점이 많은 순)
      */
-    public record Exams(long started, long submitted, long scored, Double averageScore, List<Band> bands) {}
+    public record Exams(long started, long submitted, long scored, Double averageScore, List<Band> bands, List<TaskScore> tasks) {}
+
+    /**
+     * 과제 하나의 채점 수와 평균 점수 (기간 안에 시작한 응시 기준)
+     *
+     * @param taskId 과제 코드 (화면 주소에 쓰는 ID)
+     */
+    public record TaskScore(String taskId, String title, long scored, Double averageScore) {}
 
     /** 실전: 회차·대상자 수와 응시(대상자 × 과제) 수·점수 */
     public record LiveExams(long sessions, long participants, long started, long submitted, long scored,

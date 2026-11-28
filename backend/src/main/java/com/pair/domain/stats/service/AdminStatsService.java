@@ -32,6 +32,8 @@ import com.pair.domain.exam.service.SessionAiCostService;
 import com.pair.domain.scoring.repository.JudgeCallRepository;
 import com.pair.domain.stats.dto.AdminStatsResponse;
 import com.pair.domain.stats.dto.AdminStatsResponse.Band;
+import com.pair.domain.task.entity.Task;
+import com.pair.domain.task.repository.TaskRepository;
 import com.pair.domain.taskgen.repository.TaskGenCallRepository;
 import com.pair.domain.taskgen.repository.TaskGenJobRepository;
 import com.pair.global.security.CurrentUser;
@@ -62,6 +64,7 @@ public class AdminStatsService {
     private final CreditPurchaseRepository purchases;
     private final ExamSessionRepository sessions;
     private final ExamParticipantRepository participants;
+    private final TaskRepository tasks;
     private final SessionAiCostService pricing;
     private final ObjectMapper json;
     private final Clock clock;
@@ -69,7 +72,7 @@ public class AdminStatsService {
     public AdminStatsService(AuthAccountRepository accounts, CompanyRepository companies, AttemptRepository attempts,
             AttemptReportRepository reports, ChatTurnRepository chatTurns, JudgeCallRepository judgeCalls,
             TaskGenCallRepository taskGenCalls, TaskGenJobRepository taskGenJobs, CreditPurchaseRepository purchases,
-            ExamSessionRepository sessions, ExamParticipantRepository participants, SessionAiCostService pricing,
+            ExamSessionRepository sessions, ExamParticipantRepository participants, TaskRepository tasks, SessionAiCostService pricing,
             ObjectMapper json, Clock clock) {
         this.accounts = accounts;
         this.companies = companies;
@@ -82,6 +85,7 @@ public class AdminStatsService {
         this.purchases = purchases;
         this.sessions = sessions;
         this.participants = participants;
+        this.tasks = tasks;
         this.pricing = pricing;
         this.json = json;
         this.clock = clock;
@@ -116,8 +120,31 @@ public class AdminStatsService {
 
     private AdminStatsResponse.Exams selfDiagnosis(Instant start, Instant end) {
         Counts c = counts(Attempt.Mode.SELF, start, end);
-        Scores s = scores(Attempt.Mode.SELF, start, end);
-        return new AdminStatsResponse.Exams(c.started, c.submitted, s.scored(), s.average(), s.bands());
+        List<AttemptReportRepository.ModeReport> rows = reports.findReportsBetween(start, end).stream()
+                .filter(r -> r.getMode() == Attempt.Mode.SELF).toList();
+        Scores s = summarize(scoresOf(rows));
+        return new AdminStatsResponse.Exams(c.started, c.submitted, s.scored(), s.average(), s.bands(), taskScores(rows));
+    }
+
+    /** 과제별 채점 수와 평균 점수. 과제 이름은 한 번에 불러온다 */
+    private List<AdminStatsResponse.TaskScore> taskScores(List<AttemptReportRepository.ModeReport> rows) {
+        Map<Long, List<Double>> byTask = new java.util.LinkedHashMap<>();
+        for (AttemptReportRepository.ModeReport r : rows) {
+            Double score = scoreOf(json, r.getReport());
+            if (score != null && r.getTaskId() != null) byTask.computeIfAbsent(r.getTaskId(), k -> new ArrayList<>()).add(score);
+        }
+        Map<Long, Task> tasksById = new java.util.HashMap<>();
+        tasks.findAllById(byTask.keySet()).forEach(t -> tasksById.put(t.getId(), t));
+        return byTask.entrySet().stream()
+                .map(e -> {
+                    Task t = tasksById.get(e.getKey());
+                    Scores s = summarize(e.getValue());
+                    return new AdminStatsResponse.TaskScore(t == null ? String.valueOf(e.getKey()) : t.getCode(),
+                            t == null ? "(지운 과제)" : t.getTitle(), s.scored(), s.average());
+                })
+                .sorted(java.util.Comparator.comparingLong(AdminStatsResponse.TaskScore::scored).reversed()
+                        .thenComparing(AdminStatsResponse.TaskScore::title))
+                .toList();
     }
 
     private AdminStatsResponse.LiveExams live(Instant start, Instant end) {
@@ -137,17 +164,23 @@ public class AdminStatsService {
     record Scores(long scored, Double average, List<Band> bands) {}
 
     private Scores scores(Attempt.Mode mode, Instant start, Instant end) {
-        List<Double> values = new ArrayList<>();
-        for (AttemptReportRepository.ModeReport r : reports.findReportsBetween(start, end)) {
-            if (r.getMode() != mode) continue;
-            Double score = scoreOf(r.getReport());
-            if (score != null) values.add(score);
-        }
-        return summarize(values);
+        return summarize(scoresOf(reports.findReportsBetween(start, end).stream().filter(r -> r.getMode() == mode).toList()));
     }
 
-    /** 리포트 총점을 100점 만점으로. 채점이 끝나지 않았거나(버전 2 미만, total 없음) 읽을 수 없으면 null */
-    Double scoreOf(String report) {
+    private List<Double> scoresOf(List<AttemptReportRepository.ModeReport> rows) {
+        List<Double> values = new ArrayList<>();
+        for (AttemptReportRepository.ModeReport r : rows) {
+            Double score = scoreOf(json, r.getReport());
+            if (score != null) values.add(score);
+        }
+        return values;
+    }
+
+    /**
+     * 리포트 총점을 100점 만점으로. 채점이 끝나지 않았거나(버전 2 미만, total 없음) 읽을 수 없으면 null.
+     * 관리자 회원 목록(AdminMemberService)도 같은 기준을 쓴다.
+     */
+    public static Double scoreOf(ObjectMapper json, String report) {
         if (report == null || report.isBlank()) return null;
         try {
             JsonNode node = json.readTree(report);

@@ -106,6 +106,48 @@ class AdminStatsIntegrationTest extends BearerIntegrationTest {
         assertThat(after.ai().selfChat().inputTokens() - before.ai().selfChat().inputTokens()).isEqualTo(10);
         assertThat(after.ai().selfChat().outputTokens() - before.ai().selfChat().outputTokens()).isEqualTo(20);
         assertThat(after.ai().unpricedModels()).contains("stats-test-model");
+        // 과제별: 이 과제의 채점 수가 하나 늘었다
+        assertThat(scoredOf(after, TestTasks.SELF_DEV) - scoredOf(before, TestTasks.SELF_DEV)).isEqualTo(1);
+        assertThat(after.selfDiagnosis().tasks()).filteredOn(t -> t.taskId().equals(TestTasks.SELF_DEV))
+                .singleElement().satisfies(t -> {
+                    assertThat(t.title()).isEqualTo("주문 처리 장애 원인 분석");
+                    assertThat(t.averageScore()).isNotNull();
+                });
+    }
+
+    @Test
+    void memberListShowsSelfDiagnosisSummaryAndFilters() throws Exception {
+        String name = "목록" + UUID.randomUUID().toString().substring(0, 8);
+        AuthResponse user = AuthTestSupport.signup(auth, mail, name, "member-" + UUID.randomUUID() + "@example.com");
+        String attemptId = attempts.startSelf(TestTasks.SELF_DEV, user.user().id()).id();
+        reports.saveAndFlush(new AttemptReport(Long.parseLong(attemptId), "{\"version\":2,\"total\":72,\"max\":100,\"items\":[]}", Instant.now()));
+        String admin = adminToken();
+
+        mvc.perform(get("/api/admin/members").param("q", name.toUpperCase()).header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.members[0].name").value(name))
+                .andExpect(jsonPath("$.members[0].role").value("USER"))
+                .andExpect(jsonPath("$.members[0].selfAttempts").value(1))
+                .andExpect(jsonPath("$.members[0].selfSubmitted").value(0))
+                .andExpect(jsonPath("$.members[0].averageScore").value(72.0))
+                .andExpect(jsonPath("$.members[0].creditBalance").isNumber())
+                .andExpect(jsonPath("$.members[0].lastAttemptAt").isNotEmpty());
+        // 역할 필터: 기업 계정만 보면 이 회원은 없다
+        mvc.perform(get("/api/admin/members").param("q", name).param("role", "COMPANY").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0));
+        // 일반 회원은 볼 수 없고, 잘못된 값은 400
+        mvc.perform(get("/api/admin/members").header("Authorization", "Bearer " + user.token()))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/admin/members").param("size", "500").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/admin/members").param("role", "NOPE").header("Authorization", "Bearer " + admin))
+                .andExpect(status().isBadRequest());
+    }
+
+    private static long scoredOf(AdminStatsResponse s, String taskId) {
+        return s.selfDiagnosis().tasks().stream().filter(t -> t.taskId().equals(taskId)).mapToLong(t -> t.scored()).sum();
     }
 
     @Test
