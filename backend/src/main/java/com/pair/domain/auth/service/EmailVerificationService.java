@@ -9,14 +9,9 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
-import org.springframework.mail.MailPreparationException;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -24,6 +19,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.pair.infra.mail.MailClient;
 import com.pair.infra.mail.MailLayout;
 
 /** 이메일 인증 코드 발급·발송·검증을 처리한다. */
@@ -35,13 +31,13 @@ public class EmailVerificationService {
 
     private final EmailVerificationRepository verifications;
     private final TransactionTemplate tx;
-    private final JavaMailSender mail;
+    private final MailClient mail;
     private final String mailFrom;
     private final Duration codeLifetime;
     private final Duration resendInterval;
     private final int maxAttempts;
 
-    public EmailVerificationService(EmailVerificationRepository verifications, TransactionTemplate tx, JavaMailSender mail,
+    public EmailVerificationService(EmailVerificationRepository verifications, TransactionTemplate tx, MailClient mail,
             @Value("${pair.auth.email-from:no-reply@pair.test}") String mailFrom,
             @Value("${pair.auth.email-verification.code-lifetime:10m}") Duration codeLifetime,
             @Value("${pair.auth.email-verification.resend-interval:60s}") Duration resendInterval,
@@ -92,7 +88,7 @@ public class EmailVerificationService {
         });
 
         try {
-            mail.send(codeMessage(email, code, noExpiry));
+            sendCodeMail(email, code, noExpiry);
         } catch (MailException e) {
             discard(email, codeHash);
             throw new MailDeliveryException(e);
@@ -107,7 +103,7 @@ public class EmailVerificationService {
     }
 
     /** 시험 초대 메일과 같은 서식(머리띠·표·안내 문구)으로 만든 인증 코드 메일. 글자 본문도 함께 담는다 */
-    private MimeMessage codeMessage(String email, String code, boolean noExpiry) {
+    private void sendCodeMail(String email, String code, boolean noExpiry) {
         long minutes = Math.max(1, codeLifetime.toMinutes());
         String expiry = noExpiry ? "새 코드를 요청하거나 인증에 성공할 때까지 유효합니다."
                 : "발송 시각부터 %d분 동안 유효합니다.".formatted(minutes);
@@ -126,18 +122,7 @@ public class EmailVerificationService {
                 List.of("본인이 요청하지 않았다면 이 메일을 무시해 주세요.",
                         "인증 코드는 본인만 사용하세요. 다른 사람과 공유하지 마세요."),
                 "이 메일은 pAIr 회원가입 인증을 위해 자동으로 발송되었습니다. 회신하지 않아도 됩니다.");
-        try {
-            MimeMessage mime = mail.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
-            helper.setFrom(mailFrom);
-            helper.setTo(email);
-            helper.setSubject("[pAIr] 회원가입 이메일 인증 코드");
-            helper.setText(text, html);
-            helper.addInline(MailLayout.LOGO_CID, MailLayout.LOGO, "image/png");
-            return mime;
-        } catch (MessagingException e) {
-            throw new MailPreparationException(e);
-        }
+        mail.send(mailFrom, email, "[pAIr] 회원가입 이메일 인증 코드", text, html);
     }
 
     /**

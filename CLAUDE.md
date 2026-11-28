@@ -15,7 +15,7 @@ Enforced by `global/config/PackageRulesConfig`: a violation fails `./gradlew cla
 com.pair
 ├─ PairApplication
 ├─ global/   config/ error/ security/
-├─ infra/    ai/ sandbox/ storage/ payment/ mail/
+├─ infra/    ai/ sandbox/ storage/ payment/ mail/ xlsx/
 └─ domain/<feature>/   controller/ service/ dto/ repository/ entity/ exception/
 ```
 - Only these folders. No classes directly in `domain/<feature>/`, no empty folders. A new `domain/<feature>/` is fine; new folders under `global/` or `infra/` need a team decision.
