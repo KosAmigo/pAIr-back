@@ -58,19 +58,29 @@ final class MaterialGateService {
         return materials.values().stream().mapToInt(String::length).sum();
     }
 
-    /** 필요한 묶음 검사: 파일이 모두 있고 합계가 맥락 한도의 70% 이하 */
+    /** NOTES.md 가 묶음 상한의 이 비율보다 크면 작성 단계도 다시(코드만 줄이면 코드가 너무 작아진다) */
+    static final double NOTES_SHARE_MAX = 0.4;
+
+    /**
+     * 필요한 묶음 검사: 파일이 모두 있고 합계가 맥락 한도의 70% 이하.
+     * 실패하면 다시 돌릴 단계를 DEV 기준으로 담는다(BIZ 는 언제나 설계도라 부르는 쪽이 withStages 로 바꾼다).
+     */
     static GenCheckResultDto needed(BlueprintDto bp, Map<String, String> materials, AiLimitsDto limits) {
         List<String> needed = bp.neededFiles() == null ? List.of() : bp.neededFiles();
-        if (needed.isEmpty()) return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "설계도에 필요한 자료 묶음(neededFiles)이 없습니다");
+        if (needed.isEmpty()) return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "설계도에 필요한 자료 묶음(neededFiles)이 없습니다").withStages("BLUEPRINT");
         List<String> missing = needed.stream().filter(p -> !materials.containsKey(p)).toList();
         if (!missing.isEmpty()) {
-            return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "필요한 묶음 파일이 만들어지지 않았습니다: " + missing);
+            return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "필요한 묶음 파일이 만들어지지 않았습니다: " + missing)
+                    .withStages(missing.stream().anyMatch(p -> p.contains("NOTES.md")) ? "WRITING" : "CODE"); // NOTES.md 는 작성 단계가 만든다
         }
         int size = bundleChars(materials, needed);
         int max = (int) Math.floor(limits.contextChars() * NEEDED_MAX_RATIO);
         if (size > max) {
+            // 필요한 묶음이 큼(g14: 설계도부터 다시 해도 같은 크기로 또 실패). 코드를 남은 예산에 맞춰 다시 쓰고, NOTES.md 자체가 크면 작성도 다시
+            int notes = bundle(needed).stream().filter(f -> f.endsWith("NOTES.md")).findFirst().map(f -> materials.getOrDefault(f, "").length()).orElse(0);
+            String[] stages = notes > max * NOTES_SHARE_MAX ? new String[] {"WRITING", "CODE"} : new String[] {"CODE"};
             return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, false, "필요한 묶음 " + size + "자가 맥락 한도 " + limits.contextChars() + "자의 70%(" + max
-                    + "자)를 넘습니다. 필요한 묶음 파일을 줄이거나 더 작은 파일로 나눠 고르세요(공개 테스트는 세지 않음). 파일: " + sizes(materials, bundle(needed)));
+                    + "자)를 넘습니다. 필요한 묶음 파일을 줄이거나 더 작은 파일로 나눠 고르세요(공개 테스트는 세지 않음). 파일: " + sizes(materials, bundle(needed))).withStages(stages);
         }
         // 통과해도 파일 목록을 남긴다: 판정(검수)이 어느 파일이 묶음인지 몰라 추측하다 틀렸다(2026-11-27 g15 04·05·06)
         return new GenCheckResultDto(TaskPipelineService.M6_NEEDED_CHECK, true, "필요한 묶음 " + size + "자 ≤ " + max + "자(한도 " + limits.contextChars() + "자의 70%). 파일: " + sizes(materials, bundle(needed)));
@@ -175,6 +185,30 @@ final class MaterialGateService {
         int target = (int) Math.ceil(limits.contextChars() * TOTAL_TARGET_RATIO);
         int others = Math.max(0, target - neededChars);
         return Math.max(800, (int) Math.ceil(others / (double) count / 100.0) * 100);
+    }
+
+    /**
+     * BIZ 관련 적은 자료 파일별 글자 수(2026-11-27 g16~g18): 크기만 보고 필요한 파일을 고르지 못하게, 헷갈리는 자료는 필요한 파일 하나의 평균 분량으로 쓰고
+     * 나머지 관련 적은 자료가 자료 전체 목표(한도 2.3배)까지 남는 분량을 나눠 갖는다. 헷갈리는 자료만 있으면 모두 같은 분량(perFillerChars)
+     */
+    static Map<String, Integer> bizFillerChars(BlueprintDto bp, int neededChars, AiLimitsDto limits) {
+        Map<String, Integer> out = new java.util.LinkedHashMap<>();
+        if (bp.fillers() == null || bp.fillers().isEmpty()) return out;
+        List<BlueprintDto.Filler> confusing = bp.fillers().stream().filter(BlueprintDto.Filler::confusingFlag).toList();
+        List<BlueprintDto.Filler> plain = bp.fillers().stream().filter(f -> !f.confusingFlag()).toList();
+        int even = perFillerChars(bp, neededChars, limits);
+        if (confusing.isEmpty() || plain.isEmpty()) {
+            bp.fillers().forEach(f -> out.put(f.path(), even));
+            return out;
+        }
+        int neededCount = Math.max(1, bp.neededFiles() == null ? 1 : bp.neededFiles().size());
+        int like = Math.max(800, (int) Math.round(neededChars / (double) neededCount / 100.0) * 100); // 필요한 파일 하나의 평균
+        like = Math.min(like, even); // 고르게 나눈 분량보다 크게 만들지는 않는다
+        int target = (int) Math.ceil(limits.contextChars() * TOTAL_TARGET_RATIO);
+        int rest = Math.max(0, target - neededChars - like * confusing.size());
+        int each = Math.max(800, (int) Math.ceil(rest / (double) plain.size() / 100.0) * 100);
+        for (var f : bp.fillers()) out.put(f.path(), f.confusingFlag() ? like : each);
+        return out;
     }
 
     private static String sizes(Map<String, String> materials, List<String> paths) {

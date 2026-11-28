@@ -230,18 +230,28 @@ final class TaskWritingService {
                 + String.join(" / ", dup.subList(0, Math.min(5, dup.size()))));
     }
 
+    /** 한자 검사 글 표시 → 그 글을 만든 단계 */
+    private static final Map<String, String> HAN_TAG_STAGE = Map.of("[설계도]", "BLUEPRINT", "[작성]", "WRITING", "[코드]", "CODE",
+            "[문항]", "QUESTIONS", "[정답]", "ANSWER", "[관련 적은 자료]", "FILLER");
+
     /** 한국어 글에 한자(중국어 글자)가 섞였는지. parts 는 [단계 표시] → 그 단계가 만든 글. 상세 앞의 표시가 다시 돌릴 단계를 가른다 */
     static GenCheckResultDto hanCheck(Map<String, String> parts) {
         List<String> bad = new ArrayList<>();
+        java.util.Set<String> stages = new java.util.LinkedHashSet<>();
         parts.forEach((tag, text) -> {
             if (text == null) return;
             var m = HAN.matcher(text);
             List<String> hits = new ArrayList<>();
             while (m.find() && hits.size() < 3) hits.add(text.substring(Math.max(0, m.start() - 8), Math.min(text.length(), m.end() + 8)).replaceAll("\\s+", " "));
-            if (!hits.isEmpty()) bad.add(tag + " " + hits);
+            if (!hits.isEmpty()) {
+                bad.add(tag + " " + hits);
+                String stage = HAN_TAG_STAGE.get(tag);
+                if (stage != null) stages.add(stage);
+            }
         });
         if (bad.isEmpty()) return new GenCheckResultDto(TaskPipelineService.HAN_CHECK, true, "한자가 섞여 있지 않습니다.");
-        return new GenCheckResultDto(TaskPipelineService.HAN_CHECK, false, "한국어 글에 한자(중국어 글자)가 있습니다. 한글로만 쓰세요: " + String.join(" / ", bad));
+        return new GenCheckResultDto(TaskPipelineService.HAN_CHECK, false, "한국어 글에 한자(중국어 글자)가 있습니다. 한글로만 쓰세요: " + String.join(" / ", bad))
+                .withStages(stages.toArray(String[]::new));
     }
 
     private static final List<String> META_WORDS = List.of("응시자", "AI 어시스턴트", "이 페이지는", "이 문서는 과제", "과제 설계");
@@ -380,7 +390,10 @@ final class TaskWritingService {
             }
         }
         if (hits.isEmpty()) return new GenCheckResultDto(TaskPipelineService.FLAW_POINTER_CHECK, true, "요청 글·문항이 필요한 자료 이름을 대지 않습니다.", GenCheckResultDto.WARN);
-        return new GenCheckResultDto(TaskPipelineService.FLAW_POINTER_CHECK, false, "요청 글·문항이 필요한 자료를 지목합니다: " + String.join(" / ", hits.stream().distinct().limit(5).toList()), GenCheckResultDto.WARN);
+        List<String> shown = hits.stream().distinct().limit(5).toList();
+        boolean inQuestions = shown.stream().anyMatch(h -> h.startsWith("[문항]")), inRequest = shown.stream().anyMatch(h -> h.startsWith("[요청 글]"));
+        String[] stages = !inQuestions ? new String[] {"WRITING"} : inRequest ? new String[] {"WRITING", "QUESTIONS"} : new String[] {"QUESTIONS"};
+        return new GenCheckResultDto(TaskPipelineService.FLAW_POINTER_CHECK, false, "요청 글·문항이 필요한 자료를 지목합니다: " + String.join(" / ", shown), GenCheckResultDto.WARN).withStages(stages);
     }
 
     private static final Pattern FILE_MENTION = Pattern.compile("[\\w가-힣.\\-]+\\.(?:java|md|pdf|csv|json|log|txt|xml|yml)\\b", Pattern.CASE_INSENSITIVE);

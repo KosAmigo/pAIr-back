@@ -1,11 +1,13 @@
 package com.pair.domain.company.controller;
 
+import com.pair.domain.company.dto.CompanyDeletionResponse;
 import com.pair.domain.company.dto.CompanyDetailResponse;
 import com.pair.domain.company.dto.CompanyMemberResponse;
 import com.pair.domain.company.dto.CompanyResponse;
 import com.pair.domain.company.dto.InquiryResponse;
 import com.pair.domain.company.dto.ManagerReplacementResponse;
 import com.pair.domain.company.dto.ReplaceManagerRequest;
+import com.pair.domain.company.service.CompanyDeletionService;
 import com.pair.domain.company.service.CompanyInquiryService;
 import com.pair.domain.company.service.CompanyMemberService;
 import java.util.List;
@@ -13,6 +15,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,10 +36,13 @@ public class AdminCompanyController {
 
     private final CompanyInquiryService inquiries;
     private final CompanyMemberService members;
+    private final CompanyDeletionService deletion;
 
-    public AdminCompanyController(CompanyInquiryService inquiries, CompanyMemberService members) {
+    public AdminCompanyController(CompanyInquiryService inquiries, CompanyMemberService members,
+            CompanyDeletionService deletion) {
         this.inquiries = inquiries;
         this.members = members;
+        this.deletion = deletion;
     }
 
     @GetMapping("/company-inquiries")
@@ -78,6 +84,13 @@ public class AdminCompanyController {
     public CompanyDetailResponse company(CurrentUser user, @PathVariable Long companyId) {
         requireAdmin(user);
         return members.company(companyId);
+    }
+
+    /** 회사 삭제(소프트 삭제): 진행 중 회차가 있으면 409. 예정 회차 취소, 대기 초대 무효, 멤버 탈퇴 처리 */
+    @DeleteMapping("/companies/{companyId}")
+    public CompanyDeletionResponse delete(CurrentUser user, @PathVariable long companyId) {
+        requireAdmin(user);
+        return deletion.delete(companyId, user);
     }
 
     @PostMapping("/companies/{companyId}/manager")

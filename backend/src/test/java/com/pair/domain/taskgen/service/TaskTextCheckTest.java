@@ -175,6 +175,7 @@ class TaskTextCheckTest {
         var routed = StageRouteService.reroute(b, onBlueprint, List.of());
 
         assertThat(routed.name()).isEqualTo(TaskPipelineService.BLUEPRINT_SENTENCE_CHECK);
+        assertThat(routed.stages()).containsExactly("BLUEPRINT");
         assertThat(routed.detail()).contains("기록이나 관측").contains(TaskPipelineService.LEAK_A_GATE).contains(TaskPipelineServiceTest.F_SETTLE);
         assertThat(DevPipelineService.owners(routed, List.of())).containsExactly(TaskPipelineService.Stage.BLUEPRINT);
         assertThat(BizPipelineService.owners(routed)).containsExactly(TaskPipelineService.Stage.BLUEPRINT);

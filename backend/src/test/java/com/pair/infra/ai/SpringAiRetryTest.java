@@ -55,4 +55,27 @@ class SpringAiRetryTest {
         }, w -> { }));
         assertEquals(1, calls.get());
     }
+
+    /** 크레딧 부족(OpenAI insufficient_quota 429, Anthropic credit balance 400)은 다시 부르지 않고 크레딧 부족으로 알린다 */
+    @Test
+    void creditExhaustedIsNotRetriedAndSaysSo() {
+        for (RuntimeException e : List.of(
+                new NonTransientAiException("HTTP 429 - {\"error\": {\"message\": \"You have no credits remaining.\", \"type\": \"insufficient_quota\"}}"),
+                new TransientAiException("429 insufficient_quota Billing hard limit has been reached"),
+                new NonTransientAiException("HTTP 400 - Your credit balance is too low to access the Anthropic API."))) {
+            AtomicInteger calls = new AtomicInteger();
+            AiUnavailableException thrown = assertThrows(AiUnavailableException.class, () -> SpringAi.call("OpenAI", () -> {
+                calls.incrementAndGet();
+                throw e;
+            }, w -> { }));
+            assertEquals(1, calls.get());
+            assertTrue(thrown.getMessage().contains("크레딧이 부족합니다"), thrown.getMessage());
+        }
+    }
+
+    @Test
+    void streamingCreditErrorSaysCredit() {
+        assertTrue(SpringAi.unavailable("OpenAI", new RuntimeException("429 insufficient_quota")).getMessage().contains("크레딧이 부족합니다"));
+        assertTrue(SpringAi.unavailable("OpenAI", new RuntimeException("429 rate limit")).getMessage().contains("요청 한도"));
+    }
 }

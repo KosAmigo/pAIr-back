@@ -76,7 +76,7 @@ public class CheckpointService {
         Checkpoint cp = checkpoints.findById(checkpointId)
                 .orElseThrow(() -> new NoSuchElementException("없는 체크포인트입니다."));
         Attempt attempt = records.findById(cp.getAttemptId()).orElseThrow();
-        if (!userId.equals(attempt.getUserId())) throw new NoSuchElementException("없는 체크포인트입니다.");
+        if (attempt.isDeleted() || !userId.equals(attempt.getUserId())) throw new NoSuchElementException("없는 체크포인트입니다.");
         String name = label == null ? "" : label.strip();
         if (name.length() > MAX_LABEL) throw new IllegalArgumentException("이름은 " + MAX_LABEL + "자 이하로 입력하세요.");
         cp.rename(name.isEmpty() ? null : name);

@@ -2,13 +2,27 @@ package com.pair.domain.credit.entity;
 
 import java.time.Instant;
 
+import com.pair.global.error.ConflictException;
 import jakarta.persistence.*;
 
 @Entity
 @Table(name = "credit_purchases")
 public class CreditPurchase {
     /** REFUNDING: 크레딧을 빼고 토스 결제 취소를 요청한 중간 상태 */
-    public enum Status { READY, CONFIRMING, PAID, FAILED, CANCELED, REFUNDING, REFUNDED }
+    public enum Status {
+        READY, CONFIRMING, PAID, FAILED, CANCELED, REFUNDING, REFUNDED;
+
+        /** 허용 전이 표. FAILED·CANCELED·REFUNDED는 끝 상태다 */
+        public boolean canMoveTo(Status next) {
+            return switch (this) {
+                case READY -> next == CONFIRMING || next == CANCELED;
+                case CONFIRMING -> next == PAID || next == FAILED;
+                case PAID -> next == REFUNDING;
+                case REFUNDING -> next == REFUNDED || next == PAID;
+                case FAILED, CANCELED, REFUNDED -> false;
+            };
+        }
+    }
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "purchase_id")
@@ -52,25 +66,33 @@ public class CreditPurchase {
         this.createdAt = Instant.now();
     }
 
+    private void move(Status next) {
+        if (!status.canMoveTo(next)) throw new ConflictException("주문 상태가 변경되었습니다.");
+        status = next;
+    }
+
     public void beginConfirmation(String key, String idempotencyKey) {
-        status = Status.CONFIRMING;
+        move(Status.CONFIRMING);
         paymentKey = key;
         confirmationKey = idempotencyKey;
         confirmationStartedAt = Instant.now();
     }
-    public void paid() { status = Status.PAID; paidAt = Instant.now(); }
-    public void failed() { status = Status.FAILED; }
-    public void cancel() { status = Status.CANCELED; }
+    public void paid() { move(Status.PAID); paidAt = Instant.now(); }
+    public void failed() { move(Status.FAILED); }
+    public void cancel() { move(Status.CANCELED); }
     public void beginRefund(String idempotencyKey) {
-        status = Status.REFUNDING;
+        move(Status.REFUNDING);
         refundKey = idempotencyKey;
         refundStartedAt = Instant.now();
     }
     /** 결과를 모르는 취소를 다시 요청한다(새 멱등 키). 처음 요청한 시각은 그대로 둔다 */
-    public void retryRefund(String idempotencyKey) { refundKey = idempotencyKey; }
-    public void refunded() { status = Status.REFUNDED; refundedAt = Instant.now(); }
+    public void retryRefund(String idempotencyKey) {
+        if (status != Status.REFUNDING) throw new ConflictException("주문 상태가 변경되었습니다.");
+        refundKey = idempotencyKey;
+    }
+    public void refunded() { move(Status.REFUNDED); refundedAt = Instant.now(); }
     /** 토스가 취소를 거절했다: 결제는 그대로 완료 상태다 */
-    public void refundRejected() { status = Status.PAID; }
+    public void refundRejected() { move(Status.PAID); }
     public Long getId() { return id; }
     public Long getUserId() { return userId; }
     public int getCredits() { return credits; }

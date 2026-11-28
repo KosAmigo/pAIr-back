@@ -1,31 +1,24 @@
 package com.pair.domain.company.service;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.DataValidation;
 import org.apache.poi.ss.usermodel.DataValidationConstraint;
 import org.apache.poi.ss.usermodel.DataValidationHelper;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
-import org.apache.poi.ss.usermodel.PrintSetup;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
-import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellRangeAddressList;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import com.pair.domain.company.dto.InquiryMemberInputDto;
-import com.pair.domain.exam.service.XlsxStyleService;
+import com.pair.infra.xlsx.XlsxRosterService;
+import com.pair.infra.xlsx.XlsxStyleService;
 import com.pair.global.security.CurrentUser;
 
 /**
@@ -46,7 +39,7 @@ public final class CompanyMemberWorkbookService {
 
     /** xlsx 는 ZIP 이라 "PK" 로 시작한다 */
     public static boolean isXlsx(byte[] bytes) {
-        return bytes != null && bytes.length > 2 && bytes[0] == 'P' && bytes[1] == 'K';
+        return XlsxRosterService.isXlsx(bytes);
     }
 
     // ── 양식 ──
@@ -58,9 +51,7 @@ public final class CompanyMemberWorkbookService {
             guideSheet(wb, st);
             wb.getProperties().getCoreProperties().setTitle("pAIr 기업 회원 명단 양식");
             wb.getProperties().getCoreProperties().setCreator("pAIr");
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            wb.write(out);
-            return out.toByteArray();
+            return XlsxRosterService.toBytes(wb);
         } catch (IOException e) {
             throw new IllegalStateException("양식을 만들지 못했습니다.", e);
         }
@@ -70,7 +61,7 @@ public final class CompanyMemberWorkbookService {
         XSSFSheet sh = wb.createSheet("회원 명단");
         sh.setDisplayGridlines(false);
         sh.setTabColor(XlsxStyleService.BRAND);
-        widths(sh, 8, 20, 38, 16, 30);
+        XlsxRosterService.widths(sh, 8, 20, 38, 16, 30);
 
         XSSFCellStyle title = st.style(st.font(20, true, XlsxStyleService.WHITE, false), XlsxStyleService.BRAND, HorizontalAlignment.LEFT, false, false);
         title.setIndention((short) 1);
@@ -153,7 +144,7 @@ public final class CompanyMemberWorkbookService {
         XSSFSheet sh = wb.createSheet("작성 안내");
         sh.setDisplayGridlines(false);
         sh.setTabColor(XlsxStyleService.MUTED);
-        widths(sh, 8, 24, 70);
+        XlsxRosterService.widths(sh, 8, 24, 70);
 
         XSSFCellStyle title = st.style(st.font(18, true, XlsxStyleService.WHITE, false), XlsxStyleService.BRAND, HorizontalAlignment.LEFT, false, false);
         title.setIndention((short) 1);
@@ -201,72 +192,33 @@ public final class CompanyMemberWorkbookService {
 
     /** 엑셀 명단 읽기. 줄 번호는 엑셀 행 번호로 알려 준다 */
     public static List<InquiryMemberInputDto> read(byte[] bytes) {
-        try (Workbook wb = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
-            Sheet sheet = wb.getSheetAt(0);
-            DataFormatter fmt = new DataFormatter();
-            int headerRow = -1, nameCol = -1, emailCol = -1, roleCol = -1;
-            for (int i = 0; i <= Math.min(sheet.getLastRowNum(), HEADER_SEARCH_ROWS) && headerRow < 0; i++) {
-                Row r = sheet.getRow(i);
-                if (r == null) continue;
-                int n = -1, e = -1, ro = -1;
-                for (Cell c : r) {
-                    String v = fmt.formatCellValue(c).replace("*", "").trim();
-                    if (v.equals("회원명")) n = c.getColumnIndex();
-                    else if (v.equals("회원이메일")) e = c.getColumnIndex();
-                    else if (v.equals("역할")) ro = c.getColumnIndex();
-                }
-                if (n >= 0 && e >= 0 && ro >= 0) {
-                    headerRow = i;
-                    nameCol = n;
-                    emailCol = e;
-                    roleCol = ro;
-                }
-            }
-            if (headerRow < 0) throw new IllegalArgumentException("'회원명', '회원이메일', '역할' 열을 찾지 못했습니다. 양식을 내려받아 써 주세요.");
-
-            List<InquiryMemberInputDto> rows = new ArrayList<>();
-            for (int i = headerRow + 1; i <= sheet.getLastRowNum(); i++) {
-                Row r = sheet.getRow(i);
-                if (r == null) continue;
-                String name = fmt.formatCellValue(r.getCell(nameCol)).trim();
-                String email = fmt.formatCellValue(r.getCell(emailCol)).trim();
-                String role = fmt.formatCellValue(r.getCell(roleCol)).trim();
-                if (name.isEmpty() && email.isEmpty() && role.isEmpty()) continue;
-                if (SAMPLE_EMAIL.equalsIgnoreCase(email)) continue; // 지우지 않은 예시 행
-                CurrentUser.Role parsed;
-                try {
-                    parsed = CurrentUser.Role.valueOf(role.toUpperCase(Locale.ROOT));
-                } catch (IllegalArgumentException ex) {
-                    parsed = null;
-                }
-                if (parsed != CurrentUser.Role.MANAGER && parsed != CurrentUser.Role.PROCTOR) {
-                    throw new IllegalArgumentException("엑셀 %d번째 행의 역할은 MANAGER 또는 PROCTOR여야 합니다.".formatted(i + 1));
-                }
-                rows.add(new InquiryMemberInputDto(name, email, parsed));
-            }
-            return rows;
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (IOException | RuntimeException e) {
-            throw new IllegalArgumentException("엑셀 파일을 읽지 못했습니다. 양식을 내려받아 써 주세요.");
-        }
-    }
-
-    // ── 공통 ──
-
-    private static void widths(Sheet sh, int... chars) {
-        for (int c = 0; c < chars.length; c++) sh.setColumnWidth(c, chars[c] * 256 + 512);
+        return XlsxRosterService.readRows(bytes, HEADER_SEARCH_ROWS,
+                cells -> {
+                    int n = -1, e = -1, ro = -1;
+                    for (int c = 0; c < cells.size(); c++) {
+                        String v = cells.get(c).replace("*", "").trim();
+                        if (v.equals("회원명")) n = c;
+                        else if (v.equals("회원이메일")) e = c;
+                        else if (v.equals("역할")) ro = c;
+                    }
+                    return n >= 0 && e >= 0 && ro >= 0 ? new int[] {n, e, ro} : null;
+                },
+                "'회원명', '회원이메일', '역할' 열을 찾지 못했습니다. 양식을 내려받아 써 주세요.", SAMPLE_EMAIL, 1, 0, null,
+                (row, v) -> {
+                    CurrentUser.Role parsed;
+                    try {
+                        parsed = CurrentUser.Role.valueOf(v.get(2).toUpperCase(Locale.ROOT));
+                    } catch (IllegalArgumentException ex) {
+                        parsed = null;
+                    }
+                    if (parsed != CurrentUser.Role.MANAGER && parsed != CurrentUser.Role.PROCTOR) {
+                        throw new IllegalArgumentException("엑셀 %d번째 행의 역할은 MANAGER 또는 PROCTOR여야 합니다.".formatted(row));
+                    }
+                    return new InquiryMemberInputDto(v.get(0), v.get(1), parsed);
+                });
     }
 
     private static void printSetup(Sheet sh, int repeatHeaderRow) {
-        PrintSetup ps = sh.getPrintSetup();
-        ps.setLandscape(true);
-        ps.setPaperSize(PrintSetup.A4_PAPERSIZE);
-        ps.setFitWidth((short) 1);
-        ps.setFitHeight((short) 0);
-        sh.setFitToPage(true);
-        sh.getFooter().setLeft("pAIr 기업 회원 명단");
-        sh.getFooter().setRight("&P / &N");
-        sh.setRepeatingRows(new CellRangeAddress(repeatHeaderRow, repeatHeaderRow, -1, -1));
+        XlsxRosterService.printSetup(sh, repeatHeaderRow, "pAIr 기업 회원 명단", null);
     }
 }

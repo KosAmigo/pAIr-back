@@ -145,7 +145,7 @@ public class ReplayCompareService {
         } catch (NumberFormatException e) {
             throw new NoSuchElementException("없는 응시입니다: " + id);
         }
-        if (r.getMode() != Attempt.Mode.SELF || !userId.equals(r.getUserId())) throw new NoSuchElementException("없는 응시입니다: " + id);
+        if (r.isDeleted() || r.getMode() != Attempt.Mode.SELF || !userId.equals(r.getUserId())) throw new NoSuchElementException("없는 응시입니다: " + id);
         return r;
     }
 

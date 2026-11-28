@@ -28,4 +28,8 @@ public interface ExamSessionRepository extends JpaRepository<ExamSession, Long> 
 
     /** 종료 시각이 지났는데 아직 자동 제출 처리가 안 된 회차 (취소한 회차는 닫을 것이 없다) */
     List<ExamSession> findByEndsAtLessThanEqualAndClosedAtIsNullAndCanceledAtIsNull(Instant now);
+
+    /** 관리자 통계: 기간 안에 시작하는(취소하지 않은) 회차 수 */
+    @org.springframework.data.jpa.repository.Query("select count(s) from ExamSession s where s.canceledAt is null and s.startsAt >= :from and s.startsAt < :to")
+    long countStartingBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
 }

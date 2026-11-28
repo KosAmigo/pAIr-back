@@ -341,8 +341,8 @@ class TaskReviewLoopTest {
     void kindsOfFailures() {
         var leak = new GenCheckResultDto(TaskPipelineService.LEAK_A_GATE, false, "M5 [description] 원인 → 지운다");
         var key = new GenCheckResultDto(TaskPipelineService.KEY_GATE, false, "M2 [Q1] 정답 키");
-        var han = new GenCheckResultDto(TaskPipelineService.HAN_CHECK, false, "한자 [작성] [..] / [정답] [..]");
-        var hanText = new GenCheckResultDto(TaskPipelineService.HAN_CHECK, false, "한자 [작성] [..]");
+        var han = TaskWritingService.hanCheck(new java.util.LinkedHashMap<>(java.util.Map.of("[작성]", "結論은 이렇다")) {{ put("[정답]", "結論은 이렇다"); }});
+        var hanText = TaskWritingService.hanCheck(java.util.Map.of("[작성]", "結論은 이렇다"));
         var dup = new GenCheckResultDto(TaskPipelineService.DUPLICATE_CHECK, false, "같은 문장");
 
         assertThat(StageRouteService.kinds(List.of(leak, dup), BizPipelineService::owners)).containsExactly("text");
@@ -583,7 +583,7 @@ class TaskReviewLoopTest {
     @DisplayName("점검 프롬프트는 resources/taskgen/review/ 파일에서 읽고, 고치는 단계의 프롬프트는 없다")
     void promptsComeFromResources() {
         for (var c : TaskReviewService.Check.values()) assertThat(TaskPromptService.check(c.resource)).isNotBlank();
-        assertThat(TaskPromptService.check("leak")).contains("M5").contains("NOTES").contains("문항·보기").doesNotContain("M2").doesNotContain("C1");
+        assertThat(TaskPromptService.check("leak-dev")).contains("M5").contains("NOTES").contains("문항·보기").doesNotContain("M2").doesNotContain("C1");
         assertThat(TaskPromptService.check("backing-cases")).contains("기대 결과를 직접 정하는가").doesNotContain("M5");
         assertThat(TaskPromptService.check("backing")).contains("null").doesNotContain("M5");
         assertThat(TaskPromptService.check("answer-key")).contains("판단 지점을 객관식으로 물음").contains("계산 검증은 코드가 합니다");
@@ -715,6 +715,7 @@ class TaskReviewLoopTest {
         assertThat(results.get(names.indexOf(BizCheckService.FORMAT)).ok()).isFalse();
         assertThat(results.get(names.indexOf(BizCheckService.FORMAT)).detail()).contains("정답 보기가 1개");
         assertThat(results).noneMatch(r -> r.detail() != null && r.detail().contains("형식이 맞지 않아 확인하지 않았습니다"));
-        assertThat(BizPipelineService.owners(new GenCheckResultDto(BizCheckService.FORMAT, false, "객관식은 정답 보기가 1개여야 합니다"))).contains(Stage.QUESTIONS);
+        assertThat(results.get(names.indexOf(BizCheckService.FORMAT)).stages()).containsExactly("QUESTIONS", "ANSWER");
+        assertThat(BizPipelineService.owners(results.get(names.indexOf(BizCheckService.FORMAT)))).contains(Stage.QUESTIONS);
     }
 }

@@ -80,7 +80,7 @@ final class DevCheckService {
         return List.of(
                 check(FORMAT, d -> {
                     String p = DevRunService.formatProblem(d);
-                    return p == null ? ok("경로와 필수 항목이 모두 맞습니다.") : fail(p);
+                    return p == null ? ok("경로와 필수 항목이 모두 맞습니다.") : formatFail(p, d);
                 }),
                 check(NO_HINT, d -> {
                     for (var f : d.files() == null ? List.<DevDraftDto.FileDraft>of() : d.files()) {
@@ -409,7 +409,7 @@ final class DevCheckService {
             @Override
             public GenCheckResultDto run(DevDraftDto d) {
                 GenCheckResultDto r = body.apply(d);
-                return new GenCheckResultDto(name, r.ok(), r.detail(), r.level());
+                return new GenCheckResultDto(name, r.ok(), r.detail(), r.level(), r.stages());
             }
         };
     }
@@ -429,9 +429,21 @@ final class DevCheckService {
             @Override
             public GenCheckResultDto run(DevDraftDto d) {
                 GenCheckResultDto r = body.apply(d);
-                return new GenCheckResultDto(name, r.ok(), r.detail(), level);
+                return new GenCheckResultDto(name, r.ok(), r.detail(), level, r.stages());
             }
         };
+    }
+
+    /** 형식 실패에 다시 돌릴 단계를 붙인다: 정답 쪽 항목 → 정답 쪽, 설명·요구사항·후속 → 작성, 시작 코드·테스트·코드 경로 → 시작 코드, 그 밖의 경로 → 정답 쪽. 안 맞으면 비움(설계도부터) */
+    static GenCheckResultDto formatFail(String problem, DevDraftDto draft) {
+        String d = problem == null ? "" : problem;
+        GenCheckResultDto r = fail(d);
+        List<String> codePaths = draft == null || draft.files() == null ? List.of() : draft.files().stream().filter(f -> f != null && f.path() != null).map(DevDraftDto.FileDraft::path).toList();
+        if (d.contains("정답 설명") || d.contains("숨은 테스트") || d.contains("정답 코드")) return r.withStages("ANSWER");
+        if (d.contains("설명(description)") || d.contains("요구사항(requirements)") || d.contains("후속")) return r.withStages("WRITING");
+        if (d.contains("시작 코드") || d.contains("공개 테스트") || d.contains("같은 경로") || codePaths.stream().anyMatch(d::contains)) return r.withStages("CODE");
+        if (d.contains("경로")) return r.withStages("ANSWER");
+        return r;
     }
 
     private static GenCheckResultDto ok(String detail) {

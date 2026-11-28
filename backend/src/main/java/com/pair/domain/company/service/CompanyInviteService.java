@@ -127,15 +127,20 @@ public class CompanyInviteService {
         if (!InviteTokenService.looksValid(rawToken)) throw new UnauthorizedException("유효하지 않은 기업 초대입니다.");
         CompanyInvite invite = invites.findByTokenHash(InviteTokenService.hash(rawToken))
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 기업 초대입니다."));
-        if (!invite.isUsable(Instant.now())) throw new UnauthorizedException("만료되었거나 이미 사용된 기업 초대입니다.");
+        if (!invite.isUsable(Instant.now()) || companyDeleted(invite)) throw new UnauthorizedException("만료되었거나 이미 사용된 기업 초대입니다.");
         return invite;
+    }
+
+    /** 삭제한 회사의 초대는 삭제 때 무효로 하지만, 그 사이에 만든 초대도 받지 않는다 */
+    private boolean companyDeleted(CompanyInvite invite) {
+        return companies.findById(invite.getCompanyId()).map(Company::isDeleted).orElse(true);
     }
 
     private CompanyInvite findUsableForUpdate(String rawToken) {
         if (!InviteTokenService.looksValid(rawToken)) throw new UnauthorizedException("유효하지 않은 기업 초대입니다.");
         CompanyInvite invite = invites.lockByTokenHash(InviteTokenService.hash(rawToken))
                 .orElseThrow(() -> new UnauthorizedException("유효하지 않은 기업 초대입니다."));
-        if (!invite.isUsable(Instant.now())) throw new UnauthorizedException("만료되었거나 이미 사용된 기업 초대입니다.");
+        if (!invite.isUsable(Instant.now()) || companyDeleted(invite)) throw new UnauthorizedException("만료되었거나 이미 사용된 기업 초대입니다.");
         return invite;
     }
 

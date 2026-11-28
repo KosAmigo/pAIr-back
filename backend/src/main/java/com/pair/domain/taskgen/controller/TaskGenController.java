@@ -4,12 +4,14 @@ import com.pair.domain.taskgen.dto.AutoTopicDto;
 import com.pair.domain.taskgen.dto.TaskGenAutoRequest;
 import com.pair.domain.taskgen.dto.TaskGenAutoResponse;
 import com.pair.domain.taskgen.dto.TaskGenContentResponse;
+import com.pair.domain.taskgen.dto.TaskGenCostEstimateResponse;
 import com.pair.domain.taskgen.dto.TaskGenPreviewRequest;
 import com.pair.domain.taskgen.dto.TaskGenStartRequest;
 import com.pair.domain.taskgen.dto.TaskGenStartResponse;
 import com.pair.domain.taskgen.repository.GeneratedTaskRepository;
 import com.pair.domain.taskgen.service.TaskAutoService;
 import com.pair.domain.taskgen.service.TaskGenContentService;
+import com.pair.domain.taskgen.service.TaskGenCostService;
 import com.pair.domain.taskgen.service.TaskGenJobService;
 import com.pair.domain.taskgen.service.TaskSuggestionService;
 import java.util.List;
@@ -37,8 +39,11 @@ public class TaskGenController {
     private final TaskSuggestionService suggestions;
     private final TaskAutoService auto;
     private final TaskGenContentService content;
+    private final TaskGenCostService cost;
 
-    public TaskGenController(TaskGenJobService jobs, GeneratedTaskRepository writer, TaskSuggestionService suggestions, TaskAutoService auto, TaskGenContentService content) {
+    public TaskGenController(TaskGenJobService jobs, GeneratedTaskRepository writer, TaskSuggestionService suggestions, TaskAutoService auto, TaskGenContentService content,
+            TaskGenCostService cost) {
+        this.cost = cost;
         this.content = content;
         this.auto = auto;
         this.suggestions = suggestions;
@@ -59,6 +64,14 @@ public class TaskGenController {
     public List<AutoTopicDto> preview(CurrentUser user, @RequestBody TaskGenPreviewRequest req) {
         requireAdmin(user);
         return auto.preview(req, user.userId());
+    }
+
+    /** 만들기 전 예상 비용: ?track=DEV|BIZ&minutes=&mode=NOW|BATCH&count= (최근 같은 조건 작업의 실제 비용 중앙값, 없으면 상한에서 어림) */
+    @GetMapping("/task-gen/cost-estimate")
+    public TaskGenCostEstimateResponse costEstimate(CurrentUser user, @RequestParam(required = false) String track,
+            @RequestParam(required = false) Integer minutes, @RequestParam(required = false) String mode, @RequestParam(required = false) Integer count) {
+        requireAdmin(user);
+        return cost.estimate(track, minutes, mode, count);
     }
 
     /** 자동 생성 시작: topics 가 있으면 그대로, 없으면 서버가 고른다. 주제마다 작업 하나. 202 {batchId, jobIds} */

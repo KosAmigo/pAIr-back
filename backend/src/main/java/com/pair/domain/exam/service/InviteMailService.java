@@ -3,20 +3,16 @@ package com.pair.domain.exam.service;
 import com.pair.domain.exam.dto.InvitesCreatedDto;
 import com.pair.domain.exam.dto.SessionNoticeDto;
 import com.pair.global.security.InviteTokenService;
+import com.pair.infra.mail.MailClient;
 import com.pair.infra.mail.MailLayout;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.mail.MailException;
-import org.springframework.mail.MailPreparationException;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
@@ -41,12 +37,12 @@ public class InviteMailService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(KST);
 
-    private final JavaMailSender mail;
+    private final MailClient mail;
     private final ExamParticipantRepository participants;
     private final TransactionTemplate tx;
     private final ExamProperties props;
 
-    public InviteMailService(JavaMailSender mail, ExamParticipantRepository participants, TransactionTemplate tx,
+    public InviteMailService(MailClient mail, ExamParticipantRepository participants, TransactionTemplate tx,
             ExamProperties props) {
         this.mail = mail;
         this.participants = participants;
@@ -94,28 +90,12 @@ public class InviteMailService {
     /** @return 실패하면 오류 문구, 성공하면 null */
     private String trySend(Mail msg, Long participantId, String kind) {
         try {
-            mail.send(toMime(msg));
+            mail.send(props.mailFrom(), msg.to(), msg.subject(), msg.text(), msg.html());
             return null;
         } catch (MailException e) {
             // 메일 주소는 개인정보라 로그에 남기지 않는다
             log.warn("{} 메일 발송 실패: participantId={} ({})", kind, participantId, e.getClass().getSimpleName());
             return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-        }
-    }
-
-    /** 글자 본문과 HTML 본문을 함께 담는다. HTML 을 못 보는 클라이언트는 글자 본문을 보여 준다 */
-    private MimeMessage toMime(Mail m) {
-        try {
-            MimeMessage mime = mail.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mime, true, "UTF-8");
-            helper.setFrom(props.mailFrom());
-            helper.setTo(m.to());
-            helper.setSubject(m.subject());
-            helper.setText(m.text(), m.html());
-            helper.addInline(MailLayout.LOGO_CID, MailLayout.LOGO, "image/png");
-            return mime;
-        } catch (MessagingException e) {
-            throw new MailPreparationException(e);
         }
     }
 

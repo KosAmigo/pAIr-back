@@ -8,6 +8,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import com.pair.infra.xlsx.XlsxRosterService;
+import com.pair.infra.xlsx.XlsxStyleService;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.ComparisonOperator;
 import org.apache.poi.ss.usermodel.ConditionalFormattingRule;
@@ -52,7 +54,7 @@ final class ResultWorkbookService {
             table(wb, st, r);
             wb.getProperties().getCoreProperties().setTitle("pAIr 회차 결과 - " + r.title());
             wb.getProperties().getCoreProperties().setCreator("pAIr");
-            return ParticipantWorkbookService.toBytes(wb);
+            return XlsxRosterService.toBytes(wb);
         } catch (IOException e) {
             throw new IllegalStateException("결과 파일을 만들지 못했습니다.", e);
         }
@@ -64,7 +66,7 @@ final class ResultWorkbookService {
         XSSFSheet sh = wb.createSheet("요약");
         sh.setDisplayGridlines(false);
         sh.setTabColor(XlsxStyleService.BRAND);
-        ParticipantWorkbookService.widths(sh, 16, 16, 16, 16, 16, 16);
+        XlsxRosterService.widths(sh, 16, 16, 16, 16, 16, 16);
 
         XSSFCellStyle title = st.style(st.font(20, true, XlsxStyleService.WHITE, false), XlsxStyleService.BRAND, HorizontalAlignment.LEFT, false, false);
         title.setIndention((short) 1);
@@ -103,7 +105,7 @@ final class ResultWorkbookService {
         row = distribution(sh, st, r, row);
         row = itemAverages(sh, st, r, row + 1);
         events(sh, st, r, row + 1);
-        ParticipantWorkbookService.footerSetup(sh, 0);
+        XlsxRosterService.printSetup(sh, 0, "pAIr 실전 시험 플랫폼", "pAIr");
     }
 
     private static long totalEvents(SessionResultService.Result r) {
@@ -260,7 +262,7 @@ final class ResultWorkbookService {
         for (int c = 0; c < head.size(); c++) sh.setColumnWidth(c, (c < fixed.length ? fixed[c] : 14) * 256 + 512);
         sh.createFreezePane(3, TABLE_HEADER_ROW + 1);
         sh.setAutoFilter(new CellRangeAddress(TABLE_HEADER_ROW, lastRow, 0, lastCol));
-        ParticipantWorkbookService.footerSetup(sh, TABLE_HEADER_ROW);
+        XlsxRosterService.printSetup(sh, TABLE_HEADER_ROW, "pAIr 실전 시험 플랫폼", "pAIr");
     }
 
     private static XSSFCellStyle body(XlsxStyleService st, org.apache.poi.xssf.usermodel.XSSFColor fill, HorizontalAlignment h, String format) {

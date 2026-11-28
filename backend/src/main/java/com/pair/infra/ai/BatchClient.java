@@ -239,9 +239,17 @@ public class BatchClient {
         return new Status(s + " " + c, "ended".equals(s), url, null, null, label(s), finished, finished + c.path("processing").asInt());
     }
 
+    /**
+     * 배치 결과 파일(JSONL)은 UTF-8 로 읽는다. body(String.class) 는 응답에 charset 이 없으면 ISO-8859-1 로 읽어
+     * 한글이 깨졌다(2026-11-28 g22: Sonnet 검수의 인용 문장이 깨져 자료 대조 거르기가 안 맞음)
+     */
+    static String utf8(byte[] body) {
+        return body == null ? "" : new String(body, StandardCharsets.UTF_8);
+    }
+
     /** custom_id → result ({type: succeeded|errored|canceled|expired, message, error}) */
     public Map<String, JsonNode> anthropicResults(String resultsUrl) {
-        String text = call("Anthropic 배치 결과", () -> anthropic().get().uri(resultsUrl).retrieve().body(String.class));
+        String text = utf8(call("Anthropic 배치 결과", () -> anthropic().get().uri(resultsUrl).retrieve().body(byte[].class)));
         Map<String, JsonNode> out = new LinkedHashMap<>();
         for (String line : lines(text)) {
             JsonNode n = parse(line);
@@ -309,7 +317,7 @@ public class BatchClient {
         Map<String, JsonNode> out = new LinkedHashMap<>();
         for (String fileId : new String[] {st.outputFileId(), st.errorFileId()}) {
             if (fileId == null || fileId.isBlank()) continue;
-            String text = call("OpenAI 배치 결과", () -> openai().get().uri("/v1/files/{id}/content", fileId).retrieve().body(String.class));
+            String text = utf8(call("OpenAI 배치 결과", () -> openai().get().uri("/v1/files/{id}/content", fileId).retrieve().body(byte[].class)));
             for (String line : lines(text)) {
                 JsonNode n = parse(line);
                 out.put(n.path("custom_id").asText(), n);
@@ -381,6 +389,7 @@ public class BatchClient {
             return v;
         } catch (RestClientResponseException e) {
             String body = e.getResponseBodyAsString();
+            if (SpringAi.creditExhausted(body)) throw new AiUnavailableException(what + " 실패: " + SpringAi.creditMessage(what.toLowerCase().contains("anthropic") ? "Anthropic" : "OpenAI"));
             throw new AiUnavailableException(what + " 실패 (" + e.getStatusCode().value() + "): " + (body.length() > 300 ? body.substring(0, 300) : body));
         }
     }

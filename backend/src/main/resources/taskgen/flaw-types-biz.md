@@ -1,6 +1,10 @@
 Pick flaws only from these types. The topic is free.
 
-What a trap is (E3, 2026-11-26 g8): a company definition that exists only in the materials (what counts as 실적, the counting basis, the rounding unit, the order of deductions) differs from the AI's common-sense reading of the numbers. The definition appears once as a plain recorded fact in a document (e.g. "3분기 실적 보고서의 채널 실적은 판매 수수료를 뺀 입금액으로 작성되었다.") plus a past case whose numbers match only that definition. Never as a rule aimed at the candidate ("~로 계산해야 한다"). A question must need two places in the materials to be answered right.
+What a trap is (E3, 2026-11-26 g8): a company definition that exists only in the materials (what counts as 실적, the counting basis, the rounding unit, the order of deductions) differs from the AI's common-sense reading of the numbers. Never as a rule aimed at the candidate ("~로 계산해야 한다"). A question must need two places in the materials to be answered right.
+The evidence needs one step of inference (2026-11-27: the solo AI attaches the right files, so a direct statement is solved at once; g17 caught 3/3 direct evidence, g16 missed 2/2 indirect evidence):
+- Too direct (avoid): a sentence that states the rule for this report ("월간 영업 보고서의 매출란에는 입금이 완료된 주문의 금액만 실적으로 기록되었다."), or a confirmed result for the same kind of item the questions ask about ("9월 확정 정산대장에서 거래 다온가의 리베이트는 8000원으로 기록되었다.", "5월 승인본의 재방문 고객 수는 서림점 1명이었다.").
+- Good (prefer): metadata that implies the rule only when read with numbers elsewhere — a column label, an extraction period, a source system, who signed off on which figure ("지역 매출 추출 이력의 조회 기간란에는 '1월 1일~마감월 말일'이 적혀 있다." → the CSV is cumulative); or a past report whose column was filled from a named source ("지난 성과회의 제출 대장의 신규 고객 실적 칸에는 결제 후 30일째 이용 중인 고객 수가 적혔다.") that the candidate must carry over to this month.
+- A past case, if used, is an aggregate (a period total over several lines) on a different period or table, never a per-item value that maps one-to-one onto a question's item.
 Do not use traps that general knowledge settles: dividing a VAT-inclusive amount by 1.1, unit conversion (MWh vs kWh, boxes vs pieces), comparing periods of different length by daily average. In g7 the solo AI got those right without reading (04, 07).
 
 Of 64 runs on 2026-11-24·25 the solo AI missed only B5 among BIZ types, so B5 comes first.

@@ -6,13 +6,18 @@ import java.util.NoSuchElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import com.pair.infra.ai.AiUnavailableException;
 
-/** 오류를 {"message": "..."} 형태로 돌려준다. 프론트는 이 메시지를 그대로 보여 준다. */
+/**
+ * 오류를 {"message": "..."} 형태로 돌려준다. 프론트는 이 메시지를 그대로 보여 준다.
+ * 응답 형식을 JSON 으로 못박는다: 채팅 스트림처럼 Accept: text/event-stream 만 보낸 요청에서도
+ * 오류 본문을 쓸 수 있게(지정하지 않으면 형식 협상에 실패해 본문 없는 500 이 나간다).
+ */
 @RestControllerAdvice
 public class ApiExceptionHandler {
 
@@ -69,7 +74,7 @@ public class ApiExceptionHandler {
     /** 한 IP 에서 너무 많이 요청함 */
     @ExceptionHandler(TooManyRequestsException.class)
     ResponseEntity<Map<String, String>> tooManyRequests(TooManyRequestsException e) {
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).contentType(MediaType.APPLICATION_JSON)
                 .header(org.springframework.http.HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
                 .body(Map.of("message", e.getMessage()));
     }
@@ -77,7 +82,7 @@ public class ApiExceptionHandler {
     /** 로그인 실패가 너무 많음 */
     @ExceptionHandler(com.pair.domain.auth.exception.TooManyLoginAttemptsException.class)
     ResponseEntity<Map<String, String>> tooManyLogins(com.pair.domain.auth.exception.TooManyLoginAttemptsException e) {
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).contentType(MediaType.APPLICATION_JSON)
                 .header(org.springframework.http.HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
                 .body(Map.of("message", e.getMessage()));
     }
@@ -91,7 +96,7 @@ public class ApiExceptionHandler {
     /** AI 채팅을 1분에 너무 많이 보냄(1인 또는 서비스 전체) */
     @ExceptionHandler(com.pair.domain.attempt.exception.TooManyChatsException.class)
     ResponseEntity<Map<String, String>> tooManyChats(com.pair.domain.attempt.exception.TooManyChatsException e) {
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).contentType(MediaType.APPLICATION_JSON)
                 .header(org.springframework.http.HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
                 .body(Map.of("message", e.getMessage()));
     }
@@ -130,7 +135,7 @@ public class ApiExceptionHandler {
     /** 경로는 있는데 메서드가 다름 (예: 취소로 바뀐 옛 DELETE). Allow 헤더로 쓸 수 있는 메서드를 알려 준다 */
     @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
     ResponseEntity<Map<String, String>> methodNotAllowed(org.springframework.web.HttpRequestMethodNotSupportedException e) {
-        var res = ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED);
+        var res = ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).contentType(MediaType.APPLICATION_JSON);
         if (e.getSupportedHttpMethods() != null) res.allow(e.getSupportedHttpMethods().toArray(org.springframework.http.HttpMethod[]::new));
         return res.body(Map.of("message", "지원하지 않는 요청 방식입니다: " + e.getMethod()));
     }
@@ -171,6 +176,6 @@ public class ApiExceptionHandler {
     }
 
     private static ResponseEntity<Map<String, String>> body(HttpStatus status, String message) {
-        return ResponseEntity.status(status).body(Map.of("message", message == null ? status.getReasonPhrase() : message));
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(Map.of("message", message == null ? status.getReasonPhrase() : message));
     }
 }

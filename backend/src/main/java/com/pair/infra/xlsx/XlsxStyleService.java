@@ -1,4 +1,4 @@
-package com.pair.domain.exam.service;
+package com.pair.infra.xlsx;
 
 import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.FillPatternType;
@@ -75,7 +75,7 @@ public final class XlsxStyleService {
         return s;
     }
 
-    XSSFCellStyle withFormat(XSSFCellStyle base, XSSFFont font, XSSFColor fill, String format) {
+    public XSSFCellStyle withFormat(XSSFCellStyle base, XSSFFont font, XSSFColor fill, String format) {
         XSSFCellStyle s = wb.createCellStyle();
         s.cloneStyleFrom(base);
         s.setFont(font);

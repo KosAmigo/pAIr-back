@@ -54,7 +54,7 @@ public class RollbackService {
         Attempt source = records.findById(cp.getAttemptId())
                 .orElseThrow(() -> new NoSuchElementException("없는 체크포인트입니다."));
         // 남의 응시와 실전 응시는 있는지도 알려 주지 않는다
-        if (source.getMode() != Attempt.Mode.SELF || !userId.equals(source.getUserId())) {
+        if (source.isDeleted() || source.getMode() != Attempt.Mode.SELF || !userId.equals(source.getUserId())) {
             throw new NoSuchElementException("없는 체크포인트입니다.");
         }
         credits.checkRollback(userId);

@@ -113,6 +113,26 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
         return out;
     }
 
+    /** 다른 회사 모델이 풀기: 코드 검사·관문을 모두 통과한 시도에서만, 관련 적은 자료를 뺀 필요한 자료로 푼다(g16: 비용 30%, 실패할 시도에서도 돌았음) */
+    @Override
+    protected List<GenCheckResultDto> lastChecks(TaskGenRequest form, BizDraftDto draft, BlueprintDto bp) {
+        BizDraftDto needed = FillerService.withoutFillers(draft, bp);
+        GenCheckService<BizDraftDto> c = BizCheckService.solveOnly(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), needed, form.minutes(), form);
+        GenCheckResultDto solve;
+        try {
+            solve = c.run(needed);
+        } catch (RuntimeException e) {
+            solve = new GenCheckResultDto(c.name(), false, "검사 중 오류: " + e.getMessage(), c.level());
+        }
+        if (!solve.ok() || solo == null || !solo.enabled()) return List.of(solve);
+        // 참고: 응시 화면 모델에 필요한 자료만 붙여 풀게 한다(warn, 막지 않음). 놓침이 자료 고르기 때문인지 함정 때문인지 나눠 본다
+        try {
+            return List.of(solve, solo.runNeeded(needed).check());
+        } catch (RuntimeException e) {
+            return List.of(solve, new GenCheckResultDto(BizSoloSolveService.NEEDED_NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패: " + e.getMessage() + ")", GenCheckResultDto.WARN));
+        }
+    }
+
     @Override
     protected Extra afterChecks(TaskGenRequest form, BizDraftDto draft, List<GenCheckResultDto> results) {
         return soloExtra(draft, results, AiLimitsDto.forMinutes(form.minutes()));
@@ -163,7 +183,7 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
 
     @Override
     protected List<GenCheckService<BizDraftDto>> checks(TaskGenRequest form, BizDraftDto draft) {
-        return BizCheckService.forDraft(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), draft, form.minutes(), form);
+        return BizCheckService.forDraft(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), draft, form.minutes(), form, false); // 풀이는 lastChecks 에서
     }
 
     /** 풀이 검사 호출의 토큰을 report 에 남기도록 감싼다 */
