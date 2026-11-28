@@ -63,7 +63,6 @@ public class ExamEntryService {
         this.progress = progress;
         this.grace = grace;
         this.catalog = catalog;
-        this.companies = companies;
         this.props = props;
         this.json = json;
         this.clock = clock;
@@ -231,7 +230,7 @@ public class ExamEntryService {
                 .toList();
         boolean serverVision = vision.isActive(s);
         boolean linkExpired = s.phase(now) == ExamSession.Phase.LIVE && ConnectionGraceService.isExpired(p, pr.started(), pr.finished(), now);
-        // 입장권·대기실·시험 화면 머리에 회사 이름 (응시자 한 명당 한 번 조회)
+        // 입장권·대기실·시험 화면 머리의 회사 이름 (응시자 한 명당 한 번 조회)
         String companyName = companies.findById(s.getCompanyId()).map(Company::getName).orElse(null);
         return new EntryInfoResponse(s.getTitle(), companyName, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
                 consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks, linkExpired,
