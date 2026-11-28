@@ -82,6 +82,10 @@ public class TaskGenJob {
     @Column(name = "finished_at")
     private Instant finishedAt;
 
+    /** 끝난 작업을 관리자가 확인한 시각(상세를 열거나 모두 확인). 확인한 끝난 작업은 작업 목록에서만 빠진다 */
+    @Column(name = "seen_at")
+    private Instant seenAt;
+
     /** 새 대기 작업 */
     public TaskGenJob(String id, String batchId, String env, String mode, Instant deadlineAt, String form, long adminId, Instant now) {
         this.id = id;

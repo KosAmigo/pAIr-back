@@ -82,7 +82,7 @@ public class TaskGenController {
         return ResponseEntity.accepted().body(new TaskGenAutoResponse(b.batchId(), b.jobIds()));
     }
 
-    /** 작업 목록: ?batchId= 이면 그 묶음, 아니면(?active=true) 대기·실행 중과 최근 24시간 안에 끝난 것 */
+    /** 작업 목록: ?batchId= 이면 그 묶음, 아니면(?active=true) 대기·실행 중과 최근 7일 안에 끝났는데 아직 확인하지 않은 것 */
     @GetMapping("/task-gen/jobs")
     public List<TaskGenJobService.JobStatus> list(CurrentUser user, @RequestParam(required = false) String batchId,
             @RequestParam(defaultValue = "true") boolean active) {
@@ -90,6 +90,20 @@ public class TaskGenController {
         if (batchId != null && !batchId.isBlank()) return jobs.batch(batchId);
         if (!active) throw new IllegalArgumentException("active=true 또는 batchId 를 보내세요.");
         return jobs.active();
+    }
+
+    /** 끝난 작업 확인(목록에서 빠진다, 멱등). 아직 안 끝났으면 409, 없으면 404 */
+    @PostMapping("/task-gen/{jobId}/seen")
+    public TaskGenJobService.JobStatus seen(CurrentUser user, @PathVariable String jobId) {
+        requireAdmin(user);
+        return jobs.markSeen(jobId);
+    }
+
+    /** 끝난 작업 모두 확인: {seen: 바꾼 개수} */
+    @PostMapping("/task-gen/seen-all")
+    public java.util.Map<String, Integer> seenAll(CurrentUser user) {
+        requireAdmin(user);
+        return java.util.Map.of("seen", jobs.markAllSeen());
     }
 
     /** 대기(QUEUED) 작업만 취소. 시작했거나 끝났으면 409 */

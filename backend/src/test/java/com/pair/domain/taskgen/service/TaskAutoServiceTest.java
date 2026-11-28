@@ -129,11 +129,28 @@ class TaskAutoServiceTest {
     }
 
     @Test
+    @DisplayName("20개는 한 호출에 10개씩 두 번 나눠 받고, 두 번째 호출은 첫 묶음 주제를 피하게 알려 준다")
+    void previewTwentySplitsIntoTwoCalls() {
+        String[] a = {"쿠폰 할인 계산", "환불 기간 판정", "정산 마감 처리", "포인트 반올림", "배송비 면제", "재고 차감 순서", "회원 등급 산정", "이자 일할 계산", "근무 시간 집계", "환율 변환"};
+        String[] b = {"주차 요금 정산", "세금 공제 한도", "예약 중복 확인", "택배 지연 보상", "연차 잔여 일수", "통신 요금 할인", "보험료 갱신", "급여 원천징수", "렌탈 위약금", "마일리지 소멸"};
+        ai.script.add(result(a));
+        ai.script.add(result(b));
+        List<AutoTopicDto> out = auto.preview(new TaskGenPreviewRequest("DEV", 60, 20, null), 1L);
+
+        assertThat(out).hasSize(20);
+        assertThat(ai.users).hasSize(2);
+        assertThat(ai.systems.get(0)).contains("정확히 10개");
+        assertThat(ai.users.get(1)).contains("10개").contains("쿠폰 할인 계산").contains("환율 변환");
+        assertThat(ai.maxTokens).allSatisfy(m -> assertThat(m).isGreaterThanOrEqualTo(10 * 450));
+        assertThat(out.get(10).situation()).isEqualTo("주차 요금 정산");
+    }
+
+    @Test
     @DisplayName("모델이 한 개도 못 주면 AiUnavailable, 입력이 잘못되면 IllegalArgument")
     void previewErrors() {
         assertThatThrownBy(() -> auto.preview(new TaskGenPreviewRequest("DEV", 60, 3, null), 1L)).isInstanceOf(AiUnavailableException.class);
         assertThatThrownBy(() -> auto.preview(new TaskGenPreviewRequest("DEV", 60, 0, null), 1L)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> auto.preview(new TaskGenPreviewRequest("DEV", 60, 11, null), 1L)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> auto.preview(new TaskGenPreviewRequest("DEV", 60, 21, null), 1L)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> auto.preview(new TaskGenPreviewRequest("DEV", 30, 3, null), 1L)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> auto.preview(new TaskGenPreviewRequest("XYZ", 60, 3, null), 1L)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> auto.preview(null, 1L)).isInstanceOf(IllegalArgumentException.class);

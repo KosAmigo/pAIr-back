@@ -43,8 +43,10 @@ public class TaskGenJobService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskGenJobService.class);
     static final Duration STALE_AFTER = Duration.ofMinutes(2);
-    static final Duration RECENT_FINISHED = Duration.ofHours(24);
+    /** 끝났는데 확인하지 않은 작업을 목록에 남겨 두는 기간. 확인하면 바로 빠진다(이 기간은 오래된 기록이 한꺼번에 쌓이지 않게 하는 안전장치) */
+    static final Duration RECENT_FINISHED = Duration.ofDays(7);
     private static final Set<String> ACTIVE = Set.of(TaskGenJob.QUEUED, TaskGenJob.RUNNING);
+    private static final Set<String> ENDED = Set.of(TaskGenJob.DONE, TaskGenJob.FAILED, TaskGenJob.CANCELED);
     private static final Set<Integer> DEADLINE_HOURS = Set.of(3, 6, 12, 24); // 2026-11-27 사용자 결정(1시간은 대부분 바로 호출로 넘어가 뺌)
 
     public enum State { QUEUED, RUNNING, DONE, FAILED, CANCELED }
@@ -52,12 +54,13 @@ public class TaskGenJobService {
     /**
      * 작업 응답(GET /api/admin/task-gen/{jobId}, jobs 목록의 한 줄). DONE 이어도 passed 가 false 면 확인에 실패한 채 검수 전으로 저장된 것.
      * queuePosition 은 QUEUED 일 때만(내 env 의 대기 순번, 1부터). topic·track·minutes·trap·usage 는 폼에서 꺼낸 값.
+     * finishedAt: 끝난 시각(목록의 '3분 전'). seenAt: 관리자가 확인한 시각(확인 안 했으면 null).
      * taskDeleted: 끝난(DONE) 작업인데 taskCode 가 비었으면 true(만든 과제를 관리자가 지움). waitingBatch: 배치 작업이 모델 호출을 배치에 맡기고 결과를 기다리는 중이면 true(프런트의 '배치 대기 중'). deadlineAt 은 배치 마감 시각
      */
     public record JobStatus(String jobId, State status, String step, String taskCode, Boolean passed,
             List<GenCheckResultDto> checks, String error, String mode, Instant deadlineAt, Integer queuePosition,
             String batchId, String topic, String track, Integer minutes, Double costUsd, Instant createdAt, Boolean waitingBatch,
-            String trap, String usage, boolean taskDeleted) {}
+            String trap, String usage, boolean taskDeleted, Instant finishedAt, Instant seenAt) {}
 
     /** 자동 생성으로 한 번에 넣은 작업들 */
     public record Batch(String batchId, List<String> jobIds) {}
@@ -143,9 +146,22 @@ public class TaskGenJobService {
         return view(jobs.findById(jobId).orElseThrow(() -> new NoSuchElementException("없는 작업입니다: " + jobId)));
     }
 
-    /** 내 env 의 대기·실행 중 작업과 최근 24시간 안에 끝난 작업 */
+    /** 내 env 의 대기·실행 중 작업과, 최근 7일 안에 끝났는데 아직 확인하지 않은 작업 */
     public List<JobStatus> active() {
         return jobs.findActive(env, ACTIVE, Instant.now().minus(RECENT_FINISHED)).stream().map(this::view).toList();
+    }
+
+    /** 끝난 작업을 확인으로(목록에서 빠진다). 이미 확인했으면 그대로(멱등). 아직 안 끝났으면 ConflictException(409), 없으면 404 */
+    public JobStatus markSeen(String jobId) {
+        TaskGenJob j = jobs.findById(jobId).orElseThrow(() -> new NoSuchElementException("없는 작업입니다: " + jobId));
+        if (!ENDED.contains(j.getStatus())) throw new ConflictException("끝난 작업만 확인할 수 있습니다(지금 상태: " + j.getStatus() + ").");
+        jobs.markSeen(jobId, ENDED, Instant.now());
+        return status(jobId);
+    }
+
+    /** 내 env 의 끝난 작업을 모두 확인으로. 바꾼 개수 */
+    public int markAllSeen() {
+        return jobs.markAllSeen(env, ENDED, Instant.now());
     }
 
     public List<JobStatus> batch(String batchId) {
@@ -240,7 +256,7 @@ public class TaskGenJobService {
                 j.getMode(), j.getDeadlineAt(), position, j.getBatchId(), form == null ? null : form.topic(), form == null ? null : form.track(),
                 form == null ? null : form.minutes(), j.getCostUsd(), j.getCreatedAt(), waitingBatch(j),
                 form == null ? null : form.trap(), form == null ? null : form.usage(),
-                TaskGenJob.DONE.equals(j.getStatus()) && j.getTaskCode() == null);
+                TaskGenJob.DONE.equals(j.getStatus()) && j.getTaskCode() == null, j.getFinishedAt(), j.getSeenAt());
     }
 
     /** 실행 중인 배치 작업이 배치에 맡긴 호출의 결과를 기다리는 중인가(task_gen_calls 에 PENDING 이 있음) */
