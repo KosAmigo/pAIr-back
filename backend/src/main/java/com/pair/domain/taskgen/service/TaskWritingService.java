@@ -62,11 +62,7 @@ final class TaskWritingService {
             Collections.shuffle(mixed, random);
             sb.append("사실 목록 [place=").append(place).append("]:\n").append(lines(mixed));
         });
-        if (!b.examples().isEmpty()) {
-            List<String> mixed = new ArrayList<>(b.examples().stream().map(e -> e.input() + " → " + e.expected()).toList());
-            Collections.shuffle(mixed, random);
-            sb.append("예 목록:\n").append(lines(mixed));
-        }
+        // 예(examples)는 주지 않는다: 요구사항 예시 줄은 코드가 설계도에서 만들어 붙인다(Q7, ExampleLineService)
         if (feedback != null && !feedback.isBlank()) sb.append('\n').append(feedback);
         return sb.toString();
     }
@@ -114,13 +110,14 @@ final class TaskWritingService {
         return sb.toString();
     }
 
-    /** 사실 목록의 문장과 예의 입력·기대 출력이 글에 그대로 들어갔는지(M4). examplesText 는 요구사항(DEV)에서 찾는다 */
+    /** 사실 목록의 문장과 예 줄(코드가 만든 표 줄, ExampleLineService.line)이 글에 그대로 들어갔는지(M4). examplesText 는 요구사항(DEV)에서 찾는다 */
     static GenCheckResultDto factsCheck(BlueprintDto b, String corpus, String examplesText) {
         String ex = GenTextService.norm(examplesText);
         List<String> missing = new ArrayList<>();
         for (var f : b.facts()) if (!GenTextService.containsLike(corpus, f.text())) missing.add(f.text());
         for (var e : b.examples()) {
-            if (!ex.contains(GenTextService.norm(e.input())) || !ex.contains(GenTextService.norm(e.expected()))) missing.add(e.input() + " → " + e.expected());
+            String line = ExampleLineService.line(e);
+            if (!ex.contains(GenTextService.norm(line))) missing.add(line);
         }
         if (missing.isEmpty()) return new GenCheckResultDto(TaskPipelineService.FACTS_CHECK, true, "사실 " + b.facts().size() + "개와 예 " + b.examples().size() + "개가 글에 그대로 있습니다.");
         return new GenCheckResultDto(TaskPipelineService.FACTS_CHECK, false, "글에 그대로 들어가지 않은 사실·예가 있습니다: " + String.join(" / ", missing.subList(0, Math.min(5, missing.size()))));
@@ -133,8 +130,12 @@ final class TaskWritingService {
     static GenCheckResultDto basisCheck(BlueprintDto b, String visibleText) {
         List<String> missing = new ArrayList<>();
         for (var c : b.cases()) {
+            var example = ExampleLineService.basisExample(b, c); // 근거가 예면 요구사항에 그 예 줄(코드가 만든 표 줄)이 있으면 된다
             if (c.basis() == null || c.basis().isBlank()) missing.add(c.name() + ": 근거 문장(basis)이 없음");
-            else if (!GenTextService.containsLike(visibleText, c.basis())) missing.add(c.name() + ": " + c.basis());
+            else if (example != null) {
+                String line = ExampleLineService.line(example);
+                if (!GenTextService.norm(visibleText).contains(GenTextService.norm(line))) missing.add(c.name() + ": " + line);
+            } else if (!GenTextService.containsLike(visibleText, c.basis())) missing.add(c.name() + ": " + c.basis());
         }
         if (missing.isEmpty()) return new GenCheckResultDto(TaskPipelineService.BASIS_CHECK, true, "사례 " + b.cases().size() + "개의 근거 문장이 모두 글에 그대로 있습니다.");
         return new GenCheckResultDto(TaskPipelineService.BASIS_CHECK, false, "사례의 근거 문장이 글에 없습니다: " + String.join(" / ", missing.subList(0, Math.min(5, missing.size()))));
@@ -193,7 +194,7 @@ final class TaskWritingService {
         if (check.equals(TaskPipelineService.GEN_META_CHECK)) return "파일 수, 글자 수, 맥락·첨부 한도, 필요한 자료 같은 과제 생성 정보는 쓰지 않는다.";
         if (check.equals(TaskPipelineService.DUPLICATE_CHECK)) return "같은 문장은 한 번만 쓴다. 각 사실은 가장 자연스러운 한 곳에 둔다.";
         if (check.equals(TaskPipelineService.HAN_CHECK)) return "한자(漢字)와 중국어 글자 없이 한글로만 쓴다.";
-        if (check.equals(TaskPipelineService.FACTS_CHECK)) return "사실 목록의 문장과 예를 하나도 빼지 말고 그대로 넣는다.";
+        if (check.equals(TaskPipelineService.FACTS_CHECK)) return "사실 목록의 문장을 하나도 빼지 말고 그대로 넣는다.";
         if (check.equals(BizNumbersService.NAME)) return "문서에는 사실 문장과 CSV 의 숫자만 쓴다.";
         if (check.equals(TaskPipelineService.LEAK_A_GATE) || check.equals(TaskPipelineService.LEAK_B_GATE) || check.equals(TaskPipelineService.CHOICE_CHECK)
                 || check.equals(BizQuestionService.CHECK)) {

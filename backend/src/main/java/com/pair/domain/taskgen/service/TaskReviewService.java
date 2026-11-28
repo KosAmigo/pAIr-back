@@ -115,8 +115,10 @@ final class TaskReviewService {
             sb.append("- 질문: ").append(j.question()).append(" | 근거: ").append(j.basis()).append('\n');
             j.options().forEach(o -> sb.append("  선택지: ").append(o.text()).append(" | 근거 문장: ").append(o.fact()).append('\n'));
         });
-        sb.append("[예(요구사항에 입력 → 기대 출력으로 들어감)]\n");
-        bp.examples().forEach(e -> sb.append("- ").append(e.input()).append(" → ").append(e.expected()).append('\n'));
+        sb.append("[예(입력은 숨은 테스트용 호출이고, 요구사항에는 | 뒤의 표 줄로 들어감)]\n");
+        if (bp.exampleNote() != null && !bp.exampleNote().isBlank()) sb.append("- ").append(ExampleLineService.NOTE).append(' ').append(bp.exampleNote()).append('\n');
+        nz(bp.exampleSetups()).forEach(s -> sb.append("- ").append(ExampleLineService.setupLine(s)).append('\n'));
+        bp.examples().forEach(e -> sb.append("- ").append(e.input()).append(" → ").append(e.expected()).append(" | ").append(ExampleLineService.line(e)).append('\n'));
         sb.append("[숨은 테스트·문항 사례]\n");
         bp.cases().forEach(c -> sb.append("- ").append(c.name()).append(" | ").append(c.situation()).append(" → ").append(c.expected()).append(" | 근거: ").append(c.basis()).append('\n'));
         return run(Check.BLUEPRINT, Stage.REVIEW, sb.toString()).violations().stream().filter(Violation::mustFix)
@@ -241,12 +243,8 @@ final class TaskReviewService {
 
     /** 사례의 근거 문장이 요구사항 예(입력 → 기대 출력)이면 "예", 아니면 "사실" */
     static String basisKind(BlueprintDto bp, BlueprintDto.Case c) {
-        String b = GenTextService.norm(c.basis());
-        for (var e : bp.examples()) {
-            String ex = GenTextService.norm(e.input() + e.expected());
-            if (!b.isBlank() && (ex.equals(b) || b.contains(GenTextService.norm(e.input())) && b.contains(GenTextService.norm(e.expected())))) return "예";
-        }
-        return "사실";
+        var e = ExampleLineService.basisExample(bp, c);
+        return e == null ? "사실" : "예(요구사항 줄: " + ExampleLineService.line(e) + ")";
     }
 
     private static String flaws(BlueprintDto bp) {

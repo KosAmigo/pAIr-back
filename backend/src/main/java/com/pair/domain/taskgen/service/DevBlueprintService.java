@@ -48,6 +48,12 @@ final class DevBlueprintService {
             if (a != null && (a.contains("{") || a.contains("}") || a.contains(";"))) bad.add("api 항목에는 시그니처만 쓰고 본문({ ... })이나 ;는 쓰지 않습니다: " + a);
         }
         if (b.examples().size() < 2 || b.examples().stream().anyMatch(e -> blank(e.input()) || blank(e.expected()))) bad.add("입력→기대 출력 예(examples)가 2개 이상 있어야 합니다");
+        // Q7: 요구사항 예시는 코드가 method·args·expected 로 표 줄을 만든다(2026-11-28)
+        for (var e : b.examples()) {
+            if (blank(e.method()) || e.args() == null || e.args().stream().anyMatch(a -> a == null || a.size() != 2 || blank(a.get(0)))) {
+                bad.add("예 '" + e.input() + "' 에 표 칸이 없습니다: method(\"Class.method\", api 의 메서드)와 args(매개변수마다 [\"이름\", \"짧은 표시값\"], 시그니처 순서, 매개변수가 없으면 [])를 채우세요");
+            }
+        }
         return bad;
     }
 
@@ -172,9 +178,12 @@ final class DevBlueprintService {
                 }
             }
             for (var e : nz(b.examples())) {
-                if (word.matcher((e.input() == null ? "" : e.input()) + " " + (e.expected() == null ? "" : e.expected())).find()) {
+                if (word.matcher((e.input() == null ? "" : e.input()) + " " + (e.expected() == null ? "" : e.expected()) + " " + ExampleLineService.line(e)).find()) {
                     bad.add("결함 클래스 " + cls + " 가 예(examples)에 있습니다: " + e.input() + ". 예는 api 클래스만 부르세요");
                 }
+            }
+            for (var s : nz(b.exampleSetups())) {
+                if (s != null && word.matcher(s.method() + " " + s.text()).find()) bad.add("결함 클래스 " + cls + " 가 예시 준비(exampleSetups)에 있습니다: " + s.text() + ". 예는 api 클래스만 부르세요");
             }
             for (var f : nz(b.facts())) {
                 if (BlueprintService.DESCRIPTION.equals(f.place()) && f.text() != null && word.matcher(f.text()).find()) {
