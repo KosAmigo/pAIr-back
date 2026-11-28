@@ -58,4 +58,20 @@ public interface AuthAccountRepository extends JpaRepository<AuthAccount, Long> 
     /** 관리자 통계: 기간 안에 탈퇴한(회사 삭제로 정리된 멤버 포함) 계정 수 */
     @org.springframework.data.jpa.repository.Query("select count(a) from AuthAccount a where a.memberStatus = 'WITHDRAWN' and a.deletedAt >= :from and a.deletedAt < :to")
     long countWithdrawnBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
+
+    /** 관리자 회원 목록: 탈퇴하지 않은 계정을 역할·이름/이메일 검색으로 거르고 최근 가입 순으로 */
+    @org.springframework.data.jpa.repository.Query(value = """
+            select a from AuthAccount a
+            where a.memberStatus <> 'WITHDRAWN' and a.role in :roles
+              and (lower(a.name) like :pattern or lower(a.email) like :pattern)
+            order by a.createdAt desc, a.id desc
+            """,
+            countQuery = """
+            select count(a) from AuthAccount a
+            where a.memberStatus <> 'WITHDRAWN' and a.role in :roles
+              and (lower(a.name) like :pattern or lower(a.email) like :pattern)
+            """)
+    org.springframework.data.domain.Page<AuthAccount> searchMembers(
+            @org.springframework.data.repository.query.Param("roles") java.util.Collection<com.pair.global.security.CurrentUser.Role> roles,
+            @org.springframework.data.repository.query.Param("pattern") String pattern, org.springframework.data.domain.Pageable pageable);
 }
