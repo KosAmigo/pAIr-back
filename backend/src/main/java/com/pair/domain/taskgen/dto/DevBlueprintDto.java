@@ -21,7 +21,16 @@ public record DevBlueprintDto(
         List<String> trapKeywords,
         List<Case> cases,
         List<String> neededFiles,
-        List<BlueprintDto.Filler> fillers) {
+        List<BlueprintDto.Filler> fillers,
+        List<BlueprintDto.ExampleSetup> exampleSetups,
+        String exampleNote) {
+
+    /** 예시 준비 데이터·공통 줄 없이 만든다(테스트·옛 코드용) */
+    public DevBlueprintDto(String title, String summary, String code, String category, List<String> competencies, String scenario, List<String> api,
+            List<BlueprintDto.Fact> facts, List<BlueprintDto.Example> examples, List<BlueprintDto.Flaw> flaws, List<BlueprintDto.Judgment> judgments,
+            List<String> trapKeywords, List<Case> cases, List<String> neededFiles, List<BlueprintDto.Filler> fillers) {
+        this(title, summary, code, category, competencies, scenario, api, facts, examples, flaws, judgments, trapKeywords, cases, neededFiles, fillers, List.of(), "");
+    }
 
     /** 숨은 테스트 하나: name 은 테스트 메서드 이름 */
     public record Case(String name, String situation, String expected, String basis) {}
@@ -29,13 +38,14 @@ public record DevBlueprintDto(
     public BlueprintDto toBlueprint() {
         List<BlueprintDto.Case> cs = cases == null ? List.of() : cases.stream().filter(c -> c != null).map(c -> new BlueprintDto.Case(c.name(), c.situation(), c.expected(), c.basis())).toList();
         return new BlueprintDto(title, summary, code, category, competencies, scenario, api, facts, examples, flaws, judgments, trapKeywords, null,
-                List.of(), List.of(), List.of(), List.of(), cs, neededFiles, fillers);
+                List.of(), List.of(), List.of(), List.of(), cs, neededFiles, fillers,
+                exampleSetups == null ? List.of() : exampleSetups, exampleNote == null ? "" : exampleNote);
     }
 
     /** 공통 설계도에서 DEV 칸만 옮긴다(테스트의 가짜 AI 용) */
     public static DevBlueprintDto from(BlueprintDto b) {
         List<Case> cs = b.cases() == null ? List.of() : b.cases().stream().map(c -> new Case(c.name(), c.situation(), c.expected(), c.basis())).toList();
         return new DevBlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), b.facts(), b.examples(), b.flaws(),
-                b.judgments(), b.trapKeywords(), cs, b.neededFiles(), b.fillers());
+                b.judgments(), b.trapKeywords(), cs, b.neededFiles(), b.fillers(), b.exampleSetups(), b.exampleNote());
     }
 }

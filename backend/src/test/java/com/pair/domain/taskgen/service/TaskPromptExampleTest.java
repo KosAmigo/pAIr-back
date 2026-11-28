@@ -182,7 +182,7 @@ class TaskPromptExampleTest {
                 "addItem(\"펜\", 3000, 1) 뒤 points() → 30", "적립금 사용 정책을 정하고 이유를 설명하세요.");
         assertThat(TaskWritingService.withoutRequirementLines(desc, req)).containsExactly("쇼핑몰 주문 화면에 결제액 조회를 더한다.", "적립금 사용 정책을 정하고 이유를 설명하세요.");
         assertThat(TaskWritingService.withoutRequirementLines(desc, List.of())).isEqualTo(desc);
-        assertThat(TaskPromptService.WRITING_DEV).contains("Examples appear only here, never again in description");
+        assertThat(TaskPromptService.WRITING_DEV).contains("write no examples");
     }
 
     @Test

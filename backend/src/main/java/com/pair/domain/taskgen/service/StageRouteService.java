@@ -147,7 +147,10 @@ final class StageRouteService {
             raw.add(e.input());
             raw.add(e.expected());
             raw.add(e.input() + " → " + e.expected());
+            raw.add(ExampleLineService.line(e)); // 요구사항에 들어가는 표 줄(Q7)
         });
+        if (bp.exampleSetups() != null) bp.exampleSetups().forEach(s -> raw.add(s.text()));
+        raw.add(bp.exampleNote());
         bp.cases().forEach(c -> raw.add(c.basis()));
         bp.flaws().forEach(f -> raw.add(f.evidence()));
         return raw.stream().map(GenTextService::norm).filter(s -> s.length() >= MIN_QUOTE).distinct().toList();

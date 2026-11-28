@@ -37,7 +37,19 @@ public record BlueprintDto(
         /** E6·M6: 풀이에 꼭 필요한 자료 묶음의 파일 이름(DEV: 시작 코드·공개 테스트·NOTES.md 경로, BIZ: 문서·CSV 경로). 20~30% */
         List<String> neededFiles,
         /** E6·M6: 관련 적은 자료 목록(파일 이름과 한 줄 내용). 단계 4'(싼 모델)가 결함·답을 모른 채 만든다 */
-        List<Filler> fillers) {
+        List<Filler> fillers,
+        /** DEV(Q7): 함수별 예시 표 위에 한 번 적는 미리 넣어 둔 데이터. 한 함수의 예시는 같은 준비 데이터를 쓴다 */
+        List<ExampleSetup> exampleSetups,
+        /** DEV(Q7): 모든 예시 값에 공통인 한 줄(시간대 등). 없으면 빈 값 */
+        String exampleNote) {
+
+    /** 예시 표 준비 데이터·공통 줄 없이 만든다(BIZ·테스트·옛 코드용) */
+    public BlueprintDto(String title, String summary, String code, String category, List<String> competencies, String scenario, List<String> api,
+            List<Fact> facts, List<Example> examples, List<Flaw> flaws, List<Judgment> judgments, List<String> trapKeywords, Conclusion conclusion,
+            List<Table> tables, List<Figure> figures, List<Doc> docs, List<String> questionPlan, List<Case> cases, List<String> neededFiles, List<Filler> fillers) {
+        this(title, summary, code, category, competencies, scenario, api, facts, examples, flaws, judgments, trapKeywords, conclusion, tables, figures, docs,
+                questionPlan, cases, neededFiles, fillers, List.of(), "");
+    }
 
     /** 필요한 묶음·관련 적은 자료 없이 만든다(테스트·옛 코드용) */
     public BlueprintDto(String title, String summary, String code, String category, List<String> competencies, String scenario, List<String> api,
@@ -50,7 +62,7 @@ public record BlueprintDto(
     /** 필요한 묶음과 관련 적은 자료 목록만 바꾼 복사본 */
     public BlueprintDto withMaterials(List<String> neededFiles, List<Filler> fillers) {
         return new BlueprintDto(title, summary, code, category, competencies, scenario, api, facts, examples, flaws, judgments, trapKeywords, conclusion,
-                tables, figures, docs, questionPlan, cases, neededFiles, fillers);
+                tables, figures, docs, questionPlan, cases, neededFiles, fillers, exampleSetups, exampleNote);
     }
 
     /** 관련 적은 자료 하나: path 는 파일 이름(DEV src/…java, BIZ 자료/…pdf·csv), summary 는 한 줄 내용(결함·답과 상관없는 일반 업무 내용) */
@@ -78,8 +90,20 @@ public record BlueprintDto(
     /** 응시자 글에 그대로 들어갈 사실 한 문장. place 는 DEV: description 또는 notes, BIZ: 문서 경로 또는 description */
     public record Fact(String text, String place) {}
 
-    /** 입력 → 기대 출력 예(응시자에게 보임) */
-    public record Example(String input, String expected) {}
+    /**
+     * 입력 → 기대 출력 예. input 은 정확한 Java 호출(준비 호출 포함, 숨은 테스트·사례 근거용, 응시자에게는 안 보임).
+     * 응시자는 method·args·expected 로 만든 표(매개변수 | 결과)를 본다(Q7, 2026-11-28). args 는 [매개변수 이름, 짧은 표시값] 쌍, 시그니처 순서
+     */
+    public record Example(String input, String expected, String method, List<List<String>> args) {
+
+        /** 표 칸 없이 만든다(옛 설계도·테스트용) */
+        public Example(String input, String expected) {
+            this(input, expected, null, null);
+        }
+    }
+
+    /** 한 함수의 예시들이 함께 쓰는 미리 넣어 둔 데이터 한 줄(method 는 "Class.method") */
+    public record ExampleSetup(String method, String text) {}
 
     /** 숨은 결함(DEV 는 wrongAnswer: 이 결함을 놓친 흔한 오답 방식, separatedBy: 그 오답을 정답과 가르는 사례 name). evidence 는 응시자가 대조하면 결함이 보이는 사실 문장(facts 에 있는 그대로). caughtBy: DEV 숨은 테스트 메서드 이름, BIZ "Q2" 또는 "결론" */
     public record Flaw(String what, String where, String evidence, String caughtBy, String wrongAnswer, String separatedBy) {

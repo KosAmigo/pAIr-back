@@ -41,7 +41,11 @@ final class BlueprintService {
             for (var o : nz(j.options())) required.add(o.fact());
         }
         for (var f : nz(b.flaws())) required.add(f.evidence());
-        for (var c : nz(b.cases())) required.add(c.basis()); // 사례의 근거는 반드시 응시자 자료에 들어간다(M2)
+        for (var c : nz(b.cases())) { // 사례의 근거는 반드시 응시자 자료에 들어간다(M2)
+            var example = biz ? null : ExampleLineService.basisExample(b, c);
+            if (example != null && ExampleLineService.shown(b, example)) continue; // 근거가 예면 코드가 요구사항 예 줄로 넣는다(Q7: 설명에 Java 호출 문장을 넣지 않는다)
+            required.add(c.basis());
+        }
         for (String r : required) {
             if (r != null && !r.isBlank() && seen.add(GenTextService.norm(r))) facts.add(new BlueprintDto.Fact(r.strip(), fallback));
         }
@@ -53,7 +57,9 @@ final class BlueprintService {
         List<String> api = nz(b.api()).stream().map(a -> a != null && a.contains("{") ? FeatureCheckService.stripBody(a) : a).toList(); // 시그니처에 본문이 붙어 있으면 뗀다
         return new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), nz(b.competencies()), b.scenario(), api, facts,
                 nz(b.examples()), nz(b.flaws()), nz(b.judgments()), nz(b.trapKeywords()), b.conclusion(), nz(b.tables()), nz(b.figures()), docs,
-                nz(b.questionPlan()), nz(b.cases()), nz(b.neededFiles()).stream().filter(x -> !blank(x)).map(String::strip).distinct().toList(), fillers(b));
+                nz(b.questionPlan()), nz(b.cases()), nz(b.neededFiles()).stream().filter(x -> !blank(x)).map(String::strip).distinct().toList(), fillers(b),
+                nz(b.exampleSetups()).stream().filter(x -> x != null && !blank(x.method()) && !blank(x.text())).map(x -> new BlueprintDto.ExampleSetup(x.method().strip(), x.text().strip())).toList(),
+                b.exampleNote() == null ? "" : b.exampleNote().strip());
     }
 
     /** 관련 적은 자료 목록: 빈 항목과 같은 경로 중복을 버린다 */
@@ -149,7 +155,7 @@ final class BlueprintService {
     static BlueprintDto withoutFacts(BlueprintDto b) {
         return new BlueprintDto(b.title(), b.summary(), b.code(), b.category(), b.competencies(), b.scenario(), b.api(), List.of(), b.examples(),
                 b.flaws(), b.judgments(), b.trapKeywords(), b.conclusion(), b.tables(), b.figures(), b.docs(), b.questionPlan(), b.cases(),
-                b.neededFiles(), b.fillers());
+                b.neededFiles(), b.fillers(), b.exampleSetups(), b.exampleNote());
     }
 
     static boolean blank(String s) {
