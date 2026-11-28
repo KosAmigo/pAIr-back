@@ -180,12 +180,12 @@ class GenFixRegressionTest {
         var error = new GenCheckResultDto(SoloSolveService.NAME, true, "AI 단독 풀이를 확인하지 못했어요(모델 호출 실패: timeout)", GenCheckResultDto.WARN);
         for (var c : List.of(skipped, caught, missed, error)) assertThat(c.needsRegeneration()).isFalse();
 
-        assertThat(TaskGeneratorService.soloOutcome(List.of(skipped))).containsEntry("status", "skipped").containsEntry("reason", "다른 검사가 실패해 돌리지 않음");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(caught))).containsEntry("status", "caught").doesNotContainKey("reason");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(missed))).containsEntry("status", "missed");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(error))).containsEntry("status", "error");
-        assertThat(TaskGeneratorService.soloOutcome(List.of(error)).get("reason").toString()).contains("모델 호출 실패: timeout");
-        assertThat(TaskGeneratorService.soloOutcome(List.of())).containsEntry("status", "skipped").containsKey("reason"); // 검사가 아예 없어도 이유를 남긴다
+        assertThat(GenReportService.soloOutcome(List.of(skipped))).containsEntry("status", "skipped").containsEntry("reason", "다른 검사가 실패해 돌리지 않음");
+        assertThat(GenReportService.soloOutcome(List.of(caught))).containsEntry("status", "caught").doesNotContainKey("reason");
+        assertThat(GenReportService.soloOutcome(List.of(missed))).containsEntry("status", "missed");
+        assertThat(GenReportService.soloOutcome(List.of(error))).containsEntry("status", "error");
+        assertThat(GenReportService.soloOutcome(List.of(error)).get("reason").toString()).contains("모델 호출 실패: timeout");
+        assertThat(GenReportService.soloOutcome(List.of())).containsEntry("status", "skipped").containsKey("reason"); // 검사가 아예 없어도 이유를 남긴다
     }
 
     @Test
