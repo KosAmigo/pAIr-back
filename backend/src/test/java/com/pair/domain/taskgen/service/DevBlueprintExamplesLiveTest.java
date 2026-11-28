@@ -99,8 +99,8 @@ class DevBlueprintExamplesLiveTest {
             double cost = StageCallService.cost(props, run.usage());
             sb.append("\n화면 예시 함수당: ").append(shown).append(", 기존 메서드 예(안 보임): ").append(hidden).append('\n');
             sb.append("모양 경고: ").append(shape.ok() ? "없음" : shape.detail()).append('\n');
-            sb.append("설계도 재시도: ").append(run.blueprintRetries().size()).append("번")
-                    .append(run.blueprintRetries().isEmpty() ? "" : " (마지막 문제: " + run.blueprintRetries().get(run.blueprintRetries().size() - 1) + ")").append('\n');
+            sb.append("설계도 재시도: ").append(run.blueprintRetries().size()).append("번\n");
+            for (int i = 0; i < run.blueprintRetries().size(); i++) sb.append("  ").append(i + 1).append("번째 문제: ").append(run.blueprintRetries().get(i)).append('\n'); // 회차별 원인(g26: 마지막 것만으로는 원인을 못 봤다)
             sb.append("남은 형식 문제: ").append(BlueprintService.problems(bp, false)).append('\n');
             sb.append(String.format("비용: $%.3f%n", cost));
         } catch (RuntimeException e) {

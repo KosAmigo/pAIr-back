@@ -83,8 +83,6 @@ class ExampleLineServiceTest {
 
         var offset = new BlueprintDto.Example(IN1, "1", "PassRegistry.availableCodes", List.of(List.of("visitDate", "2026-06-10T16:00Z")));
         assertThat(ExampleLineService.shapeCheck(bp(List.of(offset), List.of(), "")).detail()).contains("시간대 오프셋");
-        var renamed = new BlueprintDto.Example("새 Batch에 load(\"바일;10000\") 뒤 feeFor(\"바일\")", "300", "PassRegistry.availableCodes", List.of(List.of("visitDate", "바다")));
-        assertThat(ExampleLineService.shapeCheck(bp(List.of(renamed), List.of(), "")).detail()).contains("표시값 '바다' 이 입력 호출에 없음");
         var existingLong =new BlueprintDto.Example("x", "[\"A\", \"B\", \"C\", \"D\"]", "PassRegistry.size", List.of());
         assertThat(ExampleLineService.shapeCheck(bp(List.of(EX1, existingLong, existingLong, existingLong), List.of(), "")).ok()).isTrue();
     }
@@ -101,6 +99,48 @@ class ExampleLineServiceTest {
         assertThat(req).doesNotContain("PassRegistry.size");
         assertThat(TaskWritingService.basisCheck(b, req).ok()).isFalse();
         assertThat(TaskWritingService.factsCheck(b, "", req).ok()).isTrue();
+    }
+
+    private static BlueprintDto batch(String setup, List<BlueprintDto.Example> examples) {
+        return new BlueprintDto("t", "s", "batch", "기능 구현", List.of(), "상황", List.of("기존: SettlementBatch.load(String content): void", "추가: SettlementBatch.feeFor(String reference): long"),
+                List.of(), examples, List.of(), List.of(), List.of(), null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(new BlueprintDto.ExampleSetup("SettlementBatch.feeFor", setup)), "");
+    }
+
+    @Test
+    @DisplayName("g25 03: 표시값·준비 문장의 이름·숫자가 input 과 다르면 형식 실패(재요청 문구 포함). 날짜·쉼표 숫자·줄바꿈 낀 문자열은 같은 값으로 본다")
+    void displayMustMatchInput() {
+        String in = "새 SettlementBatch에 load(\"바일;10000\\n바이;20000\")를 한 뒤 feeFor(\"바일\")";
+        var renamed = new BlueprintDto.Example(in, "300", "SettlementBatch.feeFor", List.of(List.of("reference", "바다")));
+        List<String> bad = ExampleLineService.mismatches(batch("수신 파일에는 정상 거래 바다 10,000원과 하늘 20,000원이 들어 있다.", List.of(renamed)));
+        assertThat(bad).anyMatch(p -> p.contains("표시값 '바다' 이 input 에 없습니다"))
+                .anyMatch(p -> p.contains("input 의 값 '바일'"))
+                .allMatch(p -> p.endsWith(ExampleLineService.MISMATCH_RULE));
+        assertThat(ExampleLineService.mismatches(batch("수신 파일에는 바일 10,000원과 바이 25,000원이 들어 있다.",
+                List.of(new BlueprintDto.Example(in, "300", "SettlementBatch.feeFor", List.of(List.of("reference", "바일")))))))
+                .containsExactly("예시 SettlementBatch.feeFor 의 준비 문장 숫자 25000 이 input 에 없습니다: 수신 파일에는 바일 10,000원과 바이 25,000원이 들어 있다.. " + ExampleLineService.MISMATCH_RULE);
+
+        // 오탐 없음: 같은 이름·숫자를 짧게 쓴 것
+        var ok = new BlueprintDto.Example(in, "300", "SettlementBatch.feeFor", List.of(List.of("reference", "바일")));
+        assertThat(ExampleLineService.mismatches(batch("수신 파일에는 바일 10,000원과 바이 20,000원이 들어 있다.", List.of(ok)))).isEmpty();
+        var setup = new BlueprintDto.ExampleSetup("PassRegistry.availableCodes", "등록된 이용권: POOL-A 2026-06-30 만료, GYM-B 2026-06-01 만료");
+        assertThat(ExampleLineService.mismatches(bp(List.of(EX1, EX2), List.of(setup), ""))).isEmpty();
+        var time = new BlueprintDto.Example("새 RoomCalendar에 registerRoom(\"한빛\"), reserve(\"한빛\", LocalTime.of(10, 0), LocalTime.of(11, 0)) 뒤 availableRooms(LocalTime.of(11, 30), LocalTime.of(11, 45))",
+                "[\"한빛\"]", "PassRegistry.availableCodes", List.of(List.of("start", "11:30"), List.of("end", "11:45")));
+        assertThat(ExampleLineService.mismatches(bp(List.of(time), List.of(new BlueprintDto.ExampleSetup("PassRegistry.availableCodes", "한빛에는 10:00부터 11:00까지 예약이 있다.")), ""))).isEmpty();
+        var decimal = new BlueprintDto.Example("새 PaymentDiscount에 add(new BigDecimal(\"0.10\")) 뒤 availableCodes(LocalDate.of(2026, 6, 10))", "[]", "PassRegistry.availableCodes",
+                List.of(List.of("visitDate", "2026-06-10")));
+        assertThat(ExampleLineService.mismatches(bp(List.of(decimal), List.of(new BlueprintDto.ExampleSetup("PassRegistry.availableCodes", "할인 0.1 등록")), ""))).isEmpty();
+        assertThat(ExampleLineService.numbers("2026-06-10 40,000원 0.10 [1,2]")).containsExactly("2026", "6", "10", "40000", "0.1", "1", "2");
+    }
+
+    @Test
+    @DisplayName("g25 01·04: where 에 api 클래스를 적으면 where 를 고치라고 알린다")
+    void whereNamingApiClassSaysFixWhere() {
+        BlueprintDto b = new BlueprintDto("t", "s", "room", "기능 구현", List.of(), "상황", List.of("추가: RoomCalendar.availableRooms(LocalTime start, LocalTime end): List<String>"), List.of(),
+                List.of(), List.of(new BlueprintDto.Flaw("R1 경계", "ReservationOverlap.overlaps (src/meeting/ReservationOverlap.java), RoomCalendar.isAvailable (src/meeting/RoomCalendar.java)", "근거", "t")),
+                List.of(), List.of(), null, List.of(), List.of(), List.of(), List.of(), List.of());
+        assertThat(DevBlueprintService.flawHidden(b)).hasSize(1).allMatch(p -> p.startsWith("flaws.where 가 결함 클래스와 함께 그것을 부르는 공개 API 클래스 RoomCalendar"));
     }
 
     @Test

@@ -33,6 +33,7 @@ final class DevBlueprintService {
         }
         bad.addAll(addedMethodCases(b));
         bad.addAll(exampleBasisCases(b));
+        bad.addAll(ExampleLineService.mismatches(b)); // 화면 표시값·준비 문장이 숨은 테스트 input 과 다르면 틀린 예(g25 03)
         for (var c : b.cases()) { // Q7 개정: 기존 메서드 예는 화면에 안 나오니 사례 근거가 될 수 없다
             var e = ExampleLineService.basisExample(b, c);
             if (e != null && !ExampleLineService.shown(b, e)) {
@@ -176,8 +177,17 @@ final class DevBlueprintService {
      */
     static List<String> flawHidden(BlueprintDto b) {
         List<String> bad = new ArrayList<>();
-        for (String cls : flawClasses(b)) {
+        java.util.Set<String> flawed = flawClasses(b);
+        java.util.function.Predicate<String> inApi = cls -> nz(b.api()).stream().anyMatch(a -> a != null && Pattern.compile("(?<![\\w])" + Pattern.quote(cls) + "(?![\\w])").matcher(a).find());
+        boolean hasCalledClass = flawed.stream().anyMatch(inApi.negate());
+        for (String cls : flawed) {
             Pattern word = Pattern.compile("(?<![\\w])" + Pattern.quote(cls) + "(?![\\w])");
+            if (hasCalledClass && inApi.test(cls)) {
+                // g25 01·04: where 에 호출되는 결함 클래스와 함께 그것을 부르는 api 클래스까지 적어 이 검사가 3번 되풀이됐다(모델은 api 를 고치려 했다). where 를 고치라고 말한다
+                bad.add("flaws.where 가 결함 클래스와 함께 그것을 부르는 공개 API 클래스 " + cls + " 까지 적었습니다: " + nz(b.flaws()).stream().map(BlueprintDto.Flaw::where).toList()
+                        + ". flaws.where 에는 결함이 실제로 있는 호출되는 클래스와 그 경로(와 NOTES.md)만 적고, api 클래스·메서드·파일 경로는 적지 마세요(예: \"ReservationOverlap.overlaps (src/meeting/ReservationOverlap.java), NOTES.md\"). api·예는 그대로 두면 됩니다");
+                continue;
+            }
             for (String a : nz(b.api())) {
                 if (a != null && word.matcher(a).find()) {
                     bad.add("결함 클래스 " + cls + " 가 공개 API(api)에 있습니다: " + a + ". 결함은 api 클래스가 부르는 다른 클래스(설명이 이름을 대지 않는 파일)에 두고, api 에는 호출하는 쪽 클래스만 쓰세요");

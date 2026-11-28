@@ -210,11 +210,6 @@ final class ExampleLineService {
             perMethod.merge(method, 1, Integer::sum);
             List<String> values = new ArrayList<>();
             for (var a : nz(e.args())) if (a != null && a.size() > 1) values.add(str(a.get(1)));
-            String input = GenTextService.norm(e.input());
-            for (String v : values) { // 표시값의 이름·코드가 실제 호출(input)에 없으면 화면 값과 숨은 테스트가 어긋난다(g25 03: 표시 "바다", 호출 feeFor("바일"))
-                var w = WORD.matcher(v);
-                while (w.find()) if (!input.contains(GenTextService.norm(w.group()))) hits.add(method + " 표시값 '" + w.group() + "' 이 입력 호출에 없음");
-            }
             values.add(str(e.expected()));
             for (String v : values) {
                 if (v.length() > MAX_VALUE_CHARS) hits.add(method + " 표시값 " + v.length() + "자: " + clip(v));
@@ -232,6 +227,71 @@ final class ExampleLineService {
         }
         if (hits.isEmpty()) return new GenCheckResultDto(SHAPE_CHECK, true, "예시 " + total + "개가 함수별 짧은 표 모양입니다.", GenCheckResultDto.WARN);
         return new GenCheckResultDto(SHAPE_CHECK, false, "예시가 Q7 표 모양을 벗어납니다: " + String.join(" / ", hits.stream().distinct().limit(8).toList()), GenCheckResultDto.WARN);
+    }
+
+    static final String MISMATCH_RULE = "표시값은 input의 값을 그대로 짧게 쓴 것이어야 한다(이름·숫자 일치)";
+    private static final Pattern NUMBER = Pattern.compile("\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?");
+    private static final Pattern STRING_LITERAL = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"");
+
+    /**
+     * 화면 표시값·준비 문장이 숨은 테스트용 input 과 어긋나는 곳(형식 실패, g25 03: 준비 "바다 10,000원", input load("바일;10000")).
+     * ① 매개변수 표시값의 이름·코드 낱말과 숫자가 그 예의 input 에 있다. ② 준비 문장의 숫자가 그 함수 예들의 input 에 있다.
+     * ③ 그 함수 예들의 input 문자열 값 속 이름은 준비 문장이나 그 예의 표시값에 나온다. 숫자는 값으로 비교한다(2026-06-10 ↔ LocalDate.of(2026, 6, 10), 40,000 ↔ 40000)
+     */
+    static List<String> mismatches(BlueprintDto bp) {
+        List<String> bad = new ArrayList<>();
+        Map<String, List<BlueprintDto.Example>> byMethod = new LinkedHashMap<>();
+        for (var e : shownExamples(bp)) if (!blank(e.method()) && !blank(e.input())) byMethod.computeIfAbsent(e.method().strip(), k -> new ArrayList<>()).add(e);
+        Map<String, String> setups = new LinkedHashMap<>();
+        for (var s : nz(bp.exampleSetups())) if (s != null && !blank(s.method()) && !blank(s.text())) setups.putIfAbsent(s.method().strip(), s.text());
+        for (var entry : byMethod.entrySet()) {
+            String method = entry.getKey();
+            String setup = setups.getOrDefault(method, "");
+            Set<String> allNumbers = new LinkedHashSet<>();
+            entry.getValue().forEach(e -> allNumbers.addAll(numbers(e.input())));
+            for (var e : entry.getValue()) {
+                String input = GenTextService.norm(e.input());
+                Set<String> inputNumbers = numbers(e.input());
+                StringBuilder shownText = new StringBuilder(setup);
+                for (var a : nz(e.args())) {
+                    if (a == null || a.size() < 2) continue;
+                    String v = str(a.get(1));
+                    shownText.append(' ').append(v);
+                    var w = WORD.matcher(v);
+                    while (w.find()) if (!input.contains(GenTextService.norm(w.group()))) bad.add(mismatch(method, "표시값 '" + w.group() + "' 이 input 에 없습니다", e));
+                    for (String num : numbers(v)) if (!inputNumbers.contains(num)) bad.add(mismatch(method, "표시값 숫자 " + num + " 이 input 에 없습니다", e));
+                }
+                shownText.append(' ').append(str(e.expected()));
+                String shown = GenTextService.norm(shownText.toString());
+                var lit = STRING_LITERAL.matcher(e.input());
+                while (lit.find()) {
+                    var w = WORD.matcher(lit.group(1).replaceAll("\\\\[ntr]", " "));
+                    while (w.find()) if (!shown.contains(GenTextService.norm(w.group()))) bad.add(mismatch(method, "input 의 값 '" + w.group() + "' 이 준비 문장·표시값에 없습니다", e));
+                }
+            }
+            for (String num : numbers(setup)) if (!allNumbers.contains(num)) bad.add("예시 " + method + " 의 준비 문장 숫자 " + num + " 이 input 에 없습니다: " + setup + ". " + MISMATCH_RULE);
+        }
+        return bad.stream().distinct().toList();
+    }
+
+    private static String mismatch(String method, String what, BlueprintDto.Example e) {
+        return "예시 " + method + " 의 " + what + "(input: " + clip(e.input()) + "). " + MISMATCH_RULE;
+    }
+
+    /** 글 속 숫자들을 값으로(쉼표·앞 0·끝 0 뺌): "2026-06-10" → 2026, 6, 10, "40,000" → 40000, "0.10" → 0.1 */
+    static Set<String> numbers(String text) {
+        Set<String> out = new LinkedHashSet<>();
+        var m = NUMBER.matcher(text == null ? "" : text);
+        while (m.find()) {
+            String raw = m.group().replace(",", "");
+            if (raw.endsWith(".")) raw = raw.substring(0, raw.length() - 1);
+            try {
+                out.add(new java.math.BigDecimal(raw).stripTrailingZeros().toPlainString());
+            } catch (NumberFormatException ignored) {
+                // 숫자 꼴이 아니면 건너뛴다
+            }
+        }
+        return out;
     }
 
     /** 표시값이 목록([...])이면 항목 수, 아니면 0 */
