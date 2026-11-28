@@ -30,6 +30,10 @@ public class Company {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /** 관리자가 삭제한 시각 (소프트 삭제). 회차·응시 기록이 이 행을 참조하므로 지우지 않는다 */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     protected Company() {}
 
     public Company(String name, String businessNo, String contact, Instant createdAt) {
@@ -44,4 +48,11 @@ public class Company {
     public String getBusinessNo() { return businessNo; }
     public String getContact() { return contact; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public boolean isDeleted() { return deletedAt != null; }
+
+    public void delete(Instant at) {
+        if (deletedAt != null) throw new IllegalStateException("이미 삭제한 회사입니다.");
+        deletedAt = at;
+    }
 }

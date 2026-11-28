@@ -30,6 +30,9 @@ public interface TaskGenJobRepository extends JpaRepository<TaskGenJob, String> 
 
     List<TaskGenJob> findByBatchIdOrderByCreatedAtAsc(String batchId);
 
+    /** 최근 끝난 작업(예상 비용 계산용, TaskGenCostService) */
+    List<TaskGenJob> findTop200ByStatusAndCostUsdNotNullOrderByFinishedAtDesc(String status);
+
     /** 내 env 의 대기·실행 중인 작업과 since 이후에 끝난 작업 */
     @Query("select j from TaskGenJob j where j.env = :env and (j.status in :active or j.finishedAt >= :since) order by j.createdAt asc")
     List<TaskGenJob> findActive(@Param("env") String env, @Param("active") Collection<String> active, @Param("since") Instant since);
@@ -61,8 +64,8 @@ public interface TaskGenJobRepository extends JpaRepository<TaskGenJob, String> 
 
     @Transactional
     @Modifying
-    @Query("update TaskGenJob j set j.step = :step where j.id = :id and j.status = 'RUNNING' and j.workerId = :worker")
-    int updateStep(@Param("id") String id, @Param("worker") String worker, @Param("step") String step);
+    @Query("update TaskGenJob j set j.step = :step, j.costUsd = :cost where j.id = :id and j.status = 'RUNNING' and j.workerId = :worker")
+    int updateStep(@Param("id") String id, @Param("worker") String worker, @Param("step") String step, @Param("cost") Double cost);
 
     /** 끝남(내가 줍은 실행 중 작업만) */
     @Transactional

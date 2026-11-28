@@ -209,7 +209,8 @@ public class TaskGenJobService {
             recorder.bind();
             TaskGenRequest form = json.readValue(job.getForm(), TaskGenRequest.class);
             TaskGeneratorService<?> generator = "BIZ".equals(form.track()) ? biz : dev;
-            TaskGeneratorService.Outcome o = generator.generate(form, job.getAdminId(), step -> step(jobId, step));
+            JobCallService rec = recorder;
+            TaskGeneratorService.Outcome o = generator.generate(form, job.getAdminId(), step -> step(jobId, step, rec.costUsd())); // 단계마다 지금까지 쓴 비용도 남긴다
             jobs.finish(jobId, workerId, TaskGenJob.DONE, "완료", o.taskCode(), o.passed(), toJson(o.checks()), null, recorder.costUsd(), Instant.now());
         } catch (Exception e) {
             if (stopping) return; // 서버가 꺼지는 중이라 끊긴 것: RUNNING 으로 두면 다음 서버가 heartbeat 규칙으로 이어 간다
@@ -221,9 +222,9 @@ public class TaskGenJobService {
         }
     }
 
-    private void step(String jobId, String step) {
+    private void step(String jobId, String step, double costUsd) {
         try {
-            jobs.updateStep(jobId, workerId, step);
+            jobs.updateStep(jobId, workerId, step, costUsd);
         } catch (RuntimeException e) {
             log.warn("단계 기록 실패: {}", e.getMessage());
         }

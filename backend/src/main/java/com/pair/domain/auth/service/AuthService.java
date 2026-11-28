@@ -215,6 +215,16 @@ public class AuthService {
         if (account.getRole() == CurrentUser.Role.MANAGER) {
             throw new ForbiddenException("매니저는 먼저 위임하거나 관리자에게 교체를 요청해야 합니다.");
         }
+        withdrawAccount(account, now);
+    }
+
+    /**
+     * 계정을 탈퇴 처리한다: 이메일을 탈퇴 해시로 바꿔 같은 이메일로 다시 가입·기업 계정 발급을 할 수 있게 하고
+     * (그때 이 행이 되살아난다), 비밀번호를 무효로 바꾸고 로그인 세션을 모두 끊는다.
+     * 권한·회차 검사는 부르는 쪽이 한다 (본인 탈퇴, 관리자의 회사 삭제).
+     */
+    @Transactional
+    public void withdrawAccount(AuthAccount account, Instant now) {
         String anonymousEmail = withdrawnEmailHasher.hash(normalizeEmail(account.getEmail()));
         // 탈퇴 해시 행이 이미 따로 있는 계정(중복 생성된 기존 데이터)은 무작위 주소로 익명화한다
         if (accounts.existsByEmailIgnoreCase(anonymousEmail)) {
