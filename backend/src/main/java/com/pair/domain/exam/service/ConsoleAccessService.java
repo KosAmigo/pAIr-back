@@ -4,6 +4,7 @@ import java.util.NoSuchElementException;
 
 import org.springframework.stereotype.Component;
 
+import com.pair.domain.company.repository.CompanyRepository;
 import com.pair.domain.exam.repository.ExamSessionRepository;
 import com.pair.global.security.CurrentUser;
 import com.pair.global.security.CurrentUser.Role;
@@ -18,9 +19,11 @@ import com.pair.global.error.ForbiddenException;
 public class ConsoleAccessService {
 
     private final ExamSessionRepository sessions;
+    private final CompanyRepository companies;
 
-    public ConsoleAccessService(ExamSessionRepository sessions) {
+    public ConsoleAccessService(ExamSessionRepository sessions, CompanyRepository companies) {
         this.sessions = sessions;
+        this.companies = companies;
     }
 
     /** 회차 생성은 회사 매니저만 가능 */
@@ -49,6 +52,10 @@ public class ConsoleAccessService {
     public Long companyFor(CurrentUser user, Long requested) {
         if (user.isAdmin()) {
             if (requested == null) throw new IllegalArgumentException("관리자는 companyId 를 넣어야 합니다.");
+            // 삭제한 회사에는 회차를 새로 만들거나 옮기지 않는다
+            if (companies.findById(requested).filter(c -> !c.isDeleted()).isEmpty()) {
+                throw new NoSuchElementException("회사를 찾을 수 없습니다: " + requested);
+            }
             return requested;
         }
         return user.companyId();
