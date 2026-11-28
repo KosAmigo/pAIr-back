@@ -81,12 +81,12 @@ public class CompanyMemberService {
 
     @Transactional(readOnly = true)
     public List<CompanyResponse> allCompanies() {
-        return companies.findAll().stream().map(CompanyResponse::from).toList();
+        return companies.findByDeletedAtIsNullOrderByIdAsc().stream().map(CompanyResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
     public CompanyDetailResponse company(Long companyId) {
-        Company company = companies.findById(companyId)
+        Company company = companies.findById(companyId).filter(c -> !c.isDeleted())
                 .orElseThrow(() -> new NoSuchElementException("회사를 찾을 수 없습니다."));
         return new CompanyDetailResponse(CompanyResponse.from(company), accountViews(companyId));
     }
@@ -95,7 +95,7 @@ public class CompanyMemberService {
     public ManagerReplacementResponse replaceManager(long companyId, CurrentUser admin,
             ReplaceManagerRequest request) {
         requireAdmin(admin);
-        if (companies.findById(companyId).isEmpty()) throw new NoSuchElementException("회사를 찾을 수 없습니다.");
+        if (companies.findById(companyId).filter(c -> !c.isDeleted()).isEmpty()) throw new NoSuchElementException("회사를 찾을 수 없습니다.");
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (accounts.existsByEmailIgnoreCase(email)) throw new ConflictException("이미 가입된 이메일입니다.");
         List<AuthAccount> companyAccounts = accounts.lockByCompanyId(companyId);
