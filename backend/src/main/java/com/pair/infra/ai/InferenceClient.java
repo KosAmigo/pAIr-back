@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * 추론 서버(RunPod GPU) 경계 (계약 §3-2·§3-3). 백엔드는 응시자 사진 프레임을 여기로 넘기고, 세션을 시작·전환·종료하고, 상태를 확인한다.
- * 추론 서버 저장소가 아직 없어서 지금은 {@link StubInferenceClient} 만 있다. 실제 `/v1/stream`·REST 구현은 추론 서버가 생긴 뒤 이 인터페이스로 끼운다.
+ * 추론 서버는 {@link RunPodInferenceClient} 가 연결하고 inference-url 이 비어 있는 로컬 환경에서는 {@link StubInferenceClient} 를 쓴다.
  * 구현은 사진·키를 로그에 남기지 않는다. 판정 결과 중 이벤트는 이 경계로 돌아오지 않고 내부 콜백 API(`/internal/vision/events`)로 들어온다.
  * 세션 키(sessionKey)는 응시자의 불투명 visionKey 다.
  */

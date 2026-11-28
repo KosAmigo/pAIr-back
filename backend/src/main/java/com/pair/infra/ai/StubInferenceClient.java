@@ -6,17 +6,19 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Conditional;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * 가짜 추론 서버: 추론 서버 저장소가 생기기 전의 자리 채움이다. 프레임을 세기만 하고 내용은 보관하지 않으며 로그에도 남기지 않는다.
+ * 로컬용 가짜 추론 서버: inference-url 미설정일 때만 사용한다. 프레임을 세기만 하고 내용은 보관하지 않으며 로그에도 남기지 않는다.
  * 항상 준비됨으로 답하고, 시험 모드로 등록된 세션에는 2초마다 생존 신호(state)를 돌려주며, 점검 모드 세션에는 모두 통과한 점검 판정을 돌려준다.
- * 실제 구현으로 바꿀 때는 이 클래스를 지우고 InferenceClient 구현을 Bean 으로 둔다.
+ * 실제 inference-url 이 설정되면 RunPodInferenceClient 가 대신 선택된다.
  */
 @Component
+@Conditional(InferenceUrlMissing.class)
 public class StubInferenceClient implements InferenceClient {
 
     private final ObjectMapper json;
