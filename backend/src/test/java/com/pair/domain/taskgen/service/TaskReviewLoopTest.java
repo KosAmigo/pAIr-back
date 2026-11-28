@@ -609,16 +609,27 @@ class TaskReviewLoopTest {
     }
 
     @Test
-    @DisplayName("문항 글이 설계도의 보기 후보와 다르면 fail(문항 글 단계로), 설명 문장이 낀 보기나 정답 보기가 빠진 것도 잡는다")
+    @DisplayName("문항 글 단계가 보기를 줄여 써도 보기는 설계도 후보 그대로 들어가고 정답 보기는 하나다. 문항이 빠지면 fail(문항 글 단계로)")
     void questionTextCheck() {
         BlueprintDto b = TaskPipelineServiceTest.bizBlueprint();
         assertThat(BizQuestionService.check(b, TaskPipelineServiceTest.bizQuestions()).ok()).isTrue();
 
+        // g23: 문장 보기를 짧게 줄여 쓴 문항 글
         var qs = new ArrayList<>(TaskPipelineServiceTest.bizQuestions().questions());
-        qs.set(0, new BizQuestionsDto.Question("Q1", "Q1. 배정 후보는?", List.of("여름만 후보", "둘 다 후보", "둘 다 보류", "새봄이 낫다는 설명 문장이 붙은 보기")));
+        qs.set(0, new BizQuestionsDto.Question("Q1", "Q1. 배정 후보는?", List.of("여름만", "둘 다", "보류", "새봄이 낫다는 설명 문장이 붙은 보기")));
+        var shortened = new BizQuestionsDto(qs);
+        assertThat(BizQuestionService.check(b, shortened).ok()).isTrue();
+        var q1 = BizQuestionService.assemble(b, shortened, null).get(0);
+        assertThat(q1.choices()).extracting(BizDraftDto.Choice::content).containsExactlyInAnyOrderElementsOf(b.cases().get(0).choices());
+        assertThat(q1.choices()).filteredOn(BizDraftDto.Choice::correct).extracting(BizDraftDto.Choice::content).containsExactly(b.cases().get(0).expected());
+        // 문항 글 단계 입력의 보기 순서와 조립된 보기 순서가 같다
+        String in = BizQuestionService.input(b, "글", "");
+        assertThat(in).contains(String.join(" / ", q1.choices().stream().map(BizDraftDto.Choice::content).toList()));
+
+        qs.remove(0);
         var bad = BizQuestionService.check(b, new BizQuestionsDto(qs));
         assertThat(bad.ok()).isFalse();
-        assertThat(bad.detail()).contains("정답 보기").contains("새봄만 후보");
+        assertThat(bad.detail()).contains("Q1 문항이 없음");
         assertThat(BizPipelineService.owners(bad)).containsExactly(Stage.QUESTIONS);
     }
 
@@ -672,7 +683,8 @@ class TaskReviewLoopTest {
         var qs = BizQuestionService.assemble(withJudgment, questions, answer);
 
         assertThat(qs).hasSize(2);
-        assertThat(qs.get(0).choices()).extracting(BizDraftDto.Choice::correct).containsExactly(false, true, false, false); // 정답 보기는 기대 결과로 정한다(순서가 달라도)
+        assertThat(qs.get(0).choices()).filteredOn(BizDraftDto.Choice::correct).extracting(BizDraftDto.Choice::content)
+                .containsExactly(withJudgment.cases().get(0).expected()); // 정답 보기는 기대 결과로 정한다(보기는 설계도 후보를 섞은 순서)
         assertThat(qs.get(1).accepted()).containsExactly("25", "25.0"); // 단위를 뗀다
         assertThat(qs.get(0).type()).isEqualTo(BizDraftDto.Type.SINGLE);
         assertThat(qs.get(1).type()).isEqualTo(BizDraftDto.Type.SHORT);
@@ -694,7 +706,7 @@ class TaskReviewLoopTest {
                 new com.pair.domain.taskgen.dto.BizAnswerDto("c", List.of()));
 
         assertThat(qs).hasSize(1);
-        assertThat(qs.get(0).choices()).extracting(BizDraftDto.Choice::correct).containsExactly(true, false, false, false); // 정확히 하나
+        assertThat(qs.get(0).choices()).filteredOn(BizDraftDto.Choice::correct).extracting(BizDraftDto.Choice::content).containsExactly(expected); // 정확히 하나
         assertThat(BizQuestionService.check(bp, new BizQuestionsDto(List.of(new BizQuestionsDto.Question("Q1", "Q1", choices)))).ok()).isTrue();
         // 숫자만 적힌 보기는 단위를 맞춘 같은 값으로 하나만 고른다
         assertThat(BizQuestionService.correctIndex(List.of("20", "25퍼센트", "0.25", "30"), "25")).isEqualTo(1);

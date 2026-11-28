@@ -33,6 +33,19 @@ class BizLeakRecordFilterTest {
     }
 
     @Test
+    void 객관식_보기_위치는_답_노출에서_뺀다() {
+        assertThat(TaskReviewService.onChoice(v("30백만원 부족", "문항 3 보기4"))).isTrue();
+        assertThat(TaskReviewService.onChoice(v("30백만원 부족", "choice:3:4"))).isTrue();
+        assertThat(TaskReviewService.onChoice(v("부족액을 구하시오", "문항 3"))).isFalse();
+    }
+
+    @Test
+    void 위반이_아니라고_적은_항목은_뺀다() {
+        assertThat(TaskReviewService.selfDenied(new Violation("M2", "q", "question:3", "기준과 계산 값으로 답이 하나로 정해져 판단 지점이 아니므로 위반이 아닙니다. [단계:ANSWER]"))).isTrue();
+        assertThat(TaskReviewService.selfDenied(new Violation("M2", "q", "question:3", "단위가 천 원인데 인정 답이 원 단위입니다."))).isFalse();
+    }
+
+    @Test
     void 설계도가_넣은_근거_문장은_답_노출_입력에_의도한_근거로_실린다() {
         var bp = TaskPipelineServiceTest.bizBlueprint();
         String out = TaskReviewService.intendedFacts(bp);

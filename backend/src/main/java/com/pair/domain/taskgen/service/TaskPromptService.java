@@ -426,7 +426,7 @@ final class TaskPromptService {
             Rules:
             - questions: one per id in the list, in order. content asks only for the value, in 1–2 sentences. No calculation method, order, cause, or which material to use how; never name a material by its title or a near paraphrase.
             - Short-answer wording states the unit and rounding (e.g. "소수 첫째 자리까지").
-            - Multiple-choice choices are the given candidates with values unchanged: numbers or short conclusions only, no explanation sentences (a unit may be added). Any order.
+            - Multiple-choice choices: copy the given candidates exactly, character for character (the code replaces them with the blueprint candidates anyway). Write the wording so it reads naturally with those candidates.
             - Do not put another question's value into choices or wording. Do not hint which choice is right.
             """ + KOREAN_STYLE;
 

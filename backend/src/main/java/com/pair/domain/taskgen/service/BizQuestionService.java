@@ -16,6 +16,8 @@ import java.util.regex.Pattern;
 /**
  * 3단계(BIZ) 문항 글: 입력 만들기, 결과 확인, 정답 쪽과의 조립. 문항 글 단계는 결함을 모른다(설계 3장):
  * 사례의 "구할 값"과 보기 후보만 받고, 기대 결과·근거·결함·함정 결론은 받지 않는다. 정답 보기는 코드가 사례의 기대 결과로 정한다.
+ * 객관식 보기는 문항 글 단계가 쓴 것을 쓰지 않고 설계도 보기 후보를 코드가 섞어 그대로 넣는다
+ * (2026-11-28 g23: 문항 글 단계가 문장 보기를 "달빛만 선정"처럼 줄여 써서 보기·정답 보기 검사가 다시 만들어도 계속 실패).
  */
 final class BizQuestionService {
 
@@ -57,6 +59,19 @@ final class BizQuestionService {
         return l == null ? List.of() : l;
     }
 
+    /** 객관식 사례별 보기 순서: 설계도 보기 후보를 과제 코드로 정한 순서로 섞는다(같은 설계도면 늘 같은 순서) */
+    static java.util.Map<String, List<String>> shuffledChoices(BlueprintDto b) {
+        java.util.Map<String, List<String>> out = new java.util.LinkedHashMap<>();
+        Random random = new Random(String.valueOf(b.code()).hashCode());
+        for (var c : ordered(b)) {
+            if (!single(c)) continue;
+            List<String> mixed = new ArrayList<>(c.choices());
+            Collections.shuffle(mixed, random);
+            out.put(c.name(), mixed);
+        }
+        return out;
+    }
+
     /** 문항 글 단계 입력. 결함·근거·기대 결과·함정 결론은 넣지 않는다. feedback 은 다시 쓸 때 붙는다 */
     static String input(BlueprintDto b, String visibleText, String feedback) {
         StringBuilder sb = new StringBuilder("상황: ").append(b.scenario()).append("\n[응시자에게 보이는 글]\n").append(visibleText).append('\n');
@@ -64,12 +79,11 @@ final class BizQuestionService {
         b.docs().forEach(d -> sb.append("- ").append(d.path()).append(" (").append(d.role()).append(")\n"));
         b.tables().forEach(t -> sb.append("- ").append(t.path()).append(" 열: ").append(String.join(", ", t.columns())).append('\n'));
         sb.append("[문항 목록]\n");
-        Random random = new Random(String.valueOf(b.code()).hashCode());
+        var shuffled = shuffledChoices(b);
         for (var c : ordered(b)) {
             sb.append("- ").append(c.name()).append(" | ");
             if (single(c)) {
-                List<String> mixed = new ArrayList<>(c.choices());
-                Collections.shuffle(mixed, random);
+                List<String> mixed = shuffled.get(c.name());
                 sb.append("객관식 | 구할 값: ").append(c.ask()).append(" | 보기 후보: ").append(String.join(" / ", mixed));
             } else {
                 sb.append("단답형(숫자 하나) | 구할 값: ").append(c.ask());
@@ -80,7 +94,7 @@ final class BizQuestionService {
         return sb.toString();
     }
 
-    /** 문항 글이 설계도의 문항과 보기 후보를 그대로 따랐는지: id 가 사례와 같고, 객관식 보기가 후보와 같은 값이며, 정답 보기가 있음(판단 지점 문항은 모두 인정) */
+    /** 문항 글이 설계도의 문항을 모두 썼는지: id 가 사례와 같고 문구가 있음. 보기는 코드가 설계도 후보로 넣으므로 보지 않는다 */
     static GenCheckResultDto check(BlueprintDto b, BizQuestionsDto q) {
         List<String> bad = new ArrayList<>();
         List<BizQuestionsDto.Question> qs = q == null || q.questions() == null ? List.of() : q.questions();
@@ -91,11 +105,6 @@ final class BizQuestionService {
                 continue;
             }
             if (found.content() == null || found.content().isBlank()) bad.add(c.name() + " 문구가 비어 있음");
-            if (!single(c)) continue;
-            List<String> have = found.choices() == null ? List.of() : found.choices();
-            if (have.size() != c.choices().size()) bad.add(c.name() + " 보기가 " + have.size() + "개(설계도 " + c.choices().size() + "개)");
-            for (String want : c.choices()) if (have.stream().noneMatch(h -> sameChoice(h, want))) bad.add(c.name() + " 보기 후보 '" + want + "' 가 없음");
-            if (correctIndex(have, c.expected()) < 0) bad.add(c.name() + " 정답 보기('" + c.expected() + "')가 없음");
         }
         long extra = qs.stream().filter(x -> x != null && ordered(b).stream().noneMatch(c -> c.name() != null && c.name().equals(x.id()))).count();
         if (extra > 0) bad.add("설계도에 없는 문항 " + extra + "개");
@@ -128,28 +137,22 @@ final class BizQuestionService {
         return s != null && ValueService.plain(s).matches("-?\\d+(\\.\\d+)?");
     }
 
-    /** 보기가 같은지: 둘 다 숫자가 있으면 단위를 맞춘 값 비교, 아니면 공백을 뺀 글 비교 */
-    static boolean sameChoice(String a, String b) {
-        if (a == null || b == null) return false;
-        if (bare(a) && bare(b)) return ValueService.same(a, b);
-        return GenTextService.norm(a).equals(GenTextService.norm(b));
-    }
-
     /**
      * 문항 글(3단계)과 정답 키(4단계)를 합친다. 문항 종류는 사례에서(보기 후보가 있으면 객관식).
-     * 기계적 수정: 정답 키의 값은 단위 글자와 쉼표를 떼 숫자만 남기고, 정답 보기는 사례의 기대 결과와 가장 같은 보기 하나로 정한다. 판단 지점 사례는 문항으로 만들지 않는다
+     * 기계적 수정: 정답 키의 값은 단위 글자와 쉼표를 떼 숫자만 남기고, 객관식 보기는 설계도 후보를 섞은 것, 정답 보기는 사례의 기대 결과와 가장 같은 보기 하나로 정한다. 판단 지점 사례는 문항으로 만들지 않는다
      */
     static List<BizDraftDto.QuestionDraft> assemble(BlueprintDto b, BizQuestionsDto q, BizAnswerDto a) {
         List<BizDraftDto.QuestionDraft> out = new ArrayList<>();
         List<BizQuestionsDto.Question> texts = q == null || q.questions() == null ? List.of() : q.questions();
         List<BizAnswerDto.Key> keys = a == null || a.keys() == null ? List.of() : a.keys();
+        var shuffled = shuffledChoices(b);
         for (var c : ordered(b)) {
             var text = texts.stream().filter(x -> x != null && c.name().equals(x.id())).findFirst().orElse(null);
             var key = keys.stream().filter(x -> x != null && c.name().equals(x.id())).findFirst().orElse(null);
             if (text == null) continue;
             List<BizDraftDto.Source> sources = key == null || key.sources() == null ? List.of() : key.sources();
             if (single(c)) {
-                List<String> given = text.choices() == null ? List.of() : text.choices();
+                List<String> given = shuffled.get(c.name());
                 int right = correctIndex(given, c.expected());
                 List<BizDraftDto.Choice> choices = new ArrayList<>();
                 for (int i = 0; i < given.size(); i++) choices.add(new BizDraftDto.Choice(given.get(i), i == right));

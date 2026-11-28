@@ -567,7 +567,7 @@ class TaskPipelineServiceTest {
         assertThat(TaskPromptService.blueprint(false, 20, "깊이")).contains("must already pass on the flawed starter code");
         assertThat(TaskPromptService.WRITING_DEV).contains("write only background").contains("문자 그대로 취급한다");
         assertThat(TaskPromptService.writingBizDoc(20, false, 2)).contains("write only background");
-        assertThat(TaskPromptService.QUESTIONS_BIZ).contains("Do not put another question's value").contains("no explanation sentences");
+        assertThat(TaskPromptService.QUESTIONS_BIZ).contains("Do not put another question's value").contains("copy the given candidates exactly");
         assertThat(TaskPromptService.answerBiz("깊이")).contains("You write only the answer keys").doesNotContain("taskFollowUp");
         assertThat(TaskPromptService.answerDev(20)).contains("situation input values exactly");
     }
