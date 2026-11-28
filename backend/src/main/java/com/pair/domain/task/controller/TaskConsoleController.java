@@ -2,9 +2,13 @@ package com.pair.domain.task.controller;
 
 import com.pair.domain.task.service.TaskConsoleService;
 import com.pair.domain.task.service.TaskReviewService;
+import com.pair.domain.task.service.TaskDeleteService;
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -34,9 +38,11 @@ public class TaskConsoleController {
     private final TaskCatalogService tasks;
     private final TaskMaterialService materials;
     private final TaskReviewService review;
+    private final TaskDeleteService deleter;
 
     public TaskConsoleController(TaskConsoleService console, TaskCatalogService tasks, TaskMaterialService materials,
-            TaskReviewService review) {
+            TaskReviewService review, TaskDeleteService deleter) {
+        this.deleter = deleter;
         this.console = console;
         this.tasks = tasks;
         this.materials = materials;
@@ -68,6 +74,14 @@ public class TaskConsoleController {
     public TaskSummary hide(CurrentUser user, @PathVariable String taskId) {
         requireAdmin(user);
         return console.changeStatus(taskId, Task.Status.HIDDEN);
+    }
+
+    /** 숨김(HIDDEN) 과제 삭제. 공개 중·응시 기록·회차·복사본이 있으면 409, 없는 과제는 404 */
+    @DeleteMapping("/{taskId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(CurrentUser user, @PathVariable String taskId) {
+        requireAdmin(user);
+        deleter.delete(taskId);
     }
 
     public record UsageRequest(Task.Usage usage) {}
