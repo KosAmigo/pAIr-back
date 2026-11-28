@@ -16,6 +16,8 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
 
+import org.hibernate.annotations.ColumnDefault;
+
 /** 실전 시험 회차. 시작·종료 시각은 서버 시각 기준이다. */
 @Entity
 @Table(name = "exam_sessions")
@@ -45,6 +47,7 @@ public class ExamSession {
     private boolean proctoring;
 
     /** 서버 추론 감독 사용 회차인지. 백엔드 스위치(pair.vision.enabled)도 켜져 있어야 실제로 쓴다 */
+    @ColumnDefault("false")  // 운영 V29 의 DEFAULT FALSE 와 맞춤. 테스트 H2 스키마(엔티티로 생성)에서 컬럼을 빼고 INSERT 해도 되게 한다
     @Column(name = "server_vision", nullable = false)
     private boolean serverVision;
 
