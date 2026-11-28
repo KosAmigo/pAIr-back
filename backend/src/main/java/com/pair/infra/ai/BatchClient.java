@@ -381,6 +381,7 @@ public class BatchClient {
             return v;
         } catch (RestClientResponseException e) {
             String body = e.getResponseBodyAsString();
+            if (SpringAi.creditExhausted(body)) throw new AiUnavailableException(what + " 실패: " + SpringAi.creditMessage(what.toLowerCase().contains("anthropic") ? "Anthropic" : "OpenAI"));
             throw new AiUnavailableException(what + " 실패 (" + e.getStatusCode().value() + "): " + (body.length() > 300 ? body.substring(0, 300) : body));
         }
     }

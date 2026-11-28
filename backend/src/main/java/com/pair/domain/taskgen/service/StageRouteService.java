@@ -80,6 +80,14 @@ final class StageRouteService {
         return null;
     }
 
+    /** 검사를 만든 쪽이 결과에 담은 다시 돌릴 단계(c.stages()). 없으면 null */
+    static Set<Stage> given(GenCheckResultDto c) {
+        if (c.stages().isEmpty()) return null;
+        Set<Stage> s = EnumSet.noneOf(Stage.class);
+        c.stages().forEach(x -> s.add(Stage.valueOf(x)));
+        return s;
+    }
+
     private static final java.util.regex.Pattern MARK = java.util.regex.Pattern.compile("\\[단계:([A-Z]+)]");
     private static final java.util.regex.Pattern LOC = java.util.regex.Pattern.compile("^\\S+\\s*\\[([^\\]]*)]");
 
@@ -181,7 +189,7 @@ final class StageRouteService {
             hint = "같은 검사가 같은 이유로 되풀이해 실패했습니다. 이 단계만 다시 만들어서는 고쳐지지 않으니 설계도(사실·사례·보기·판단 지점)부터 고치세요.";
         }
         if (hint == null) return c;
-        return new GenCheckResultDto(TaskPipelineService.BLUEPRINT_SENTENCE_CHECK, false, hint + " [" + c.name() + "] " + c.detail());
+        return new GenCheckResultDto(TaskPipelineService.BLUEPRINT_SENTENCE_CHECK, false, hint + " [" + c.name() + "] " + c.detail()).withStages("BLUEPRINT");
     }
 
     /** 실패 검사들의 문제 종류: 고칠 단계가 글 단계(작성·문항 글)뿐이면 "text", 아니면(정답 쪽·시작 코드·설계도·모름) "test". 둘 다 있으면 둘 다 */

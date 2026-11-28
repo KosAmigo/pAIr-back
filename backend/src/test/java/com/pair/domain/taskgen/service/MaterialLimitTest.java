@@ -131,7 +131,8 @@ class MaterialLimitTest {
         assertThat(fail.ok()).isFalse();
         assertThat(fail.name()).isEqualTo(TaskPipelineService.M6_NEEDED_CHECK);
         assertThat(DevPipelineService.owners(fail, List.of(), List.of())).containsExactly(Stage.CODE); // NOTES.md 가 없으니 코드만
-        assertThat(BizPipelineService.owners(fail)).containsExactly(Stage.BLUEPRINT);
+        assertThat(fail.stages()).containsExactly("CODE");
+        assertThat(BizPipelineService.owners(fail.withStages("BLUEPRINT"))).containsExactly(Stage.BLUEPRINT); // BIZ 는 호출부(BizPipelineService)가 언제나 설계도로 바꿔 담는다
     }
 
     @Test
@@ -217,9 +218,12 @@ class MaterialLimitTest {
         BlueprintDto b = bp(List.of("src/a.java", "NOTES.md"), List.of());
         GenCheckResultDto missingCode = MaterialGateService.needed(b, Map.of("NOTES.md", "m"), new AiLimitsDto(10, 2, 1000));
         assertThat(missingCode.ok()).isFalse();
+        assertThat(missingCode.stages()).containsExactly("CODE");
         assertThat(DevPipelineService.owners(missingCode, List.of(), List.of())).containsExactly(Stage.CODE);
         GenCheckResultDto missingNotes = MaterialGateService.needed(b, Map.of("src/a.java", "m"), new AiLimitsDto(10, 2, 1000));
+        assertThat(missingNotes.stages()).containsExactly("WRITING");
         assertThat(DevPipelineService.owners(missingNotes, List.of(), List.of())).containsExactly(Stage.WRITING);
+        assertThat(MaterialGateService.needed(bp(List.of(), List.of()), Map.of(), new AiLimitsDto(10, 2, 1000)).stages()).containsExactly("BLUEPRINT"); // 필요한 묶음이 설계도에 없음
     }
 
     @Test

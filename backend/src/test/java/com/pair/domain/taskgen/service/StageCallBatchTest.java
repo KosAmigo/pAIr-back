@@ -212,7 +212,7 @@ class StageCallBatchTest {
                 new StageUsageDto("ANSWER", "m", "low", 1, 1, 7, "", "DIRECT", 5_000, "length"),
                 new StageUsageDto("CODE", "m", "low", 1, 1, 7, "", "DIRECT", 0, "deadline"),
                 new StageUsageDto("BLUEPRINT", "m", "low", 1, 1, 7));
-        Map<String, Object> b = TaskGeneratorService.batchSummary(usage, clock.instant());
+        Map<String, Object> b = GenReportService.batchSummary(usage, clock.instant());
         assertThat(b.get("batchCalls")).isEqualTo(2);
         assertThat(b.get("avgWaitSeconds")).isEqualTo(60L);
         assertThat(b.get("directCalls")).isEqualTo(2L);

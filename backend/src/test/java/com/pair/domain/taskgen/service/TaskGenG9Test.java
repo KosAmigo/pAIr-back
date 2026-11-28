@@ -20,7 +20,10 @@ class TaskGenG9Test {
         assertThat(hit.ok()).isFalse();
         assertThat(hit.level()).isEqualTo(GenCheckResultDto.WARN);
         assertThat(hit.detail()).contains("[요청 글]").contains("[문항]").contains("시설별 전력 사용량");
+        assertThat(hit.stages()).containsExactly("WRITING", "QUESTIONS"); // [요청 글] 과 [문항] 이 함께
         assertThat(BizPipelineService.owners(hit)).contains(TaskPipelineService.Stage.WRITING, TaskPipelineService.Stage.QUESTIONS);
+        assertThat(TaskWritingService.bizMaterialPointerCheck(b, List.of("결론을 쓰세요."), List.of(), List.of("계량기안내서를 참고해 6월 사용량을 구하면 몇 kWh 입니까?")).stages()).containsExactly("QUESTIONS");
+        assertThat(TaskWritingService.bizMaterialPointerCheck(b, List.of("시설별 전력 사용량 자료와 계량기 안내서를 대조하고 기획안을 쓰세요."), List.of(), List.of()).stages()).containsExactly("WRITING");
         GenCheckResultDto ok = TaskWritingService.bizMaterialPointerCheck(b, List.of("시설 전력 비용을 검토해 1페이지 기획안을 쓰세요."), List.of("결론과 근거 3개"),
                 List.of("6월 전체 사용량은 몇 kWh 입니까?"));
         assertThat(ok.ok()).isTrue();

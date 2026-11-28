@@ -1,0 +1,151 @@
+{
+  "model" : "gpt-6.1-terra, gpt-6.1-sol",
+  "attempts" : 2,
+  "inputTokens" : 12,
+  "outputTokens" : 22,
+  "passed" : false,
+  "form" : {
+    "track" : "DEV",
+    "topic" : "쿠폰 할인 계산",
+    "trap" : "쿠폰 두 장을 겹치면 할인이 중복 적용",
+    "usage" : "SELF",
+    "minutes" : 60,
+    "competencies" : [ ]
+  },
+  "checks" : [ {
+    "name" : "시험 실행 검사",
+    "ok" : true,
+    "detail" : "통과",
+    "level" : "fail"
+  }, {
+    "name" : "답 노출 점검(1차)",
+    "ok" : false,
+    "detail" : "M5 [description] 원인을 찾아 고치세요. → 원인 문장을 지운다",
+    "level" : "fail"
+  } ],
+  "retryError" : null,
+  "details" : {
+    "solo" : {
+      "status" : "skipped",
+      "reason" : "단독 풀이 검사가 실행되지 않음"
+    },
+    "timing" : {
+      "modelCalls" : 3,
+      "runCount" : 0
+    },
+    "stages" : [ {
+      "stage" : "BLUEPRINT",
+      "model" : "gpt-6.1-terra",
+      "effort" : "medium",
+      "inputTokens" : 10,
+      "outputTokens" : 20,
+      "outputLimit" : "",
+      "via" : "DIRECT",
+      "directReason" : ""
+    }, {
+      "stage" : "REVIEW:LEAK",
+      "model" : "gpt-6.1-sol",
+      "effort" : "medium",
+      "inputTokens" : 1,
+      "outputTokens" : 1,
+      "outputLimit" : "",
+      "via" : "DIRECT",
+      "directReason" : ""
+    }, {
+      "stage" : "REVIEW:LEAK",
+      "model" : "gpt-6.1-sol",
+      "effort" : "medium",
+      "inputTokens" : 1,
+      "outputTokens" : 1,
+      "outputLimit" : "",
+      "via" : "DIRECT",
+      "directReason" : ""
+    } ],
+    "outputLimit" : {
+      "effortLowered" : 0,
+      "stageFailures" : 0,
+      "resumes" : [ ]
+    },
+    "blueprintRetries" : [ ],
+    "cost" : {
+      "totalUsd" : 1.0E-4,
+      "capUsd" : 0.6,
+      "attempts" : 2,
+      "stoppedByCap" : false,
+      "reusedCalls" : 0,
+      "estimates" : [ {
+        "attempt" : 1,
+        "method" : "처음부터 만든 비용 + 검사 비용",
+        "stages" : [ ],
+        "stageUsd" : { },
+        "regenUsd" : 1.0E-4,
+        "checkUsd" : 0.0,
+        "spentUsd" : 1.0E-4,
+        "estimateUsd" : 1.0E-4
+      } ],
+      "byStageUsd" : {
+        "BLUEPRINT" : 1.0E-4,
+        "REVIEW:LEAK" : 0.0
+      }
+    },
+    "redoStages" : [ "ANSWER" ],
+    "gates" : {
+      "passed" : false,
+      "rounds" : [ {
+        "attempt" : 1,
+        "codeChecksFailed" : [ ],
+        "gates" : [ {
+          "gate" : "답 노출 점검(1차)",
+          "stage" : "REVIEW",
+          "ok" : false,
+          "detail" : "M5 [description] 원인을 찾아 고치세요. → 원인 문장을 지운다"
+        } ]
+      }, {
+        "attempt" : 2,
+        "codeChecksFailed" : [ ],
+        "gates" : [ {
+          "gate" : "답 노출 점검(1차)",
+          "stage" : "REVIEW",
+          "ok" : false,
+          "detail" : "M5 [description] 원인을 찾아 고치세요. → 원인 문장을 지운다"
+        } ]
+      } ],
+      "regenerations" : [ {
+        "n" : 1,
+        "kind" : "blueprint",
+        "stages" : [ "ANSWER" ],
+        "because" : [ {
+          "detail" : "M5 [description] 원인을 찾아 고치세요. → 원인 문장을 지운다",
+          "name" : "답 노출 점검(1차)"
+        } ]
+      } ],
+      "budget" : {
+        "textRegens" : 0,
+        "maxTextRegens" : 2,
+        "testRegens" : 0,
+        "maxTestRegens" : 2,
+        "stageRegens" : 0,
+        "restarts" : 1,
+        "maxRestarts" : 1
+      },
+      "warnings" : { }
+    }
+  },
+  "attemptLog" : [ {
+    "number" : 1,
+    "passed" : false,
+    "problems" : [ {
+      "name" : "답 노출 점검(1차)",
+      "level" : "fail",
+      "detail" : "M5 [description] 원인을 찾아 고치세요. → 원인 문장을 지운다"
+    } ]
+  }, {
+    "number" : 2,
+    "passed" : false,
+    "problems" : [ {
+      "name" : "답 노출 점검(1차)",
+      "level" : "fail",
+      "detail" : "M5 [description] 원인을 찾아 고치세요. → 원인 문장을 지운다"
+    } ]
+  } ]
+}

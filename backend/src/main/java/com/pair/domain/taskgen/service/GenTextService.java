@@ -196,6 +196,7 @@ final class GenTextService {
         List<String> bad = new ArrayList<>();
         List<String> warns = new ArrayList<>();
         int i = 0;
+        boolean[] pointer = {false}; // 근거 사실이 "자료가 있다"고만 가리킨 문제가 있는가(설계도가 쓴 문장 탓)
         for (var p : points) {
             i++;
             if (p == null || p.question() == null || p.question().isBlank()) {
@@ -207,13 +208,14 @@ final class GenTextService {
                 if (b.length() < MIN_BASIS_CHARS) bad.add("판단 지점 " + i + "의 근거 문장(basis)이 너무 짧거나 없습니다");
                 else if (!all.contains(b)) bad.add("판단 지점 " + i + "의 근거 문장을 응시자 자료에서 찾지 못했습니다: " + clip(p.basis()));
                 else {
-                    String e = evidenceProblem(p, all, requireEvidence, warns, i);
+                    String e = evidenceProblem(p, all, requireEvidence, warns, i, pointer);
                     if (e != null) bad.add("판단 지점 " + i + e);
                 }
             }
         }
         if (!bad.isEmpty()) {
-            return new GenCheckResultDto("", false, String.join(" / ", bad) + ". 근거 문장과 선택지별 근거 사실은 응시자에게 보이는 설명·요구사항·자료에 있는 그대로 한 줄씩 복사하세요(자료가 있다고만 쓰지 말고 값·사례를 그 자료에 실제로 넣으세요).");
+            return new GenCheckResultDto("", false, String.join(" / ", bad) + ". 근거 문장과 선택지별 근거 사실은 응시자에게 보이는 설명·요구사항·자료에 있는 그대로 한 줄씩 복사하세요(자료가 있다고만 쓰지 말고 값·사례를 그 자료에 실제로 넣으세요).")
+                    .withStages(pointer[0] ? "BLUEPRINT" : "WRITING");
         }
         return warns.isEmpty() ? new GenCheckResultDto("", true, "판단 지점 " + points.size() + "개의 근거 문장이 응시자 자료에 있습니다.")
                 : new GenCheckResultDto("", false, String.join(" / ", warns) + ". 위치 말고 자료의 문장을 복사하세요.", GenCheckResultDto.WARN);
@@ -229,7 +231,7 @@ final class GenTextService {
      * M4: 선택지마다 근거 사실이 자료에 있는지. 문제가 없으면 null.
      * 위치만 적힌 evidence 는 실패시키지 않고 warns 에 담는다(문장 복사를 요청). 한 문장이 여러 선택지의 근거를 함께 말해도 된다
      */
-    private static String evidenceProblem(DevDraftDto.JudgmentPoint p, String all, boolean required, List<String> warns, int no) {
+    private static String evidenceProblem(DevDraftDto.JudgmentPoint p, String all, boolean required, List<String> warns, int no, boolean[] pointer) {
         List<String> ev = clean(p.evidence());
         if (ev.isEmpty()) return required ? "에 선택지별 근거 사실(evidence)이 없습니다" : null;
         List<String> sentences = new ArrayList<>();
@@ -249,7 +251,10 @@ final class GenTextService {
         }
         for (String t : sentences) {
             if (!all.contains(norm(t))) return "의 근거 사실을 응시자 자료에서 찾지 못했습니다: " + clip(t);
-            if (POINTER.matcher(t).find() && !CONCRETE.matcher(t).find()) return "의 근거 사실이 자료가 있다고만 가리킵니다(실제 사실·값이 없음): " + clip(t);
+            if (POINTER.matcher(t).find() && !CONCRETE.matcher(t).find()) {
+                pointer[0] = true;
+                return "의 근거 사실이 자료가 있다고만 가리킵니다(실제 사실·값이 없음): " + clip(t);
+            }
         }
         return null;
     }

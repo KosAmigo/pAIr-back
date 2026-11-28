@@ -45,7 +45,7 @@ class SoloInvalidTest {
     @DisplayName("무효 판정은 report 의 solo.status 가 invalid(이유 포함)")
     void reportStatus() {
         var c = new GenCheckResultDto(SoloSolveService.NAME, true, SoloSolveService.INVALID_PREFIX + "풀이가 컴파일되지 않음 (1번 중 1번)", GenCheckResultDto.WARN);
-        Map<String, Object> m = TaskGeneratorService.soloOutcome(List.of(c));
+        Map<String, Object> m = GenReportService.soloOutcome(List.of(c));
         assertThat(m.get("status")).isEqualTo("invalid");
         assertThat((String) m.get("reason")).startsWith("풀이가 컴파일되지 않음");
         assertThat(TaskGenBatchLiveTest.soloLine(new String[] {"- 01 | passed=true | solo=missed", "- 02 | passed=true | solo=invalid", "- 03 | passed=true | solo=caught"}))

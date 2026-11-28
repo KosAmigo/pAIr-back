@@ -118,10 +118,18 @@ public class BizTaskGeneratorService extends TaskGeneratorService<BizDraftDto> {
     protected List<GenCheckResultDto> lastChecks(TaskGenRequest form, BizDraftDto draft, BlueprintDto bp) {
         BizDraftDto needed = FillerService.withoutFillers(draft, bp);
         GenCheckService<BizDraftDto> c = BizCheckService.solveOnly(pdf, countedSolver(TaskGeneratorService::recordUsage), props.solverModel(), needed, form.minutes(), form);
+        GenCheckResultDto solve;
         try {
-            return List.of(c.run(needed));
+            solve = c.run(needed);
         } catch (RuntimeException e) {
-            return List.of(new GenCheckResultDto(c.name(), false, "검사 중 오류: " + e.getMessage(), c.level()));
+            solve = new GenCheckResultDto(c.name(), false, "검사 중 오류: " + e.getMessage(), c.level());
+        }
+        if (!solve.ok() || solo == null || !solo.enabled()) return List.of(solve);
+        // 참고: 응시 화면 모델에 필요한 자료만 붙여 풀게 한다(warn, 막지 않음). 놓침이 자료 고르기 때문인지 함정 때문인지 나눠 본다
+        try {
+            return List.of(solve, solo.runNeeded(needed).check());
+        } catch (RuntimeException e) {
+            return List.of(solve, new GenCheckResultDto(BizSoloSolveService.NEEDED_NAME, true, "AI 단독 풀이를 확인하지 못했어요(호출 실패: " + e.getMessage() + ")", GenCheckResultDto.WARN));
         }
     }
 
