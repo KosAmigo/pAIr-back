@@ -32,7 +32,12 @@ public class ProctorEvent {
         /** 서버가 직접 남기는 기록 (연결 끊김·링크 만료·담당자의 링크 복구). 응시자 화면이 보내는 이벤트로는 받지 않는다 */
         CONNECTION_LOST(Source.BROWSER), LINK_EXPIRED(Source.BROWSER), LINK_RESTORED(Source.BROWSER),
         /** PC 화면 공유 이벤트. 응시자 PC 가 보내며 사진 없이 종류와 시각만 남긴다 */
-        SCREEN_STOPPED(Source.SCREEN), SCREEN_PARTIAL(Source.SCREEN), SCREEN_RESTARTED(Source.SCREEN);
+        SCREEN_STOPPED(Source.SCREEN), SCREEN_PARTIAL(Source.SCREEN), SCREEN_RESTARTED(Source.SCREEN),
+        /** 서버 추론 감독이 판정하는 휴대폰 이벤트 (두 손 밖·한 손 밖·태블릿·메모·스마트워치·휴대폰 위치 변경). 추론 서버가 내부 API 로 보낸다 */
+        HANDS_OUT(Source.PHONE_CAM), HAND_OUT_ONE(Source.PHONE_CAM), TABLET(Source.PHONE_CAM), NOTE(Source.PHONE_CAM),
+        SMARTWATCH(Source.PHONE_CAM), PHONE_MOVED(Source.PHONE_CAM),
+        /** 추론 서버 장애로 AI 감독이 멈춘 구간(정보용). 시작·지속시간을 가지며 확정·기각 대상이 아니다 */
+        SUPERVISION_PAUSED(Source.SERVER);
 
         private final Source source;
 
@@ -51,7 +56,9 @@ public class ProctorEvent {
     }
 
     public enum Source {
-        BROWSER, PC_CAM, PHONE_CAM, SCREEN;
+        BROWSER, PC_CAM, PHONE_CAM, SCREEN,
+        /** 서버가 직접 남기는 기록 (감독 중단) */
+        SERVER;
 
         /** 사진(대표 사진·증거 구간)을 붙일 수 있는 출처. 브라우저·화면 공유 이벤트는 사진을 받지 않는다 */
         public boolean isCamera() {
@@ -142,6 +149,11 @@ public class ProctorEvent {
     /** 사진 상한에 막혀 사진을 받지 않았음을 기록한다 */
     public void skipSnapshot(SnapshotSkipReason reason) {
         this.snapshotSkipReason = reason;
+    }
+
+    /** 진행 중이던 구간 이벤트(감독 중단)가 끝났을 때 지속 시간을 확정한다. 줄어들지는 않는다 */
+    public void extendDurationTo(int durationMs) {
+        if (durationMs > this.durationMs) this.durationMs = durationMs;
     }
 
     public void assignClientId(String clientId) {

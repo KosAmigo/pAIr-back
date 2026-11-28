@@ -28,6 +28,10 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
     @EntityGraph(attributePaths = "session")
     Optional<ExamParticipant> findByInviteTokenHash(String inviteTokenHash);
 
+    /** 추론 서버가 보낸 이벤트·판정의 sessionKey(= vision_key)로 응시자를 찾는다 */
+    @EntityGraph(attributePaths = "session")
+    Optional<ExamParticipant> findByVisionKey(String visionKey);
+
     /** 시작·제출처럼 두 번 눌리면 안 되는 요청용. 같은 대상자의 요청은 줄을 세운다 */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from ExamParticipant p join fetch p.session where p.inviteTokenHash = :hash")

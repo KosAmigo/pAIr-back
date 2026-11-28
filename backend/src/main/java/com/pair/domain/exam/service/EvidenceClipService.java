@@ -23,6 +23,9 @@ import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
 import com.pair.domain.exam.entity.ProctorEventFrame;
 import com.pair.domain.exam.repository.ExamParticipantRepository;
+import com.pair.domain.exam.repository.ExamSessionRepository;
+import com.pair.global.config.VisionProperties;
+import com.pair.global.error.CodedException;
 import com.pair.domain.exam.repository.ProctorEventFrameRepository;
 import com.pair.domain.exam.repository.ProctorEventRepository;
 import com.pair.domain.exam.dto.ClipFrameRequest;
@@ -58,9 +61,16 @@ public class EvidenceClipService {
     private final SnapshotValidationService validator;
     private final SnapshotStorage storage;
     private final Clock clock;
+    private final VisionProperties vision;
+    private final VisionPromotionService promotion;
+    private final ExamSessionRepository sessions;
 
     public EvidenceClipService(ExamParticipantRepository participants, ProctorEventRepository events, ProctorEventFrameRepository frames,
-            SnapshotValidationService validator, SnapshotStorage storage, Clock clock) {
+            SnapshotValidationService validator, SnapshotStorage storage, Clock clock, VisionProperties vision,
+            VisionPromotionService promotion, ExamSessionRepository sessions) {
+        this.vision = vision;
+        this.promotion = promotion;
+        this.sessions = sessions;
         this.participants = participants;
         this.events = events;
         this.frames = frames;
@@ -77,6 +87,10 @@ public class EvidenceClipService {
                 .orElseThrow(() -> new NoSuchElementException("입장 링크가 올바르지 않습니다."));
         ExamSession s = p.getSession();
         if (!s.isProctoring()) throw new IllegalStateException("감독을 쓰지 않는 회차입니다.");
+        // 서버 추론 회차의 증거 구간은 백엔드가 상시 저장분에서 승격한다. 응시자 PC 가 올리는 것은 받지 않는다
+        if (vision.enabled() && s.isServerVision()) {
+            throw new CodedException(org.springframework.http.HttpStatus.BAD_REQUEST, "SERVER_VISION_ONLY", "서버 추론 회차의 증거 사진은 서버가 만듭니다.");
+        }
         Instant now = clock.instant();
         if (now.isAfter(s.getEndsAt().plus(LATE_GRACE))) throw new IllegalStateException("끝난 시험의 증거 사진은 받지 않습니다.");
         ProctorEvent event = events.findByParticipantIdAndClientId(p.getId(), clientId)
@@ -149,10 +163,40 @@ public class EvidenceClipService {
         }
     }
 
+    /**
+     * 콘솔이 /clip 을 열 때 먼저 부른다 (트랜잭션 밖): 서버 추론 회차 이벤트의 승격 예정 시각이 지났는데 아직 승격 전이면 그 자리에서 승격한다.
+     * 백그라운드 승격과 동시에 일어나도 UNIQUE 제약으로 한 번만 저장된다.
+     */
+    public void promoteIfDue(Long sessionId, Long eventId) {
+        ProctorEvent e = events.findById(eventId).orElse(null);
+        if (e == null || !e.getSource().isCamera()) return;
+        ExamSession s = sessions.findById(sessionId).orElse(null);
+        if (s == null || !s.isServerVision() || clock.instant().isBefore(promotion.promoteAfter(e))) return;
+        promotion.promote(eventId);
+    }
+
     @Transactional(readOnly = true)
     public ClipResponse clipOf(Long sessionId, Long eventId) {
-        requireEventIn(sessionId, eventId);
-        return new ClipResponse(eventId, frames.findByEventIdOrderByOffsetMsAscSourceAsc(eventId).stream()
+        ProctorEvent event = requireEventIn(sessionId, eventId);
+        List<ProctorEventFrame> rows = frames.findByEventIdOrderByOffsetMsAscSourceAsc(eventId);
+        String status = "READY";
+        Instant availableAt = null;
+        if (!rows.isEmpty()) {
+            if (rows.stream().allMatch(f -> f.getDeletedAt() != null)) status = "EXPIRED";
+        } else {
+            ExamSession s = sessions.findById(sessionId).orElse(null);
+            Instant now = clock.instant();
+            if (s == null || !s.isServerVision() || !event.getSource().isCamera()) {
+                status = "NONE";
+            } else if (now.isBefore(promotion.promoteAfter(event))) {
+                status = "PENDING";
+                availableAt = promotion.promoteAfter(event);
+            } else {
+                // 승격 시각이 지났는데 사진이 없다: 상시 저장분이 지워졌으면 만료, 아니면 묶음이 유실되어 만들 수 없다
+                status = !now.isBefore(s.getEndsAt().plus(java.time.Duration.ofDays(vision.streamRetentionDays()))) ? "EXPIRED" : "NONE";
+            }
+        }
+        return new ClipResponse(eventId, status, availableAt, rows.stream()
                 .map(f -> new ClipFrameDto(f.getId(), f.getSource(), f.getOffsetMs(), f.getSizeBytes(), f.getDeletedAt() != null)).toList());
     }
 
@@ -178,9 +222,10 @@ public class EvidenceClipService {
     }
 
     /** 다른 회차 번호로는 이벤트의 사진을 볼 수 없다 */
-    private void requireEventIn(Long sessionId, Long eventId) {
+    private ProctorEvent requireEventIn(Long sessionId, Long eventId) {
         ProctorEvent e = events.findById(eventId).orElseThrow(() -> new NoSuchElementException("없는 이벤트입니다."));
         ExamParticipant p = participants.findById(e.getParticipantId()).orElseThrow(() -> new NoSuchElementException("없는 이벤트입니다."));
         if (!p.getSession().getId().equals(sessionId)) throw new NoSuchElementException("없는 이벤트입니다.");
+        return e;
     }
 }

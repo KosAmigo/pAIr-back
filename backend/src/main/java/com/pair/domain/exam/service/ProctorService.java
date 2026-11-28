@@ -18,6 +18,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.global.config.ExamProperties;
+import com.pair.global.config.VisionProperties;
+import com.pair.global.error.CodedException;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorEvent;
@@ -56,13 +58,15 @@ public class ProctorService {
     private final com.pair.domain.exam.repository.SnapshotRetentionExtensionRepository extensions;
     private final SnapshotRetentionService retention;
     private final com.pair.domain.exam.repository.ProctorEventFrameRepository clipFrames;
+    private final VisionProperties vision;
 
     public ProctorService(ExamParticipantRepository participants, ProctorEventRepository events, SnapshotValidationService snapshots,
             SnapshotStorage storage, ObjectMapper json, ExamProperties props, Clock clock,
             com.pair.domain.attempt.repository.AttemptRepository attempts, PlatformTransactionManager txManager,
             com.pair.domain.exam.repository.ExamSessionRepository sessions,
             com.pair.domain.exam.repository.SnapshotRetentionExtensionRepository extensions, SnapshotRetentionService retention,
-            com.pair.domain.exam.repository.ProctorEventFrameRepository clipFrames) {
+            com.pair.domain.exam.repository.ProctorEventFrameRepository clipFrames, VisionProperties vision) {
+        this.vision = vision;
         this.clipFrames = clipFrames;
         this.sessions = sessions;
         this.extensions = extensions;
@@ -121,8 +125,12 @@ public class ProctorService {
         ExamParticipant p = findParticipant(token);
         ExamSession s = p.getSession();
         if (!s.isProctoring()) throw new IllegalStateException("감독을 쓰지 않는 회차입니다.");
+        // 서버 추론 회차의 카메라 이벤트는 추론 서버가 만든다. 응시자 PC 가 보내는 브라우저·화면 공유 이벤트는 그대로 받는다
+        if (vision.enabled() && s.isServerVision() && req.type().source().isCamera()) {
+            throw new CodedException(org.springframework.http.HttpStatus.BAD_REQUEST, "SERVER_VISION_ONLY", "서버 추론 회차의 카메라 이벤트는 서버가 만듭니다.");
+        }
         if (req.type() == ProctorEvent.Type.CONNECTION_LOST || req.type() == ProctorEvent.Type.LINK_EXPIRED
-                || req.type() == ProctorEvent.Type.LINK_RESTORED) {
+                || req.type() == ProctorEvent.Type.LINK_RESTORED || req.type() == ProctorEvent.Type.SUPERVISION_PAUSED) {
             throw new IllegalArgumentException("서버가 직접 남기는 이벤트입니다.");
         }
         if (!attempts.existsByParticipantId(p.getId())) throw new IllegalStateException("시작하지 않은 시험입니다.");
@@ -207,15 +215,15 @@ public class ProctorService {
     @Transactional
     public int purgeExpiredSnapshots() {
         Instant now = clock.instant();
-        Instant baseBefore = now.minus(Duration.ofDays(props.snapshotRetentionDays()));
+        Instant baseBefore = now.minus(Duration.ofDays(retention.shortestBaseDays())); // 서버 추론 회차는 보관이 더 짧아서 가장 짧은 값으로 후보를 모은 뒤 회차별로 거른다
         java.util.Set<Long> candidates = new java.util.LinkedHashSet<>(events.findSessionIdsWithLiveSnapshots(baseBefore));
         candidates.addAll(clipFrames.allSessionIdsWithLiveFrames()); // 증거 구간 사진도 같은 규칙. 아래에서 회차별 삭제 예정 시각으로 거른다
         List<Long> endedSessions = List.copyOf(candidates);
         if (endedSessions.isEmpty()) return 0;
         int total = 0;
         for (Long sessionId : endedSessions) {
-            Instant endsAt = sessions.findById(sessionId).map(ExamSession::getEndsAt).orElse(null);
-            if (endsAt == null || retention.expiryOf(endsAt, (long) extensions.findBySessionIdOrderBySeqAsc(sessionId).size()).isAfter(now)) continue;
+            ExamSession ended = sessions.findById(sessionId).orElse(null);
+            if (ended == null || retention.expiryOf(ended, (long) extensions.findBySessionIdOrderBySeqAsc(sessionId).size()).isAfter(now)) continue;
             List<ProctorEvent> batch;
             do {
                 batch = events.findLiveSnapshotsOfSession(sessionId, PageRequest.of(0, PURGE_BATCH));
