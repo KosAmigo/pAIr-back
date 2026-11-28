@@ -33,6 +33,11 @@ public class ApiExceptionHandler {
         return body(HttpStatus.UNAUTHORIZED, e.getMessage());
     }
 
+    @ExceptionHandler(com.pair.global.error.CodedException.class)
+    ResponseEntity<Map<String, String>> coded(com.pair.global.error.CodedException e) {
+        return ResponseEntity.status(e.status()).body(Map.of("message", e.getMessage(), "code", e.code()));
+    }
+
     @ExceptionHandler(com.pair.global.error.ForbiddenException.class)
     ResponseEntity<Map<String, String>> forbidden(RuntimeException e) {
         return body(HttpStatus.FORBIDDEN, e.getMessage());

@@ -44,20 +44,21 @@ public class SessionAiCostService {
         TreeSet<String> unpriced = new TreeSet<>();
         List<ModelLine> chatLines = new ArrayList<>();
         for (ChatTurnRepository.ModelUsage u : chatTurns.sumBySession(sessionId)) {
-            chatLines.add(line(u.getModel(), u.getCalls(), u.getInputTokens(), u.getOutputTokens(), 0, unpriced));
+            chatLines.add(priced(u.getModel(), u.getCalls(), u.getInputTokens(), u.getOutputTokens(), 0, unpriced));
         }
         List<ModelLine> scoringLines = new ArrayList<>();
         for (JudgeCallRepository.ModelUsage u : judgeCalls.sumBySession(sessionId)) {
-            scoringLines.add(line(u.getModel(), u.getCalls(), u.getInputTokens(), u.getOutputTokens(), u.getCachedTokens(), unpriced));
+            scoringLines.add(priced(u.getModel(), u.getCalls(), u.getInputTokens(), u.getOutputTokens(), u.getCachedTokens(), unpriced));
         }
-        Part chat = part(chatLines);
-        Part scoring = part(scoringLines);
+        Part chat = sum(chatLines);
+        Part scoring = sum(scoringLines);
         long n = attempts.countBySession(sessionId);
         double total = round(chat.usd() + scoring.usd());
         return new SessionAiCostResponse(sessionId, n, total, n == 0 ? null : round(total / n), chat, scoring, List.copyOf(unpriced));
     }
 
-    private ModelLine line(String model, long calls, long in, long out, long cached, TreeSet<String> unpriced) {
+    /** 모델 한 줄의 예상 비용. 단가가 없으면 usd 는 null 이고 unpriced 에 이름을 더한다 (관리자 통계도 같은 계산을 쓴다) */
+    public ModelLine priced(String model, long calls, long in, long out, long cached, java.util.Set<String> unpriced) {
         String name = model == null || model.isBlank() ? "(모름)" : model;
         PairProperties.Price p = pricing.get(name);
         if (p == null) unpriced.add(name);
@@ -65,7 +66,8 @@ public class SessionAiCostService {
         return new ModelLine(name, calls, in, out, cached, usd);
     }
 
-    private static Part part(List<ModelLine> lines) {
+    /** 모델 줄들을 비용이 큰 순으로 정렬하고 합계를 낸다 */
+    public static Part sum(List<ModelLine> lines) {
         lines.sort(Comparator.comparing((ModelLine l) -> l.usd() == null ? -1 : l.usd()).reversed());
         long calls = 0, in = 0, out = 0, cached = 0;
         double usd = 0;
@@ -80,7 +82,7 @@ public class SessionAiCostService {
     }
 
     /** 소수점 넷째 자리(0.0001달러)까지 */
-    static double round(double usd) {
+    public static double round(double usd) {
         return Math.round(usd * 10_000) / 10_000.0;
     }
 }

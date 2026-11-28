@@ -28,6 +28,10 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
     @EntityGraph(attributePaths = "session")
     Optional<ExamParticipant> findByInviteTokenHash(String inviteTokenHash);
 
+    /** 추론 서버가 보낸 이벤트·판정의 sessionKey(= vision_key)로 응시자를 찾는다 */
+    @EntityGraph(attributePaths = "session")
+    Optional<ExamParticipant> findByVisionKey(String visionKey);
+
     /** 시작·제출처럼 두 번 눌리면 안 되는 요청용. 같은 대상자의 요청은 줄을 세운다 */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from ExamParticipant p join fetch p.session where p.inviteTokenHash = :hash")
@@ -96,4 +100,8 @@ public interface ExamParticipantRepository extends JpaRepository<ExamParticipant
             from ExamParticipant p where p.session.id in :sessionIds group by p.session.id
             """)
     List<SessionCounts> countBySessionIds(@Param("sessionIds") Collection<Long> sessionIds);
+
+    /** 관리자 통계: 기간 안에 시작하는(취소하지 않은) 회차의 대상자 수 */
+    @org.springframework.data.jpa.repository.Query("select count(p) from ExamParticipant p where p.session.canceledAt is null and p.session.startsAt >= :from and p.session.startsAt < :to")
+    long countInSessionsStartingBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
 }

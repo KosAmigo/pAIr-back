@@ -21,4 +21,9 @@ public interface CompanyInviteRepository extends JpaRepository<CompanyInvite, Lo
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from CompanyInvite i where lower(i.email) = lower(:email) and i.acceptedAt is null")
     List<CompanyInvite> lockPendingByEmail(@Param("email") String email);
+
+    /** 회사 삭제 때 아직 수락·취소되지 않은 초대를 모두 무효로 한다 */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from CompanyInvite i where i.companyId = :companyId and i.acceptedAt is null and i.revokedAt is null")
+    List<CompanyInvite> lockPendingByCompanyId(@Param("companyId") Long companyId);
 }

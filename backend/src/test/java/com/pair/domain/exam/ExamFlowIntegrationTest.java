@@ -108,6 +108,7 @@ class ExamFlowIntegrationTest {
     @Autowired MutableClock clock;
     @Autowired ExamSessionService sessions;
     @Autowired ExamEntryService entry;
+    @Autowired com.pair.domain.company.repository.CompanyRepository companies;
     @Autowired AutoSubmitService autoSubmit;
     @Autowired ProctorService proctor;
     @Autowired com.pair.domain.exam.repository.ProctorEventRepository eventRepo;
@@ -307,6 +308,16 @@ class ExamFlowIntegrationTest {
         });
         assertThat(participants.findBySessionIdOrderByIdAsc(s.id())).hasSize(1); // 저장 안 함
         assertThat(sessionsRepo().findById(s.id()).orElseThrow().getParticipantsCsvKey()).isNull();
+    }
+
+    @Test
+    @DisplayName("입장 정보에는 회차를 연 회사 이름이 담긴다 (입장권·대기실의 회사 칸)")
+    void entryInfoHasCompanyName() {
+        var company = companies.saveAndFlush(new com.pair.domain.company.entity.Company("아미고테크", null, null, T0));
+        SessionSummaryResponse s = createSession(company.getId(), true);
+        String token = invite(s.id(), "company-name@test.dev");
+
+        assertThat(entry.info(token).companyName()).isEqualTo("아미고테크");
     }
 
     @Test

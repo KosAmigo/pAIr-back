@@ -77,6 +77,16 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
         return EnumSet.noneOf(Stage.class);
     }
 
+    /**
+     * 설계도 단계만 돌린다(형식 검사·조기 점검과 그 재시도 포함, 2026-11-28: 예시 표만 싸게 확인하는 라이브 테스트용).
+     * 돌려준 Run 의 blueprint()·usage()·blueprintRetries() 로 결과를 본다. 글·코드·정답 단계는 돌지 않는다
+     */
+    Run<DevDraftDto> blueprintOnly(TaskGenRequest form) {
+        DevRun run = new DevRun(form, new StageCallService(ai, props, true), props.materialGate());
+        run.bp = run.blueprint("");
+        return run;
+    }
+
     private static final class DevRun implements Run<DevDraftDto> {
         private final TaskGenRequest form;
         private final StageCallService calls;
@@ -227,7 +237,10 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
 
         private DevWritingDto write(String feedback) {
             DevWritingDto w = calls.call(Stage.WRITING, TaskPromptService.WRITING_DEV, TaskWritingService.input(bp, false, form.minutes(), feedback), DevWritingDto.class);
-            return new DevWritingDto(TaskWritingService.withoutRequirementLines(nz(w.description()), nz(w.requirements())), nz(w.requirements()), w.notes() == null ? "" : w.notes(), w.taskFollowUp() == null ? "" : w.taskFollowUp());
+            // 예시 줄은 작성 모델이 아니라 코드가 설계도에서 만들어 붙인다(Q7): 모델이 쓴 예 줄은 빼고 함수별 표 줄을 만들 기능 줄 뒤에 넣는다
+            List<String> requirements = ExampleLineService.withExamples(bp, nz(w.requirements()));
+            List<String> description = ExampleLineService.descriptionWithoutExamples(bp, TaskWritingService.withoutRequirementLines(nz(w.description()), requirements));
+            return new DevWritingDto(description, requirements, w.notes() == null ? "" : w.notes(), w.taskFollowUp() == null ? "" : w.taskFollowUp());
         }
 
         private DevCodeDto writeCode(String feedback) {
@@ -271,6 +284,7 @@ public class DevPipelineService implements TaskPipelineService<DevDraftDto> {
             out.add(TaskWritingService.genMetaCheck(String.join("\n", writing.description()) + "\n" + String.join("\n", writing.requirements()) + "\n" + writing.notes()));
             out.add(TaskWritingService.flawPointerCheck(bp, writing.description(), writing.requirements()));
             out.add(TaskWritingService.featureLinesCheck(bp, writing.requirements())); // 경고만
+            out.add(ExampleLineService.shapeCheck(bp)); // 경고만(Q7)
             out.add(CaseCheckService.stubs(bp, code.files())); // 틀이 없으면 숨은 테스트가 컴파일되지 않으니 이 검사가 먼저 시작 코드 단계를 가리킨다
             out.add(CaseCheckService.addedCalled(bp, answer.hiddenTests()));
             java.util.Map<String, String> han = new java.util.LinkedHashMap<>(); // 숨은 글(정답·오답 사유 등)까지 모든 글 칸

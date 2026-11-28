@@ -26,10 +26,12 @@ public class ExamSchedulerService {
     private final InviteMailService mailer;
     private final ConnectionGraceService grace;
     private final EnvCheckPhotoService envPhotos;
+    private final StreamRecorderService streams;
 
     public ExamSchedulerService(AutoSubmitService autoSubmit, ProctorService proctor, ReminderService reminders,
-            InviteMailService mailer, ConnectionGraceService grace, EnvCheckPhotoService envPhotos) {
+            InviteMailService mailer, ConnectionGraceService grace, EnvCheckPhotoService envPhotos, StreamRecorderService streams) {
         this.envPhotos = envPhotos;
+        this.streams = streams;
         this.grace = grace;
         this.autoSubmit = autoSubmit;
         this.proctor = proctor;
@@ -84,6 +86,12 @@ public class ExamSchedulerService {
             if (n > 0) log.info("보관 기간이 지난 환경 점검 사진 {}장 삭제", n);
         } catch (RuntimeException e) {
             log.error("환경 점검 사진 정리 실패", e);
+        }
+        try {
+            int packs = streams.purgeExpired();
+            if (packs > 0) log.info("보관 기간이 지난 상시 저장 묶음 {}개 삭제", packs);
+        } catch (RuntimeException e) {
+            log.error("상시 저장 묶음 정리 실패", e);
         }
     }
 }

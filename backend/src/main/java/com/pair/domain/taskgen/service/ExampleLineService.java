@@ -1,0 +1,335 @@
+package com.pair.domain.taskgen.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pair.domain.taskgen.dto.BlueprintDto;
+import com.pair.domain.taskgen.dto.GenCheckResultDto;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
+
+/**
+ * DEV 요구사항의 예시 줄을 설계도에서 코드로 만든다(기준 Q7, 2026-11-28). 작성 모델은 예시를 쓰지 않는다.
+ * 줄 모양은 pAIr-front 가 표(매개변수 | 결과)로 그리는 약속이라 바꾸면 화면도 같이 바꾼다:
+ * "예시 공통: …"(과제당 0~1줄), "예시 준비: {method,text}"(함수별 0~1줄), "예시: {method,args,expected}"(한 줄 JSON).
+ * 화면에는 "추가:" 메서드(새로 만들 함수)의 예시만 낸다. "기존:" 메서드 예시는 설계도에 남아 공개 테스트·사례 근거로만 쓴다(Q7 2026-11-28 개정).
+ * 예시 줄은 그 함수의 "만들 기능" 줄과 매개변수 줄 뒤에 모으고, 만들 기능 줄이 없으면 맨 뒤에 둔다
+ */
+final class ExampleLineService {
+
+    static final String NOTE = "예시 공통:";
+    static final String SETUP = "예시 준비:";
+    static final String EXAMPLE = "예시:";
+    static final String SHAPE_CHECK = "예시가 짧은 표 모양임";
+    static final int MAX_VALUE_CHARS = 30;
+    static final int MAX_LIST_ITEMS = 3;
+    static final int MAX_PER_METHOD = 2;
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+    /** 표시값 속 이름·코드 낱말(글자로 시작, 2자 이상). true/false/null 은 뺀다 */
+    private static final Pattern WORD = Pattern.compile("(?<![\\p{L}\\p{N}])(?!(?:true|false|null)(?![\\p{L}\\p{N}]))\\p{L}[\\p{L}\\p{N}_-]+");
+    /** 시각 표시값의 시간대 오프셋(10:00+09:00, 10:00Z) */
+    private static final Pattern OFFSET = Pattern.compile("\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:[+-]\\d{2}:?\\d{2}|Z)(?!\\w)");
+    private static final Pattern FEATURE_LINE = Pattern.compile("^\\s*만들 기능\\s*:");
+    /** 작성 모델이 쓴 예 줄: "예:"·"예시" 로 시작하거나 화살표가 있는 줄 */
+    private static final Pattern WRITER_EXAMPLE = Pattern.compile("^\\s*(?:[-*]\\s*)?(?:예시|예\\s*\\d*\\s*[:)])|→");
+    private static final Pattern API_METHOD = Pattern.compile("([A-Z]\\w*)\\.([A-Za-z_]\\w*)\\s*\\(");
+
+    private ExampleLineService() {}
+
+    /** api 의 "Class.method" 들. added 면 "추가:" 만, 아니면 전부 */
+    static Set<String> apiMethods(BlueprintDto bp, boolean added) {
+        Set<String> out = new LinkedHashSet<>();
+        for (String a : nz(bp.api())) {
+            if (a == null || (added && !a.strip().startsWith("추가"))) continue;
+            var m = API_METHOD.matcher(a);
+            if (m.find()) out.add(m.group(1) + "." + m.group(2));
+        }
+        return out;
+    }
+
+    /** 화면(요구사항)에 내는 예인가: method 가 "추가:" 메서드(클래스 없이 이름만 써도 인정). 표 칸 없는 옛 예는 예전처럼 낸다 */
+    static boolean shown(BlueprintDto bp, BlueprintDto.Example e) {
+        if (e == null) return false;
+        if (blank(e.method())) return true;
+        String m = e.method().strip();
+        return apiMethods(bp, true).stream().anyMatch(a -> a.equals(m) || a.endsWith("." + m));
+    }
+
+    /** 화면에 내는 예만 */
+    static List<BlueprintDto.Example> shownExamples(BlueprintDto bp) {
+        return nz(bp.examples()).stream().filter(e -> shown(bp, e)).toList();
+    }
+
+    /** 사례 근거가 예 문장(입력 → 기대 출력)이면 그 예, 아니면 null (TaskReviewService.basisKind 와 같은 판정) */
+    static BlueprintDto.Example basisExample(BlueprintDto bp, BlueprintDto.Case c) {
+        if (bp == null || c == null || c.basis() == null) return null;
+        String b = GenTextService.norm(c.basis());
+        if (b.isBlank()) return null;
+        for (var e : nz(bp.examples())) {
+            if (e == null) continue;
+            String input = GenTextService.norm(e.input()), expected = GenTextService.norm(e.expected());
+            if ((input + expected).equals(b) || (!input.isEmpty() && b.contains(input) && b.contains(expected))) return e;
+        }
+        return null;
+    }
+
+    /** 예 하나의 요구사항 줄. 표 칸(method)이 없는 옛 설계도는 예전 꼴 "입력 → 기대 출력" */
+    static String line(BlueprintDto.Example e) {
+        if (blank(e.method())) return e.input() + " → " + e.expected();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("method", e.method().strip());
+        List<List<String>> args = new ArrayList<>();
+        for (var a : nz(e.args())) {
+            if (a == null || a.isEmpty()) continue;
+            args.add(List.of(str(a.get(0)), a.size() > 1 ? str(a.get(1)) : ""));
+        }
+        m.put("args", args);
+        m.put("expected", str(e.expected()));
+        return EXAMPLE + " " + json(m);
+    }
+
+    static String setupLine(BlueprintDto.ExampleSetup s) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("method", s.method().strip());
+        m.put("text", s.text().strip());
+        return SETUP + " " + json(m);
+    }
+
+    /** 작성 모델이 쓴 예 줄인가(코드가 다시 넣으니 뺀다) */
+    static boolean writerExampleLine(String line) {
+        return line != null && WRITER_EXAMPLE.matcher(line).find();
+    }
+
+    /**
+     * 작성 모델의 요구사항에서 예 줄을 빼고, 설계도의 예시를 함수별로 모아 만들 기능 줄(과 매개변수 줄) 뒤에 넣는다.
+     * 요구사항은 한 줄씩 나눈 목록으로 돌려준다. 예가 없으면 예 줄만 뺀다
+     */
+    static List<String> withExamples(BlueprintDto bp, List<String> requirements) {
+        List<String> lines = new ArrayList<>();
+        for (String r : nz(requirements)) {
+            if (r == null) continue;
+            for (String l : r.split("\\R")) if (!l.isBlank() && !writerExampleLine(l) && !l.strip().startsWith(NOTE)) lines.add(l.strip());
+        }
+        Map<String, List<String>> blocks = blocks(bp);
+        if (blocks.isEmpty()) return lines;
+        List<String> out = new ArrayList<>();
+        Set<String> done = new LinkedHashSet<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String l = lines.get(i);
+            out.add(l);
+            if (!FEATURE_LINE.matcher(l).find()) continue;
+            while (i + 1 < lines.size() && lines.get(i + 1).startsWith("-")) out.add(lines.get(++i)); // 매개변수 줄
+            String method = matchMethod(l, blocks.keySet(), done);
+            if (method != null) {
+                out.addAll(blocks.get(method));
+                done.add(method);
+            }
+        }
+        blocks.forEach((method, block) -> {
+            if (!done.contains(method)) out.addAll(block);
+        });
+        String note = bp.exampleNote();
+        if (!blank(note)) {
+            for (int i = 0; i < out.size(); i++) {
+                if (out.get(i).startsWith(SETUP) || out.get(i).startsWith(EXAMPLE) || blocksContain(blocks, out.get(i))) {
+                    out.add(i, NOTE + " " + note.strip());
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 설명에서 작성 모델이 쓴 예 줄(화살표 줄)을 뺀다. 사실 문장이 든 줄은 남긴다 */
+    static List<String> descriptionWithoutExamples(BlueprintDto bp, List<String> description) {
+        List<String> out = new ArrayList<>();
+        for (String p : nz(description)) {
+            if (p == null) continue;
+            String kept = String.join("\n", java.util.Arrays.stream(p.split("\n"))
+                    .filter(l -> !l.contains("→") || nz(bp.facts()).stream().anyMatch(f -> GenTextService.containsLike(l, f.text()))).toList()).strip();
+            if (!kept.isEmpty()) out.add(kept);
+        }
+        return out;
+    }
+
+    /** method → 그 함수의 준비 줄과 예 줄(예 순서대로). 표 칸이 없는 옛 예는 "" 묶음 */
+    private static Map<String, List<String>> blocks(BlueprintDto bp) {
+        Map<String, List<String>> blocks = new LinkedHashMap<>();
+        Map<String, BlueprintDto.ExampleSetup> setups = new LinkedHashMap<>();
+        for (var s : nz(bp.exampleSetups())) if (s != null && !blank(s.method()) && !blank(s.text())) setups.putIfAbsent(s.method().strip(), s);
+        for (var e : shownExamples(bp)) {
+            if (blank(e.input()) && blank(e.method())) continue;
+            String key = blank(e.method()) ? "" : e.method().strip();
+            List<String> block = blocks.computeIfAbsent(key, k -> {
+                List<String> b = new ArrayList<>();
+                if (setups.containsKey(k)) b.add(setupLine(setups.get(k)));
+                return b;
+            });
+            block.add(line(e));
+        }
+        return blocks;
+    }
+
+    private static boolean blocksContain(Map<String, List<String>> blocks, String line) {
+        return blocks.values().stream().anyMatch(b -> b.contains(line));
+    }
+
+    /** 만들 기능 줄이 가리키는 예 묶음(클래스까지 같으면 우선) */
+    private static String matchMethod(String featureLine, Set<String> methods, Set<String> done) {
+        String loose = null;
+        for (String m : methods) {
+            if (m.isEmpty() || done.contains(m)) continue;
+            int dot = m.lastIndexOf('.');
+            String simple = m.substring(dot + 1);
+            if (!Pattern.compile("(?<![\\w])" + Pattern.quote(simple) + "\\s*\\(").matcher(featureLine).find()) continue;
+            if (dot > 0 && Pattern.compile("(?<![\\w])" + Pattern.quote(m) + "\\s*\\(").matcher(featureLine).find()) return m;
+            if (loose == null) loose = m;
+        }
+        return loose;
+    }
+
+    /**
+     * 화면에 내는 예시가 Q7 의 짧은 표 모양인지(경고만, 검증 전이라 실패로 두지 않는다): 추가 함수당 3개 이상, 표시값 하나가 30자 넘음,
+     * 목록 4개 이상, 표시값에 시간대 오프셋(+09:00, Z), 예시 method 가 api 에 없음
+     */
+    static GenCheckResultDto shapeCheck(BlueprintDto bp) {
+        List<String> hits = new ArrayList<>();
+        Set<String> apiMethods = apiMethods(bp, false);
+        Map<String, Integer> perMethod = new LinkedHashMap<>();
+        for (var e : nz(bp.examples())) {
+            if (e == null) continue;
+            String method = blank(e.method()) ? "" : e.method().strip();
+            if (method.isEmpty()) hits.add("표 칸(method) 없는 예: " + clip(e.input()));
+            else if (apiMethods.stream().noneMatch(a -> a.equals(method) || a.endsWith("." + method))) hits.add("api 에 없는 예시 method " + method);
+            if (!shown(bp, e)) continue; // 기존 메서드 예시는 화면에 안 나오니 모양을 보지 않는다
+            perMethod.merge(method, 1, Integer::sum);
+            List<String> values = new ArrayList<>();
+            for (var a : nz(e.args())) if (a != null && a.size() > 1) values.add(str(a.get(1)));
+            values.add(str(e.expected()));
+            for (String v : values) {
+                if (v.length() > MAX_VALUE_CHARS) hits.add(method + " 표시값 " + v.length() + "자: " + clip(v));
+                int items = listItems(v);
+                if (items > MAX_LIST_ITEMS) hits.add(method + " 목록 " + items + "개: " + clip(v));
+                if (OFFSET.matcher(v).find()) hits.add(method + " 표시값에 시간대 오프셋: " + clip(v));
+            }
+        }
+        perMethod.forEach((m, n) -> {
+            if (n > MAX_PER_METHOD) hits.add((m.isEmpty() ? "(method 없음)" : m) + " 예시 " + n + "개");
+        });
+        int total = perMethod.values().stream().mapToInt(Integer::intValue).sum();
+        for (var s : nz(bp.exampleSetups())) {
+            if (s != null && !blank(s.method()) && !apiMethods.contains(s.method().strip())) hits.add("api 에 없는 예시 준비 method " + s.method());
+        }
+        if (hits.isEmpty()) return new GenCheckResultDto(SHAPE_CHECK, true, "예시 " + total + "개가 함수별 짧은 표 모양입니다.", GenCheckResultDto.WARN);
+        return new GenCheckResultDto(SHAPE_CHECK, false, "예시가 Q7 표 모양을 벗어납니다: " + String.join(" / ", hits.stream().distinct().limit(8).toList()), GenCheckResultDto.WARN);
+    }
+
+    static final String MISMATCH_RULE = "표시값은 input의 값을 그대로 짧게 쓴 것이어야 한다(이름·숫자 일치)";
+    private static final Pattern NUMBER = Pattern.compile("\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?");
+    private static final Pattern STRING_LITERAL = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"");
+
+    /**
+     * 화면 표시값·준비 문장이 숨은 테스트용 input 과 어긋나는 곳(형식 실패, g25 03: 준비 "바다 10,000원", input load("바일;10000")).
+     * ① 매개변수 표시값의 이름·코드 낱말과 숫자가 그 예의 input 에 있다. ② 준비 문장의 숫자가 그 함수 예들의 input 에 있다.
+     * ③ 그 함수 예들의 input 문자열 값 속 이름은 준비 문장이나 그 예의 표시값에 나온다. 숫자는 값으로 비교한다(2026-06-10 ↔ LocalDate.of(2026, 6, 10), 40,000 ↔ 40000)
+     */
+    static List<String> mismatches(BlueprintDto bp) {
+        List<String> bad = new ArrayList<>();
+        Map<String, List<BlueprintDto.Example>> byMethod = new LinkedHashMap<>();
+        for (var e : shownExamples(bp)) if (!blank(e.method()) && !blank(e.input())) byMethod.computeIfAbsent(e.method().strip(), k -> new ArrayList<>()).add(e);
+        Map<String, String> setups = new LinkedHashMap<>();
+        for (var s : nz(bp.exampleSetups())) if (s != null && !blank(s.method()) && !blank(s.text())) setups.putIfAbsent(s.method().strip(), s.text());
+        for (var entry : byMethod.entrySet()) {
+            String method = entry.getKey();
+            String setup = setups.getOrDefault(method, "");
+            Set<String> allNumbers = new LinkedHashSet<>();
+            entry.getValue().forEach(e -> allNumbers.addAll(numbers(e.input())));
+            for (var e : entry.getValue()) {
+                String input = GenTextService.norm(e.input());
+                Set<String> inputNumbers = numbers(e.input());
+                StringBuilder shownText = new StringBuilder(setup);
+                for (var a : nz(e.args())) {
+                    if (a == null || a.size() < 2) continue;
+                    String v = str(a.get(1));
+                    shownText.append(' ').append(v);
+                    var w = WORD.matcher(v);
+                    while (w.find()) if (!input.contains(GenTextService.norm(w.group()))) bad.add(mismatch(method, "표시값 '" + w.group() + "' 이 input 에 없습니다", e));
+                    for (String num : numbers(v)) if (!inputNumbers.contains(num)) bad.add(mismatch(method, "표시값 숫자 " + num + " 이 input 에 없습니다", e));
+                }
+                shownText.append(' ').append(str(e.expected()));
+                String shown = GenTextService.norm(shownText.toString());
+                var lit = STRING_LITERAL.matcher(e.input());
+                while (lit.find()) {
+                    var w = WORD.matcher(lit.group(1).replaceAll("\\\\[ntr]", " "));
+                    while (w.find()) if (!shown.contains(GenTextService.norm(w.group()))) bad.add(mismatch(method, "input 의 값 '" + w.group() + "' 이 준비 문장·표시값에 없습니다", e));
+                }
+            }
+            for (String num : numbers(setup)) if (!allNumbers.contains(num)) bad.add("예시 " + method + " 의 준비 문장 숫자 " + num + " 이 input 에 없습니다: " + setup + ". " + MISMATCH_RULE);
+        }
+        return bad.stream().distinct().toList();
+    }
+
+    private static String mismatch(String method, String what, BlueprintDto.Example e) {
+        return "예시 " + method + " 의 " + what + "(input: " + clip(e.input()) + "). " + MISMATCH_RULE;
+    }
+
+    /** 글 속 숫자들을 값으로(쉼표·앞 0·끝 0 뺌): "2026-06-10" → 2026, 6, 10, "40,000" → 40000, "0.10" → 0.1 */
+    static Set<String> numbers(String text) {
+        Set<String> out = new LinkedHashSet<>();
+        var m = NUMBER.matcher(text == null ? "" : text);
+        while (m.find()) {
+            String raw = m.group().replace(",", "");
+            if (raw.endsWith(".")) raw = raw.substring(0, raw.length() - 1);
+            try {
+                out.add(new java.math.BigDecimal(raw).stripTrailingZeros().toPlainString());
+            } catch (NumberFormatException ignored) {
+                // 숫자 꼴이 아니면 건너뛴다
+            }
+        }
+        return out;
+    }
+
+    /** 표시값이 목록([...])이면 항목 수, 아니면 0 */
+    static int listItems(String v) {
+        String t = v == null ? "" : v.strip();
+        if (!t.startsWith("[") || !t.endsWith("]")) return 0;
+        try {
+            var node = JSON.readTree(t);
+            if (node.isArray()) return node.size();
+        } catch (JsonProcessingException ignored) {
+            // JSON 이 아니면 쉼표로 센다
+        }
+        String inner = t.substring(1, t.length() - 1).strip();
+        return inner.isEmpty() ? 0 : inner.split(",").length;
+    }
+
+    private static String json(Object o) {
+        try {
+            return JSON.writeValueAsString(o);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static String clip(String s) {
+        String t = s == null ? "" : s;
+        return t.length() > 40 ? t.substring(0, 40) + "…" : t;
+    }
+
+    private static String str(String s) {
+        return s == null ? "" : s.strip();
+    }
+
+    private static boolean blank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private static <T> List<T> nz(List<T> l) {
+        return l == null ? List.of() : l;
+    }
+}

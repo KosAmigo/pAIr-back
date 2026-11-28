@@ -90,12 +90,14 @@ class TaskPipelineServiceTest {
     static final String F_REPORT = "리포트 화면은 결제 원금 5.00에 할인 합계 7.00인 건을 -2.00으로 표시합니다.";
     static final String EX1_IN = "새 PaymentDiscount에 할인 1.25, 2.25를 등록한 뒤 totalDiscount()";
     static final String EX2_IN = "새 PaymentDiscount에 할인 0.10, 0.20을 등록한 뒤 totalDiscount()";
+    static final BlueprintDto.Example EX1 = new BlueprintDto.Example(EX1_IN, "3.50", "PaymentDiscount.totalDiscount", List.of());
+    static final BlueprintDto.Example EX2 = new BlueprintDto.Example(EX2_IN, "0.30", "PaymentDiscount.totalDiscount", List.of());
 
     static BlueprintDto devBlueprint() {
         return new BlueprintDto("누적 할인을 반영한 결제액", "할인 합계를 반영하는 결제액 조회를 추가합니다.", "payment-discounts", "기능 구현", List.of("control"),
                 "결제 화면에서 할인 항목을 등록하고 합계를 조회한다.", List.of("PaymentDiscount.totalDiscount(): BigDecimal"),
                 List.of(new BlueprintDto.Fact(F_DIGITS, "description"), new BlueprintDto.Fact(F_SETTLE, "description"), new BlueprintDto.Fact(F_REPORT, "description")),
-                List.of(new BlueprintDto.Example(EX1_IN, "3.50"), new BlueprintDto.Example(EX2_IN, "0.30")),
+                List.of(EX1, EX2),
                 List.of(new BlueprintDto.Flaw("할인을 double 로 누적해 소수 합계가 어긋난다", "DiscountLedger.add", F_DIGITS, "totalsExactly")),
                 List.of(new BlueprintDto.Judgment("할인이 원금보다 클 때 결제액을 어떻게 보일 것인가", F_SETTLE,
                         List.of(new BlueprintDto.Option("0으로 보인다", F_SETTLE), new BlueprintDto.Option("음수로 보인다", F_REPORT)))),
@@ -105,7 +107,7 @@ class TaskPipelineServiceTest {
 
     static DevWritingDto devWriting() {
         return new DevWritingDto(List.of("결제 화면 코드에 결제액 조회를 추가하세요. " + F_DIGITS, F_SETTLE + " " + F_REPORT + " 어느 쪽으로 정할지 설명하세요."),
-                List.of(EX1_IN + " → 3.50", EX2_IN + " → 0.30"), "", "AI 수정이 다른 입력에서도 맞는지 어떻게 확인했나요?");
+                List.of("결제 화면에서 할인 합계를 조회한다.", ExampleLineService.line(EX1), ExampleLineService.line(EX2)), "", "AI 수정이 다른 입력에서도 맞는지 어떻게 확인했나요?");
     }
 
     static DevCodeDto devCode() {
@@ -180,13 +182,14 @@ class TaskPipelineServiceTest {
     // ── 정보 가리기 ─────────────────────────────
 
     @Test
-    @DisplayName("정보 가리기(DEV): 작성 입력에는 사실·예가 모두 있고 결함 설명·위치·잡는 테스트·함정 핵심어는 없다")
+    @DisplayName("정보 가리기(DEV): 작성 입력에는 사실이 모두 있고 예(코드가 붙인다)·결함 설명·위치·잡는 테스트·함정 핵심어는 없다")
     void writingInputHidesFlaw() {
         StageAi ai = devAi();
         devRun(ai).create(s -> {});
         String input = ai.users.get(1);
 
-        for (String f : List.of(F_DIGITS, F_SETTLE, F_REPORT, EX1_IN, EX2_IN)) assertThat(input).contains(f);
+        for (String f : List.of(F_DIGITS, F_SETTLE, F_REPORT)) assertThat(input).contains(f);
+        assertThat(input).doesNotContain(EX1_IN).doesNotContain(EX2_IN);
         BlueprintDto b = devBlueprint();
         for (String secret : List.of(b.flaws().get(0).what(), b.flaws().get(0).where(), b.flaws().get(0).caughtBy(), "double", "부동소수점",
                 "0으로 보인다", "음수로 보인다")) {
@@ -227,7 +230,7 @@ class TaskPipelineServiceTest {
 
         String second = ai.users.get(4); // 설계도, 작성, 코드, 정답, 다시 작성 순서
         assertThat(ai.order.get(4)).isEqualTo(DevWritingDto.class);
-        assertThat(second).contains("사실 목록의 문장과 예를 하나도 빼지 말고 그대로 넣는다").contains("고칠 문장: " + F_SETTLE.substring(0, 5));
+        assertThat(second).contains("사실 목록의 문장을 하나도 빼지 말고 그대로 넣는다").contains("고칠 문장: " + F_SETTLE.substring(0, 5));
         assertThat(second).doesNotContain("double", "부동소수점");
     }
 
@@ -302,7 +305,7 @@ class TaskPipelineServiceTest {
         run.create(s -> {});
         assertThat(run.checks()).extracting(GenCheckResultDto::ok).containsOnly(true);
 
-        DevWritingDto missing = new DevWritingDto(List.of("결제 코드에 기능을 추가하세요."), List.of(EX1_IN + " → 3.50"), "");
+        DevWritingDto missing = new DevWritingDto(List.of("결제 코드에 기능을 추가하세요."), List.of(ExampleLineService.line(EX1)), "");
         StageAi ai2 = new StageAi().add(BlueprintDto.class, devBlueprint()).add(DevWritingDto.class, missing).add(DevCodeDto.class, devCode()).add(DevAnswerDto.class, devAnswer());
         var run2 = devRun(ai2);
         run2.create(s -> {});

@@ -15,6 +15,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pair.domain.attempt.entity.Attempt;
 import com.pair.domain.attempt.service.AttemptRegistryService;
 import com.pair.global.config.PairProperties;
+import com.pair.domain.company.entity.Company;
+import com.pair.domain.company.repository.CompanyRepository;
 import com.pair.domain.exam.entity.ExamParticipant;
 import com.pair.domain.exam.entity.ExamSession;
 import com.pair.domain.exam.entity.ProctorConsent;
@@ -43,13 +45,17 @@ public class ExamEntryService {
     private final ParticipantProgressService progress;
     private final ConnectionGraceService grace;
     private final TaskCatalogService catalog;
+    private final CompanyRepository companies;
     private final PairProperties props;
     private final ObjectMapper json;
     private final Clock clock;
+    private final VisionSessionService vision;
 
     public ExamEntryService(ExamParticipantRepository participants, ProctorConsentRepository consents,
             AttemptSubmitService attempts, AttemptRegistryService registry, ParticipantProgressService progress, ConnectionGraceService grace, TaskCatalogService catalog,
-            PairProperties props, ObjectMapper json, Clock clock) {
+            CompanyRepository companies, PairProperties props, ObjectMapper json, Clock clock, VisionSessionService vision) {
+        this.companies = companies;
+        this.vision = vision;
         this.participants = participants;
         this.consents = consents;
         this.attempts = attempts;
@@ -72,6 +78,10 @@ public class ExamEntryService {
         Instant now = clock.instant();
         ExamParticipant p = find(token);
         requireNotEnded(p.getSession(), now);
+        if (vision.isActive(p.getSession()) && !VisionSessionService.CONSENT_VERSION.equals(req.consentVersion())) {
+            throw new com.pair.global.error.CodedException(org.springframework.http.HttpStatus.BAD_REQUEST, "CONSENT_VERSION_MISMATCH",
+                    "서버 추론 감독 회차는 동의 문구 v3 에 동의해야 합니다.");
+        }
         String env;
         try {
             env = json.writeValueAsString(req.envCheck());
@@ -218,8 +228,12 @@ public class ExamEntryService {
         List<TaskStatusDto> tasks = codes.stream()
                 .map(code -> new TaskStatusDto(code, pr.attempts().get(code), pr.submitted().getOrDefault(code, false)))
                 .toList();
+        boolean serverVision = vision.isActive(s);
         boolean linkExpired = s.phase(now) == ExamSession.Phase.LIVE && ConnectionGraceService.isExpired(p, pr.started(), pr.finished(), now);
-        return new EntryInfoResponse(s.getTitle(), null, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
-                consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks, linkExpired);
+        // 입장권·대기실·시험 화면 머리의 회사 이름 (응시자 한 명당 한 번 조회)
+        String companyName = companies.findById(s.getCompanyId()).map(Company::getName).orElse(null);
+        return new EntryInfoResponse(s.getTitle(), companyName, p.getName(), p.getEmail(), s.getStartsAt(), s.getEndsAt(), now, s.phase(now), s.isProctoring(),
+                consents.existsById(p.getId()), pr.startedAt(), pr.submittedAt(), codes, pr.attempts(), tasks, linkExpired,
+                serverVision, serverVision ? VisionSessionService.CONSENT_VERSION : "v2");
     }
 }

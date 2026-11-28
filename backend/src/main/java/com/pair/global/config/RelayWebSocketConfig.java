@@ -1,6 +1,7 @@
 package com.pair.global.config;
 
 import com.pair.domain.exam.service.ProctorRelayService;
+import com.pair.domain.exam.service.VisionRelayService;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
@@ -15,15 +16,20 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class RelayWebSocketConfig implements WebSocketConfigurer {
 
     public static final String PATH = "/ws/proctor";
+    /** 서버 추론 감독 (PAIR_SERVER_VISION_ENABLED 가 꺼져 있으면 연결 직후 4403 으로 닫는다) */
+    public static final String VISION_PATH = "/ws/vision";
 
     private final ProctorRelayService handler;
+    private final VisionRelayService visionHandler;
 
-    public RelayWebSocketConfig(ProctorRelayService handler) {
+    public RelayWebSocketConfig(ProctorRelayService handler, VisionRelayService visionHandler) {
         this.handler = handler;
+        this.visionHandler = visionHandler;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(handler, PATH).setAllowedOriginPatterns("*");
+        registry.addHandler(visionHandler, VISION_PATH).setAllowedOriginPatterns("*");
     }
 }

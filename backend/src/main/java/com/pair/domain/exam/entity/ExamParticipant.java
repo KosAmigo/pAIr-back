@@ -66,6 +66,10 @@ public class ExamParticipant {
     private Instant enteredAt;
 
     /** 시작 후 시험 화면이 마지막으로 연결을 알려 온 시각 (연결 유예 판단용) */
+    /** 추론 서버용 불투명 키 (22자 base64url). 처음 필요할 때 만든다 */
+    @Column(name = "vision_key", unique = true, length = 22)
+    private String visionKey;
+
     @Column(name = "last_seen_at")
     private Instant lastSeenAt;
 
@@ -128,5 +132,10 @@ public class ExamParticipant {
     public Instant getRemindedAt() { return remindedAt; }
     public Instant getEnteredAt() { return enteredAt; }
     public Instant getLastSeenAt() { return lastSeenAt; }
+    public String getVisionKey() { return visionKey; }
+
+    public void assignVisionKey(String key) {
+        this.visionKey = key;
+    }
     public Instant getLinkExpiredAt() { return linkExpiredAt; }
 }

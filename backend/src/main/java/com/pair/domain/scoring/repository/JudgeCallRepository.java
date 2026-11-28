@@ -26,4 +26,14 @@ public interface JudgeCallRepository extends JpaRepository<JudgeCall, Long> {
             group by j.model
             """)
     List<ModelUsage> sumBySession(@org.springframework.data.repository.query.Param("sessionId") Long sessionId);
+
+    /** 관리자 통계: 기간 안에 시작한 채점의 모델 호출 토큰을 모델별로 */
+    @org.springframework.data.jpa.repository.Query("""
+            select j.model as model, count(j) as calls, coalesce(sum(j.inputTokens), 0) as inputTokens,
+                   coalesce(sum(j.outputTokens), 0) as outputTokens, coalesce(sum(j.cachedTokens), 0) as cachedTokens
+            from JudgeCall j, com.pair.domain.scoring.entity.Scoring s
+            where j.scoringId = s.id and s.startedAt >= :from and s.startedAt < :to
+            group by j.model
+            """)
+    java.util.List<ModelUsage> sumBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
 }

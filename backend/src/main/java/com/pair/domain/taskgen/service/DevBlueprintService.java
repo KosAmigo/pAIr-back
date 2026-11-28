@@ -33,6 +33,13 @@ final class DevBlueprintService {
         }
         bad.addAll(addedMethodCases(b));
         bad.addAll(exampleBasisCases(b));
+        bad.addAll(ExampleLineService.mismatches(b)); // 화면 표시값·준비 문장이 숨은 테스트 input 과 다르면 틀린 예(g25 03)
+        for (var c : b.cases()) { // Q7 개정: 기존 메서드 예는 화면에 안 나오니 사례 근거가 될 수 없다
+            var e = ExampleLineService.basisExample(b, c);
+            if (e != null && !ExampleLineService.shown(b, e)) {
+                bad.add("사례 " + c.name() + " 의 근거가 기존 메서드 예 '" + e.input() + " → " + e.expected() + "' 입니다. 기존 메서드 예는 요구사항에 나오지 않으니(공개 테스트에만 있음) 그 결과를 끌어낼 수 있는 기록을 사실(facts)로 두고 근거로 쓰세요");
+            }
+        }
         bad.addAll(pinnedJudgments(b));
         bad.addAll(flawHidden(b));
         bad.addAll(flawCasesInRequirements(b));
@@ -48,6 +55,12 @@ final class DevBlueprintService {
             if (a != null && (a.contains("{") || a.contains("}") || a.contains(";"))) bad.add("api 항목에는 시그니처만 쓰고 본문({ ... })이나 ;는 쓰지 않습니다: " + a);
         }
         if (b.examples().size() < 2 || b.examples().stream().anyMatch(e -> blank(e.input()) || blank(e.expected()))) bad.add("입력→기대 출력 예(examples)가 2개 이상 있어야 합니다");
+        // Q7: 요구사항 예시는 코드가 method·args·expected 로 표 줄을 만든다(2026-11-28)
+        for (var e : b.examples()) {
+            if (blank(e.method()) || e.args() == null || e.args().stream().anyMatch(a -> a == null || a.size() != 2 || blank(a.get(0)))) {
+                bad.add("예 '" + e.input() + "' 에 표 칸이 없습니다: method(\"Class.method\", api 의 메서드)와 args(매개변수마다 [\"이름\", \"짧은 표시값\"], 시그니처 순서, 매개변수가 없으면 [])를 채우세요");
+            }
+        }
         return bad;
     }
 
@@ -164,17 +177,29 @@ final class DevBlueprintService {
      */
     static List<String> flawHidden(BlueprintDto b) {
         List<String> bad = new ArrayList<>();
-        for (String cls : flawClasses(b)) {
+        java.util.Set<String> flawed = flawClasses(b);
+        java.util.function.Predicate<String> inApi = cls -> nz(b.api()).stream().anyMatch(a -> a != null && Pattern.compile("(?<![\\w])" + Pattern.quote(cls) + "(?![\\w])").matcher(a).find());
+        boolean hasCalledClass = flawed.stream().anyMatch(inApi.negate());
+        for (String cls : flawed) {
             Pattern word = Pattern.compile("(?<![\\w])" + Pattern.quote(cls) + "(?![\\w])");
+            if (hasCalledClass && inApi.test(cls)) {
+                // g25 01·04: where 에 호출되는 결함 클래스와 함께 그것을 부르는 api 클래스까지 적어 이 검사가 3번 되풀이됐다(모델은 api 를 고치려 했다). where 를 고치라고 말한다
+                bad.add("flaws.where 가 결함 클래스와 함께 그것을 부르는 공개 API 클래스 " + cls + " 까지 적었습니다: " + nz(b.flaws()).stream().map(BlueprintDto.Flaw::where).toList()
+                        + ". flaws.where 에는 결함이 실제로 있는 호출되는 클래스와 그 경로(와 NOTES.md)만 적고, api 클래스·메서드·파일 경로는 적지 마세요(예: \"ReservationOverlap.overlaps (src/meeting/ReservationOverlap.java), NOTES.md\"). api·예는 그대로 두면 됩니다");
+                continue;
+            }
             for (String a : nz(b.api())) {
                 if (a != null && word.matcher(a).find()) {
                     bad.add("결함 클래스 " + cls + " 가 공개 API(api)에 있습니다: " + a + ". 결함은 api 클래스가 부르는 다른 클래스(설명이 이름을 대지 않는 파일)에 두고, api 에는 호출하는 쪽 클래스만 쓰세요");
                 }
             }
             for (var e : nz(b.examples())) {
-                if (word.matcher((e.input() == null ? "" : e.input()) + " " + (e.expected() == null ? "" : e.expected())).find()) {
+                if (word.matcher((e.input() == null ? "" : e.input()) + " " + (e.expected() == null ? "" : e.expected()) + " " + ExampleLineService.line(e)).find()) {
                     bad.add("결함 클래스 " + cls + " 가 예(examples)에 있습니다: " + e.input() + ". 예는 api 클래스만 부르세요");
                 }
+            }
+            for (var s : nz(b.exampleSetups())) {
+                if (s != null && word.matcher(s.method() + " " + s.text()).find()) bad.add("결함 클래스 " + cls + " 가 예시 준비(exampleSetups)에 있습니다: " + s.text() + ". 예는 api 클래스만 부르세요");
             }
             for (var f : nz(b.facts())) {
                 if (BlueprintService.DESCRIPTION.equals(f.place()) && f.text() != null && word.matcher(f.text()).find()) {
