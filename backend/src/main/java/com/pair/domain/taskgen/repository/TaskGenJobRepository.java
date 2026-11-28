@@ -75,4 +75,13 @@ public interface TaskGenJobRepository extends JpaRepository<TaskGenJob, String> 
     int finish(@Param("id") String id, @Param("worker") String worker, @Param("status") String status, @Param("step") String step,
             @Param("taskCode") String taskCode, @Param("passed") Boolean passed, @Param("checks") String checks,
             @Param("error") String error, @Param("cost") Double cost, @Param("now") Instant now);
+
+    /** 관리자 통계: 기간 안에 만든 과제 생성 작업 수와 기록된 비용 합계 */
+    interface JobCost {
+        long getJobs();
+        Double getUsd();
+    }
+
+    @org.springframework.data.jpa.repository.Query("select count(j) as jobs, coalesce(sum(j.costUsd), 0) as usd from TaskGenJob j where j.createdAt >= :from and j.createdAt < :to")
+    JobCost sumCostBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
 }

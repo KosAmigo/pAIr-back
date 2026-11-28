@@ -38,4 +38,24 @@ public interface AuthAccountRepository extends JpaRepository<AuthAccount, Long> 
     List<AuthAccount> lockByCompanyId(@Param("companyId") Long companyId);
 
     List<AuthAccount> findByCompanyIdOrderByRoleAscNameAsc(Long companyId);
+
+    /** 관리자 통계: 탈퇴하지 않은 계정 수를 역할별로 */
+    interface RoleCount {
+        com.pair.global.security.CurrentUser.Role getRole();
+        long getCount();
+    }
+
+    @org.springframework.data.jpa.repository.Query("select a.role as role, count(a) as count from AuthAccount a where a.memberStatus <> 'WITHDRAWN' group by a.role")
+    java.util.List<RoleCount> countActiveByRole();
+
+    /** 관리자 통계: 기간 안에 가입한 일반 회원 수 */
+    @org.springframework.data.jpa.repository.Query("""
+            select count(a) from AuthAccount a
+            where a.role = com.pair.global.security.CurrentUser.Role.USER and a.createdAt >= :from and a.createdAt < :to
+            """)
+    long countNewUsersBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
+
+    /** 관리자 통계: 기간 안에 탈퇴한(회사 삭제로 정리된 멤버 포함) 계정 수 */
+    @org.springframework.data.jpa.repository.Query("select count(a) from AuthAccount a where a.memberStatus = 'WITHDRAWN' and a.deletedAt >= :from and a.deletedAt < :to")
+    long countWithdrawnBetween(@org.springframework.data.repository.query.Param("from") java.time.Instant from, @org.springframework.data.repository.query.Param("to") java.time.Instant to);
 }
